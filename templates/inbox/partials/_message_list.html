@@ -1,6 +1,7 @@
-{% load humanize %}
-{% if inbox_messages %}
-{% for msg in inbox_messages %}
+{% load humanize inbox_conversations %}
+{% conversation_rows inbox_messages as inbox_rows %}
+{% if inbox_rows %}
+{% for msg in inbox_rows %}
 {% include "inbox/partials/_message_row.html" with message=msg %}
 {% endfor %}
 {% else %}
