@@ -1,4 +1,4 @@
-{% load humanize inbox_conversations %}
+{% load humanize inbox_conversations instagram_thread_context %}
 {% conversation_identity message as identity %}
 <div class="relative flex flex-col h-full" x-data="{ detailsOpen: false }">
     <!-- Message header -->
@@ -87,7 +87,10 @@
         {% if message.message_type == 'dm' %}
             {% conversation_thread message %}
         {% else %}
-            {% if message.message_type == 'comment' and message.social_account.platform == 'instagram_login' and message.extra.post_permalink_url %}
+            {% instagram_parent_context message as parent_context %}
+            {% instagram_interaction_label message as interaction_label %}
+
+            {% if message.social_account.platform == 'instagram_login' and message.extra.post_permalink_url %}
             {% instagram_post_context message as post_context %}
             <!-- Instagram post context: compact hover preview -->
             <div class="relative inline-block mb-4 group/post">
@@ -97,7 +100,7 @@
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
                     </span>
                     <span class="min-w-0">
-                        <span class="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-400">Commented on this post</span>
+                        <span class="block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-400">{{ interaction_label }}</span>
                         <span class="block text-[12px] font-medium text-stone-700">View Instagram post</span>
                     </span>
                     <svg class="w-3.5 h-3.5 text-stone-400 group-hover/post:text-orange-600 flex-shrink-0 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14 3h7v7m0-7L10 14M5 7v12h12"/></svg>
@@ -140,6 +143,18 @@
                         </div>
                     </div>
                 </div>
+            </div>
+            {% endif %}
+
+            {% if parent_context %}
+            <!-- Instagram threaded-reply context -->
+            <div class="mb-4 rounded-xl border border-orange-100 bg-orange-50/40 px-4 py-3">
+                <div class="flex items-center gap-2 mb-1.5">
+                    <svg class="w-3.5 h-3.5 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17l-5-5 5-5"/><path stroke-linecap="round" stroke-linejoin="round" d="M20 18v-2a4 4 0 00-4-4H4"/></svg>
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-orange-600">In reply to</span>
+                    <span class="text-[11px] font-semibold text-stone-700">{{ parent_context.sender_name }}</span>
+                </div>
+                <p class="text-[12px] leading-relaxed text-stone-600 line-clamp-4 whitespace-pre-wrap">{{ parent_context.body }}</p>
             </div>
             {% endif %}
 
