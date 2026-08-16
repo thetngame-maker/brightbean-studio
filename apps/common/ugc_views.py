@@ -5,12 +5,15 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from apps.media_library.models import MediaAsset
 from apps.members.decorators import require_permission
 from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
 
+from .audit import record_audit_event
 from .models import UGCModerationEvent, UGCReport, UGCSubmission
 from .ugc import moderate_submission, resolve_report
 
@@ -107,6 +110,95 @@ def moderation_queue(request, workspace_id):
         "queue_counts": _queue_counts(workspace),
     }
     return render(request, "ugc/moderation_queue.html", context)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def create_manual_submission_view(request, workspace_id):
+    """Create one pending item from the moderation screen.
+
+    This is useful for end-to-end testing and for content a moderator receives
+    outside the normal TN Game API flow. It intentionally creates Pending UGC;
+    approval still has to go through the normal consent-gated service.
+    """
+
+    workspace = _get_workspace(request, workspace_id)
+    kind = request.POST.get("kind", "").strip()
+    attribution = request.POST.get("attribution", UGCSubmission.Attribution.NAME).strip()
+    target_type = request.POST.get("target_type", "").strip()
+    target_id = request.POST.get("target_id", "").strip()
+    rating_raw = request.POST.get("rating", "").strip()
+    media_asset_raw = request.POST.get("media_asset_id", "").strip()
+    consent_confirmed = request.POST.get("consent_confirmed") == "on"
+    consent_version = request.POST.get("consent_version", "").strip()
+
+    errors = []
+    if kind not in dict(UGCSubmission.Kind.choices):
+        errors.append("Choose a valid content type.")
+    if attribution not in dict(UGCSubmission.Attribution.choices):
+        errors.append("Choose a valid attribution option.")
+    if not target_type or not target_id:
+        errors.append("Target type and target ID are required.")
+
+    rating = None
+    if rating_raw:
+        try:
+            rating = int(rating_raw)
+        except ValueError:
+            errors.append("Rating must be a number from 1 to 5.")
+        else:
+            if rating < 1 or rating > 5:
+                errors.append("Rating must be between 1 and 5.")
+    if kind == UGCSubmission.Kind.REVIEW and rating is None:
+        errors.append("Reviews require a 1-5 rating.")
+    if consent_confirmed and not consent_version:
+        errors.append("Consent version is required when consent is confirmed.")
+
+    media_asset = None
+    if media_asset_raw:
+        media_asset = MediaAsset.objects.filter(id=media_asset_raw, workspace=workspace).first()
+        if media_asset is None:
+            errors.append("That media asset does not belong to this workspace.")
+    if kind == UGCSubmission.Kind.PHOTO and media_asset is None:
+        errors.append("Photo submissions require a Media Asset ID.")
+
+    if errors:
+        for error in errors:
+            messages.error(request, error)
+        return _return_to_queue(request, workspace)
+
+    submission = UGCSubmission.objects.create(
+        workspace=workspace,
+        kind=kind,
+        status=UGCSubmission.Status.PENDING,
+        source=UGCSubmission.Source.UI,
+        contributor_name=request.POST.get("contributor_name", "").strip()[:255],
+        contributor_handle=request.POST.get("contributor_handle", "").strip().lstrip("@")[:255],
+        attribution=attribution,
+        target_type=target_type[:100],
+        target_id=target_id[:255],
+        target_label=request.POST.get("target_label", "").strip()[:255],
+        target_url=request.POST.get("target_url", "").strip()[:2000],
+        media_asset=media_asset,
+        title=request.POST.get("title", "").strip()[:255],
+        body=request.POST.get("body", "").strip(),
+        rating=rating,
+        consent_confirmed=consent_confirmed,
+        consent_version=consent_version[:50],
+        consent_at=timezone.now() if consent_confirmed else None,
+    )
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="ugc.submitted",
+        target=submission,
+        target_label=str(submission),
+        metadata={"source": "manual", "kind": kind, "consent_confirmed": consent_confirmed},
+        request=request,
+    )
+    messages.success(request, "Community submission added to the Pending queue.")
+    return redirect("ugc:moderation_queue", workspace_id=workspace.id)
 
 
 @login_required
