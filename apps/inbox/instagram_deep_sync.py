@@ -55,64 +55,17 @@ def _endpoints(account):
     raise ValueError(f"Unsupported platform for Instagram deep sync: {account.platform}")
 
 
-def _fetch_media_pages(provider, media_url: str, host: str) -> list[dict]:
-    """Fetch a bounded, paginated Instagram media set with comments expanded."""
+def _read_media_pages(provider, media_url: str, host: str, access_token: str) -> list[dict]:
+    """Read a bounded set of media pages, preserving pages already fetched.
+
+    Meta paging cursors are an optimization/recovery layer, not a reason to
+    discard a successful first page. If a later cursor expires, is refused, or
+    transiently fails, keep the media already collected and let the next cycle
+    try again. The initial request still raises normally because without page 1
+    we have no trustworthy deep-sync result at all.
+    """
     media_floor = timezone.now().astimezone(UTC) - timedelta(days=INSTAGRAM_DEEP_MEDIA_WINDOW_DAYS)
     last_error: Exception | None = None
-
-    for fields in INSTAGRAM_COMMENT_FIELD_SETS:
-        try:
-            response = provider._request(
-                "GET",
-                media_url,
-                access_token=provider.credentials.get("access_token", ""),
-                params={
-                    "fields": f"id,timestamp,permalink,comments.limit({INSTAGRAM_COMMENTS_PER_MEDIA}){{{fields}}}",
-                    "limit": INSTAGRAM_MEDIA_SCAN_LIMIT,
-                    "since": int(media_floor.timestamp()),
-                },
-            )
-        except Exception as exc:
-            if getattr(exc, "status_code", None) != 400:
-                raise
-            last_error = exc
-            logger.info("Instagram deep sync field set rejected; retrying with fewer fields")
-            continue
-
-        media: list[dict] = []
-        payload = response.json()
-        pages = 0
-        while payload and pages < INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
-            media.extend(payload.get("data", []))
-            pages += 1
-            next_url = (payload.get("paging") or {}).get("next")
-            if not next_url or pages >= INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
-                break
-            if urlparse(next_url).netloc != urlparse(host).netloc:
-                logger.warning("Ignoring off-host Instagram media paging URL")
-                break
-            payload = provider._request(
-                "GET",
-                next_url,
-                access_token=provider.credentials.get("access_token", ""),
-            ).json()
-
-        return media
-
-    raise last_error  # type: ignore[misc]
-
-
-def sync_instagram_account_deep(account) -> int:
-    """Deep-poll one Instagram account and return newly created inbox rows."""
-    provider, media_url, host = _endpoints(account)
-
-    # Provider credentials don't consistently expose the token because callers
-    # normally pass it separately. Keep the account token authoritative here.
-    access_token = account.oauth_access_token
-
-    media_floor = timezone.now().astimezone(UTC) - timedelta(days=INSTAGRAM_DEEP_MEDIA_WINDOW_DAYS)
-    last_error: Exception | None = None
-    media_items: list[dict] | None = None
 
     for fields in INSTAGRAM_COMMENT_FIELD_SETS:
         try:
@@ -130,25 +83,53 @@ def sync_instagram_account_deep(account) -> int:
             if getattr(exc, "status_code", None) != 400:
                 raise
             last_error = exc
+            logger.info("Instagram deep sync field set rejected; retrying with fewer fields")
             continue
 
-        media_items = []
+        media: list[dict] = []
         payload = response.json()
         pages = 0
+
         while payload and pages < INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
-            media_items.extend(payload.get("data", []))
+            media.extend(payload.get("data", []))
             pages += 1
+
             next_url = (payload.get("paging") or {}).get("next")
             if not next_url or pages >= INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
                 break
             if urlparse(next_url).netloc != urlparse(host).netloc:
-                logger.warning("Ignoring off-host Instagram media paging URL")
+                logger.warning("Ignoring off-host Instagram media paging URL after %d page(s)", pages)
                 break
-            payload = provider._request("GET", next_url, access_token=access_token).json()
-        break
 
-    if media_items is None:
-        raise last_error  # type: ignore[misc]
+            try:
+                payload = provider._request(
+                    "GET",
+                    next_url,
+                    access_token=access_token,
+                ).json()
+            except Exception as exc:
+                # Do not throw away page 1+ just because a later cursor failed.
+                # The normal/next deep cycle can retry that cursor path later.
+                logger.warning(
+                    "Instagram deep sync stopped media pagination after %d page(s): %s",
+                    pages,
+                    exc,
+                )
+                break
+
+        return media
+
+    if last_error is not None:
+        raise last_error
+    return []
+
+
+def sync_instagram_account_deep(account) -> int:
+    """Deep-poll one Instagram account and return newly created inbox rows."""
+    provider, media_url, host = _endpoints(account)
+    access_token = account.oauth_access_token
+
+    media_items = _read_media_pages(provider, media_url, host, access_token)
 
     last_received = (
         InboxMessage.objects.filter(social_account=account)
@@ -179,6 +160,7 @@ def sync_instagram_account_deep(account) -> int:
                     )
                 )
         except Exception as exc:
+            # One unreadable post must not poison the whole recovery sweep.
             logger.warning("Instagram deep sync skipped media %s: %s", media.get("id"), exc)
 
     if not messages:
