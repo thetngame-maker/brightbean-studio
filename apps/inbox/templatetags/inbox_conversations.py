@@ -55,6 +55,104 @@ def _conversation_status(group, representative):
     return representative.status
 
 
+def _platform_media_ids(platform_post):
+    """Normalize platform_specific_media into an ordered list of asset IDs."""
+    raw = platform_post.platform_specific_media or []
+    ids = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, dict):
+            value = item.get("id") or item.get("media_asset_id") or item.get("asset_id")
+        else:
+            value = item
+        if value:
+            ids.append(str(value))
+    return ids
+
+
+def _local_post_image(platform_post):
+    """Return the best local media URL for a post published by TN Social Studio.
+
+    Instagram CDN media URLs can be short-lived or refuse browser hot-linking.
+    The original MediaAsset is stable and already belongs to this workspace, so
+    use it first when the inbox comment is linked to a PlatformPost.
+    """
+    if not platform_post:
+        return ""
+
+    from apps.media_library.models import MediaAsset
+
+    asset = None
+    specific_ids = _platform_media_ids(platform_post)
+    if specific_ids:
+        assets = {str(a.id): a for a in MediaAsset.objects.filter(id__in=specific_ids)}
+        for asset_id in specific_ids:
+            if asset_id in assets:
+                asset = assets[asset_id]
+                break
+
+    if asset is None:
+        attachment = (
+            platform_post.post.media_attachments.select_related("media_asset")
+            .order_by("position", "created_at")
+            .first()
+        )
+        if attachment:
+            asset = attachment.media_asset
+
+    if asset is None:
+        return ""
+
+    try:
+        if asset.is_video and asset.thumbnail:
+            return asset.thumbnail.url
+        return asset.file.url
+    except (ValueError, AttributeError):
+        return ""
+
+
+@register.simple_tag
+def instagram_post_context(message):
+    """Build display context for the Instagram post a comment belongs to.
+
+    Prefer TN Social Studio's own MediaAsset over Instagram's remote CDN URL.
+    The remote URL remains a fallback for posts that were created outside this
+    studio or cannot be linked to a local PlatformPost.
+    """
+    extra = dict(message.extra or {})
+    context = {
+        "permalink": str(extra.get("post_permalink_url") or ""),
+        "caption": str(extra.get("post_caption") or ""),
+        "media_type": str(extra.get("post_media_type") or ""),
+        "image_url": "",
+    }
+
+    platform_post = None
+    if message.related_post_id:
+        from apps.composer.models import PlatformPost
+
+        platform_post = (
+            PlatformPost.objects.select_related("post")
+            .filter(pk=message.related_post_id)
+            .first()
+        )
+
+    local_url = _local_post_image(platform_post)
+    if local_url:
+        context["image_url"] = local_url
+    else:
+        remote_media = str(extra.get("post_media_url") or "")
+        remote_thumb = str(extra.get("post_thumbnail_url") or "")
+        if context["media_type"].upper() == "VIDEO":
+            context["image_url"] = remote_thumb or remote_media
+        else:
+            context["image_url"] = remote_media or remote_thumb
+
+    if not context["caption"] and platform_post:
+        context["caption"] = platform_post.effective_caption or ""
+
+    return context
+
+
 @register.simple_tag
 def conversation_rows(messages):
     """Collapse direct messages into one inbox row per person/account.
