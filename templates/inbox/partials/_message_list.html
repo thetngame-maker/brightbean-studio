@@ -11,21 +11,13 @@
 {% inbox_sidebar_counts workspace as live_sidebar_counts %}
 {{ live_sidebar_counts|json_script:"inbox-live-sidebar-counts" }}
 <script nonce="{{ request.csp_nonce }}">
-(function syncInboxSidebarBadges() {
-    const payloadEl = document.getElementById('inbox-live-sidebar-counts');
-    if (!payloadEl) return;
-
-    let payload;
-    try {
-        payload = JSON.parse(payloadEl.textContent || '{}');
-    } catch (e) {
-        return;
+(function () {
+    function navItems() {
+        return Array.from(document.querySelectorAll('.sidebar-nav-item'));
     }
 
-    const navItems = Array.from(document.querySelectorAll('.sidebar-nav-item'));
-
     function findItem(label) {
-        return navItems.find(item => {
+        return navItems().find(item => {
             const labelEl = item.querySelector('.sidebar-nav-label');
             return labelEl && labelEl.textContent.trim() === label;
         });
@@ -44,15 +36,77 @@
         badge.style.display = hideWhenZero && !count ? 'none' : '';
     }
 
-    setBadge(findItem('Social Inbox'), Number(payload.total || 0), true);
+    function findAccountItem(accountId) {
+        const id = String(accountId || '');
+        let item = navItems().find(candidate => String(candidate.dataset.inboxAccountId || '') === id);
+        if (item) return item;
 
-    (payload.accounts || []).forEach(account => {
-        const item = findItem(account.name);
-        setBadge(item, Number(account.count || 0), false);
-        if (item) {
-            const count = Number(account.count || 0);
-            item.title = `${count} unread inbox item${count === 1 ? '' : 's'} for ${account.name}`;
+        const option = document.querySelector(`select[name="account"] option[value="${id}"]`);
+        if (option) item = findItem(option.textContent.trim());
+        return item || null;
+    }
+
+    window.tngSyncInboxSidebarBadges = function (payload) {
+        payload = payload || {};
+        setBadge(findItem('Social Inbox'), Number(payload.total || 0), true);
+
+        (payload.accounts || []).forEach(account => {
+            const item = findAccountItem(account.id) || findItem(account.name);
+            setBadge(item, Number(account.count || 0), false);
+            if (item) {
+                const count = Number(account.count || 0);
+                item.title = `${count} unread inbox item${count === 1 ? '' : 's'} for ${account.name}`;
+            }
+        });
+    };
+
+    window.tngAdjustInboxSidebarUnread = function (accountId, delta) {
+        const totalItem = findItem('Social Inbox');
+        const totalBadge = totalItem && totalItem.querySelector('.sidebar-badge');
+        const total = Math.max(0, Number(totalBadge && totalBadge.textContent || 0) + Number(delta || 0));
+        setBadge(totalItem, total, true);
+
+        const accountItem = findAccountItem(accountId);
+        if (!accountItem) return;
+        const accountBadge = accountItem.querySelector('.sidebar-badge');
+        const accountCount = Math.max(0, Number(accountBadge && accountBadge.textContent || 0) + Number(delta || 0));
+        setBadge(accountItem, accountCount, false);
+
+        const label = accountItem.querySelector('.sidebar-nav-label');
+        const accountName = label ? label.textContent.trim() : 'this channel';
+        accountItem.title = `${accountCount} unread inbox item${accountCount === 1 ? '' : 's'} for ${accountName}`;
+    };
+
+    const payloadEl = document.getElementById('inbox-live-sidebar-counts');
+    if (payloadEl) {
+        try {
+            window.tngSyncInboxSidebarBadges(JSON.parse(payloadEl.textContent || '{}'));
+        } catch (e) {
+            /* A later live refresh will retry with authoritative counts. */
         }
-    });
+    }
+
+    if (!window.__tngInboxInstantReadBound) {
+        window.__tngInboxInstantReadBound = true;
+        document.addEventListener('click', function (event) {
+            if (event.target.closest('input, button, select, textarea, label, a')) return;
+            const row = event.target.closest('#inbox-message-list .inbox-row.is-unread');
+            if (!row || row.dataset.instantReadHandled === '1') return;
+
+            row.dataset.instantReadHandled = '1';
+            const accountId = row.dataset.socialAccountId || '';
+
+            const statusBadge = row.querySelector('.badge-status-unread');
+            if (statusBadge) {
+                statusBadge.classList.remove('badge-status-unread');
+                statusBadge.classList.add('badge-status-open');
+                statusBadge.textContent = 'Open';
+            }
+
+            if (window.tngAdjustInboxSidebarUnread) {
+                window.tngAdjustInboxSidebarUnread(accountId, -1);
+            }
+        }, true);
+    }
 })();
 </script>
