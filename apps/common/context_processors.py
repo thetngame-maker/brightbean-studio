@@ -38,15 +38,19 @@ def sidebar_context(request):
     workspace = getattr(request, "workspace", None)
 
     if workspace:
-        from apps.composer.models import PlatformPost
+        from apps.inbox.models import InboxMessage
 
+        # The per-channel sidebar badge should describe inbox work that needs
+        # attention, not scheduled publishing work.  Keep the existing
+        # ``queued_post_count`` annotation name for template compatibility,
+        # but give it the same UNREAD semantics as the main Social Inbox badge.
         sidebar_channels = list(
             SocialAccount.objects.for_workspace(workspace.id)
             .filter(connection_status=SocialAccount.ConnectionStatus.CONNECTED)
             .annotate(
                 queued_post_count=Count(
-                    "platform_posts",
-                    filter=Q(platform_posts__status=PlatformPost.Status.SCHEDULED),
+                    "inbox_messages",
+                    filter=Q(inbox_messages__status=InboxMessage.Status.UNREAD),
                 )
             )
             .order_by("platform", "account_name")
