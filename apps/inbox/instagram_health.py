@@ -1,5 +1,6 @@
 """Instagram production-readiness dashboard for TN Social Studio."""
 
+import logging
 from datetime import timedelta
 
 from django.contrib import messages
@@ -13,8 +14,11 @@ from apps.members.decorators import require_permission
 from apps.social_accounts.models import SocialAccount
 
 from . import views
+from .instagram_deep_sync import sync_instagram_account_deep
 from .models import InboxMessage, InboxReply
 from .tasks import InboxSyncEngine
+
+logger = logging.getLogger(__name__)
 
 
 @login_required
@@ -174,18 +178,21 @@ def instagram_health(request, workspace_id):
 @require_permission("use_inbox")
 @require_POST
 def sync_instagram_now(request, workspace_id):
-    """Immediately poll this workspace's Instagram accounts for inbox activity.
+    """Immediately run both fast and deep Instagram inbox recovery polls.
 
-    This is intentionally a diagnostic/manual recovery path. The normal recurring
-    worker remains the primary polling mechanism; this lets an operator tell the
-    difference between a stopped scheduler and an Instagram read/webhook issue.
+    The fast pass mirrors the recurring inbox sync. The deep pass follows the
+    Instagram media cursor across additional pages, so this button is also a
+    useful recovery/diagnostic tool when Meta's webhook delivery is delayed.
     """
     workspace = views._get_workspace(request, workspace_id)
     accounts = list(
         SocialAccount.objects.filter(
             workspace=workspace,
             platform__in=("instagram_login", "instagram"),
-            connection_status=SocialAccount.ConnectionStatus.CONNECTED,
+            connection_status__in=(
+                SocialAccount.ConnectionStatus.CONNECTED,
+                SocialAccount.ConnectionStatus.TOKEN_EXPIRING,
+            ),
         )
     )
 
@@ -195,13 +202,21 @@ def sync_instagram_now(request, workspace_id):
 
     before = InboxMessage.objects.filter(social_account__in=accounts).count()
     engine = InboxSyncEngine()
-    failures = 0
+    failures = []
+    deep_added = 0
 
     for account in accounts:
         try:
             engine._sync_account(account)
-        except Exception:
-            failures += 1
+        except Exception as exc:
+            logger.exception("Manual Instagram fast sync failed for account %s", account.id)
+            failures.append(f"{account.account_name}: fast sync")
+
+        try:
+            deep_added += sync_instagram_account_deep(account)
+        except Exception as exc:
+            logger.exception("Manual Instagram deep sync failed for account %s", account.id)
+            failures.append(f"{account.account_name}: deep sync")
 
     after = InboxMessage.objects.filter(social_account__in=accounts).count()
     added = max(after - before, 0)
@@ -209,14 +224,18 @@ def sync_instagram_now(request, workspace_id):
     if failures:
         messages.error(
             request,
-            f"Instagram sync completed with {failures} account error(s). {added} new inbox item(s) were added.",
+            f"Instagram recovery sync had {len(failures)} error(s) ({'; '.join(failures)}). "
+            f"{added} new inbox item(s) were added.",
         )
     elif added:
-        messages.success(request, f"Instagram sync completed. {added} new inbox item(s) were added.")
+        messages.success(
+            request,
+            f"Instagram fast + deep recovery sync completed. {added} new inbox item(s) were added.",
+        )
     else:
         messages.info(
             request,
-            "Instagram sync completed successfully, but Instagram returned no new inbox items.",
+            "Instagram fast + deep recovery sync completed successfully, but no new inbox items were returned.",
         )
 
     return redirect("inbox:instagram_health", workspace_id=workspace.id)
