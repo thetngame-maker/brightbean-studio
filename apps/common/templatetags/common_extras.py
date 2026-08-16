@@ -55,6 +55,18 @@ def ugc_source_label(metadata, fallback_source=""):
 
 
 @register.filter
+def ugc_source_platform(metadata, fallback_source=""):
+    """Stable source key used by the moderation queue's platform filter."""
+    provenance = get_provenance(metadata)
+    platform = provenance.get("platform", "direct")
+    if platform == "direct" and fallback_source:
+        fallback = str(fallback_source).strip().lower()
+        if fallback in {"api", "import", "webhook"}:
+            return fallback
+    return platform
+
+
+@register.filter
 def ugc_source_url(metadata):
     """Original public source URL, if recorded."""
     return get_provenance(metadata).get("source_url", "")
