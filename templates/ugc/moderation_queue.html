@@ -41,22 +41,47 @@
 
 {% block content %}
 <div class="flex flex-col min-h-0">
-    <form method="get" class="flex items-center gap-2 mb-4">
-        <input type="hidden" name="tab" value="{{ active_tab }}">
-        <label for="ugc-kind" class="text-xs font-medium text-stone-500">Content type</label>
-        <select id="ugc-kind" name="kind" onchange="this.form.submit()"
-                class="text-sm border border-stone-200 rounded-lg bg-white px-3 py-2 text-stone-700 outline-none focus:border-orange-400">
-            <option value="">All types</option>
-            {% for value, label in kind_choices %}
-            <option value="{{ value }}" {% if active_kind == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
-    </form>
+    <div class="flex flex-col lg:flex-row lg:items-center gap-2.5 mb-4">
+        <div class="relative flex-1 min-w-0">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg>
+            <input id="ugc-search" type="search" autocomplete="off" placeholder="Search content, contributor, caption, or location…"
+                   class="w-full h-9 pl-9 pr-9 text-sm border border-stone-200 rounded-lg bg-white text-stone-700 placeholder:text-stone-400 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+            <button id="ugc-search-clear" type="button" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 items-center justify-center rounded text-stone-400 hover:text-stone-700 hover:bg-stone-100" aria-label="Clear search">×</button>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2">
+            <form method="get" class="flex items-center gap-2">
+                <input type="hidden" name="tab" value="{{ active_tab }}">
+                <label for="ugc-kind" class="sr-only">Content type</label>
+                <select id="ugc-kind" name="kind" onchange="this.form.submit()"
+                        class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
+                    <option value="">All types</option>
+                    {% for value, label in kind_choices %}
+                    <option value="{{ value }}" {% if active_kind == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+
+            <label for="ugc-sort" class="sr-only">Sort community content</label>
+            <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="used">Most used</option>
+                <option value="reported">Most reported</option>
+            </select>
+
+            <span id="ugc-result-count" class="text-[11px] text-stone-400 whitespace-nowrap"></span>
+        </div>
+    </div>
 
     {% if submissions %}
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
+    <div id="ugc-card-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
         {% for submission in submissions %}
-        <article class="rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0">
+        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0"
+                 data-submitted="{{ submission.submitted_at|date:'U' }}"
+                 data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}"
+                 data-reports="{{ submission.open_report_count|default:'0' }}"
+                 data-original-order="{{ forloop.counter0 }}">
             {% if submission.media_asset %}
             <div class="bg-stone-100 border-b border-stone-200 overflow-hidden" style="max-height: 220px;">
                 {% if submission.media_asset.is_image %}
@@ -229,6 +254,15 @@
         </article>
         {% endfor %}
     </div>
+
+    <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6">
+        <div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3">
+            <svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg>
+        </div>
+        <h2 class="text-sm font-semibold text-stone-800">No matching community content</h2>
+        <p class="text-xs text-stone-500 mt-1">Try a different title, contributor, caption, or location.</p>
+        <button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear search</button>
+    </div>
     {% else %}
     <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6">
         <div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3">
@@ -239,4 +273,74 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+(function () {
+    const grid = document.getElementById('ugc-card-grid');
+    if (!grid) return;
+
+    const search = document.getElementById('ugc-search');
+    const clearButton = document.getElementById('ugc-search-clear');
+    const emptyClear = document.getElementById('ugc-empty-clear');
+    const sort = document.getElementById('ugc-sort');
+    const empty = document.getElementById('ugc-filter-empty');
+    const resultCount = document.getElementById('ugc-result-count');
+    const cards = Array.from(grid.querySelectorAll('.ugc-card'));
+
+    cards.forEach((card) => {
+        card.dataset.searchText = (card.textContent || '').toLocaleLowerCase();
+    });
+
+    function num(card, key) {
+        const value = Number(card.dataset[key] || 0);
+        return Number.isFinite(value) ? value : 0;
+    }
+
+    function compareCards(a, b) {
+        const mode = sort.value;
+        const newestFirst = num(b, 'submitted') - num(a, 'submitted');
+        if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted');
+        if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst;
+        if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst;
+        return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder'));
+    }
+
+    function refresh() {
+        const query = (search.value || '').trim().toLocaleLowerCase();
+        const sorted = cards.slice().sort(compareCards);
+        let visible = 0;
+
+        sorted.forEach((card) => {
+            grid.appendChild(card);
+            const matches = !query || card.dataset.searchText.includes(query);
+            card.classList.toggle('hidden', !matches);
+            if (matches) visible += 1;
+        });
+
+        const filtering = query.length > 0;
+        clearButton.classList.toggle('hidden', !filtering);
+        clearButton.classList.toggle('flex', filtering);
+        empty.classList.toggle('hidden', visible !== 0);
+        empty.classList.toggle('flex', visible === 0);
+        grid.classList.toggle('hidden', visible === 0);
+        resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`;
+    }
+
+    function clearSearch() {
+        search.value = '';
+        search.focus();
+        refresh();
+    }
+
+    search.addEventListener('input', refresh);
+    sort.addEventListener('change', refresh);
+    clearButton.addEventListener('click', clearSearch);
+    if (emptyClear) emptyClear.addEventListener('click', clearSearch);
+
+    refresh();
+})();
+</script>
 {% endblock %}
