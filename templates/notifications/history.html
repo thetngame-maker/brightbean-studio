@@ -97,3 +97,56 @@
 
 </div>
 {% endblock %}
+
+{% block extra_js %}
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+    function notificationNavItem() {
+        return Array.from(document.querySelectorAll('.sidebar-nav-item')).find(function (item) {
+            const label = item.querySelector('.sidebar-nav-label');
+            return label && label.textContent.trim() === 'Notifications';
+        });
+    }
+
+    function setNotificationSidebarCount(count) {
+        const item = notificationNavItem();
+        if (!item) return;
+        count = Math.max(0, Number(count || 0));
+        let badge = item.querySelector('.sidebar-badge');
+        if (!badge && count > 0) {
+            badge = document.createElement('span');
+            badge.className = 'sidebar-badge';
+            item.appendChild(badge);
+        }
+        if (badge) {
+            badge.textContent = String(count);
+            badge.style.display = count ? '' : 'none';
+        }
+        item.title = `${count} unread notification${count === 1 ? '' : 's'}`;
+    }
+
+    async function refreshNotificationSidebarCount() {
+        try {
+            const response = await fetch('{% url "notifications:unread_count" %}', {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) return;
+            const payload = await response.json();
+            setNotificationSidebarCount(payload.count || 0);
+        } catch (e) {
+            /* Keep the last known count and retry after the next action. */
+        }
+    }
+
+    setNotificationSidebarCount({{ unread_notification_count|default:0 }});
+    document.body.addEventListener('htmx:afterSettle', function (event) {
+        const target = event.detail && event.detail.target;
+        if (target && (target.id === 'notification-history-list' || target.closest && target.closest('#notification-history-list'))) {
+            refreshNotificationSidebarCount();
+        }
+    });
+    window.setInterval(refreshNotificationSidebarCount, 30000);
+})();
+</script>
+{% endblock %}
