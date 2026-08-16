@@ -20,14 +20,11 @@
     {% csrf_token %}
     <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,.7fr)] gap-4">
         <section class="rounded-2xl border border-violet-200 bg-violet-50/30 p-5">
-            <div class="flex items-center justify-between gap-3 mb-3">
-                <div>
-                    <h2 class="text-sm font-semibold text-stone-900">Discovery results JSON</h2>
-                    <p class="text-xs text-stone-500 mt-1">Each object can include platform, creator_handle, source_url, external_id, title, caption, discovery_query and engagement counts.</p>
-                </div>
-                <button id="ugc-load-sample" type="button" class="flex-shrink-0 px-3 py-1.5 rounded-lg border border-violet-200 bg-white text-xs font-semibold text-violet-700 hover:bg-violet-50">Load sample</button>
+            <div class="mb-3">
+                <h2 class="text-sm font-semibold text-stone-900">Discovery results JSON</h2>
+                <p class="text-xs text-stone-500 mt-1">The sample below is ready to edit or import. Each object can include platform, creator_handle, source_url, external_id, title, caption, discovery_query and engagement counts.</p>
             </div>
-            <textarea id="ugc-bulk-json" name="items_json" rows="25" spellcheck="false" required class="w-full rounded-xl border border-violet-200 bg-white px-4 py-3 font-mono text-xs leading-5 text-stone-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100" placeholder='[{"platform":"instagram", ...}]'></textarea>
+            <textarea id="ugc-bulk-json" name="items_json" rows="25" spellcheck="false" required class="w-full rounded-xl border border-violet-200 bg-white px-4 py-3 font-mono text-xs leading-5 text-stone-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">{{ sample_json }}</textarea>
             <p class="text-[11px] text-stone-400 mt-2">Duplicates are skipped using platform + external ID, or platform + source URL when no external ID is supplied.</p>
         </section>
 
@@ -66,22 +63,4 @@
         </div>
     </div>
 </form>
-
-<script id="ugc-sample-json" type="application/json">{{ sample_json|escapejs }}</script>
-{% endblock %}
-
-{% block extra_js %}
-{{ block.super }}
-<script nonce="{{ request.csp_nonce }}">
-(function () {
-    const button = document.getElementById('ugc-load-sample');
-    const textarea = document.getElementById('ugc-bulk-json');
-    const sample = document.getElementById('ugc-sample-json');
-    if (!button || !textarea || !sample) return;
-    button.addEventListener('click', function () {
-        textarea.value = JSON.parse('"' + sample.textContent.replace(/"/g, '\\"') + '"');
-        textarea.focus();
-    });
-})();
-</script>
 {% endblock %}
