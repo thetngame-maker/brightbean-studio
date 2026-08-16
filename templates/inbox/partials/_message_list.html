@@ -77,6 +77,31 @@
         accountItem.title = `${accountCount} unread inbox item${accountCount === 1 ? '' : 's'} for ${accountName}`;
     };
 
+    window.tngSetNotificationSidebarCount = function (count) {
+        const item = findItem('Notifications');
+        count = Math.max(0, Number(count || 0));
+        setBadge(item, count, true);
+        if (item) item.title = `${count} unread notification${count === 1 ? '' : 's'}`;
+    };
+
+    async function refreshNotificationSidebarCount(force) {
+        const now = Date.now();
+        const last = Number(window.__tngNotificationSidebarLastFetch || 0);
+        if (!force && now - last < 25000) return;
+        window.__tngNotificationSidebarLastFetch = now;
+        try {
+            const response = await fetch('{% url "notifications:unread_count" %}', {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            if (!response.ok) return;
+            const payload = await response.json();
+            window.tngSetNotificationSidebarCount(payload.count || 0);
+        } catch (e) {
+            /* The next inbox refresh will retry. */
+        }
+    }
+
     const payloadEl = document.getElementById('inbox-live-sidebar-counts');
     if (payloadEl) {
         try {
@@ -84,6 +109,14 @@
         } catch (e) {
             /* A later live refresh will retry with authoritative counts. */
         }
+    }
+
+    refreshNotificationSidebarCount(false);
+    if (!window.__tngNotificationSidebarTimer) {
+        window.__tngNotificationSidebarTimer = window.setInterval(
+            () => refreshNotificationSidebarCount(true),
+            30000
+        );
     }
 
     if (!window.__tngInboxInstantReadBound) {
