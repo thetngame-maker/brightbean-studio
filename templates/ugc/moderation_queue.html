@@ -145,13 +145,22 @@
     <div id="ugc-preview-panel" class="relative w-full max-w-6xl max-h-full flex flex-col rounded-2xl bg-stone-950 border border-white/10 shadow-2xl overflow-hidden">
         <div class="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/10 text-white">
             <div class="min-w-0">
-                <div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div>
+                <div class="flex items-center gap-2 min-w-0">
+                    <div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div>
+                    <span id="ugc-preview-counter" class="text-[11px] text-stone-400 whitespace-nowrap"></span>
+                </div>
                 <div id="ugc-preview-contributor" class="text-xs text-stone-400 truncate mt-0.5"></div>
             </div>
             <button id="ugc-preview-close" type="button" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl leading-none flex items-center justify-center" aria-label="Close preview">×</button>
         </div>
-        <div class="min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black">
+        <div class="relative min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black">
+            <button id="ugc-preview-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous image">‹</button>
             <img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg">
+            <button id="ugc-preview-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next image">›</button>
+        </div>
+        <div id="ugc-preview-mobile-nav" class="hidden sm:hidden items-center justify-between gap-3 px-4 py-3 border-t border-white/10 bg-stone-950">
+            <button id="ugc-preview-prev-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">← Previous</button>
+            <button id="ugc-preview-next-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">Next →</button>
         </div>
     </div>
 </div>
@@ -198,8 +207,50 @@
     const previewImage = document.getElementById('ugc-preview-image');
     const previewTitle = document.getElementById('ugc-preview-title');
     const previewContributor = document.getElementById('ugc-preview-contributor');
+    const previewCounter = document.getElementById('ugc-preview-counter');
     const closeButton = document.getElementById('ugc-preview-close');
+    const prevButton = document.getElementById('ugc-preview-prev');
+    const nextButton = document.getElementById('ugc-preview-next');
+    const prevMobile = document.getElementById('ugc-preview-prev-mobile');
+    const nextMobile = document.getElementById('ugc-preview-next-mobile');
+    const mobileNav = document.getElementById('ugc-preview-mobile-nav');
     let previousFocus = null;
+    let currentTrigger = null;
+
+    function visiblePreviewTriggers() {
+        return Array.from(document.querySelectorAll('.ugc-card:not(.hidden) .ugc-preview-trigger'));
+    }
+
+    function updateNavigationState() {
+        const triggers = visiblePreviewTriggers();
+        const index = currentTrigger ? triggers.indexOf(currentTrigger) : -1;
+        const hasMany = triggers.length > 1;
+        if (previewCounter) previewCounter.textContent = index >= 0 ? `${index + 1} of ${triggers.length}` : '';
+        [prevButton, nextButton].forEach((button) => { if (button) button.classList.toggle('invisible', !hasMany); });
+        if (mobileNav) {
+            mobileNav.classList.toggle('hidden', !hasMany);
+            mobileNav.classList.toggle('flex', hasMany);
+        }
+    }
+
+    function renderPreview(trigger) {
+        if (!trigger || !previewImage) return;
+        currentTrigger = trigger;
+        previewImage.src = trigger.dataset.previewSrc || '';
+        previewImage.alt = trigger.dataset.previewTitle || 'Community content preview';
+        previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview';
+        previewContributor.textContent = trigger.dataset.previewContributor || '';
+        updateNavigationState();
+    }
+
+    function stepPreview(direction) {
+        const triggers = visiblePreviewTriggers();
+        if (triggers.length < 2) return;
+        let index = triggers.indexOf(currentTrigger);
+        if (index < 0) index = 0;
+        const nextIndex = (index + direction + triggers.length) % triggers.length;
+        renderPreview(triggers[nextIndex]);
+    }
 
     function closePreview() {
         if (!modal || modal.classList.contains('hidden')) return;
@@ -207,16 +258,14 @@
         modal.classList.remove('flex');
         document.body.style.overflow = '';
         previewImage.src = '';
+        currentTrigger = null;
         if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
     }
 
     function openPreview(trigger) {
         if (!modal || !previewImage) return;
         previousFocus = trigger;
-        previewImage.src = trigger.dataset.previewSrc || '';
-        previewImage.alt = trigger.dataset.previewTitle || 'Community content preview';
-        previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview';
-        previewContributor.textContent = trigger.dataset.previewContributor || '';
+        renderPreview(trigger);
         modal.classList.remove('hidden');
         modal.classList.add('flex');
         document.body.style.overflow = 'hidden';
@@ -227,9 +276,18 @@
         trigger.addEventListener('click', () => openPreview(trigger));
     });
     if (closeButton) closeButton.addEventListener('click', closePreview);
+    if (prevButton) prevButton.addEventListener('click', () => stepPreview(-1));
+    if (nextButton) nextButton.addEventListener('click', () => stepPreview(1));
+    if (prevMobile) prevMobile.addEventListener('click', () => stepPreview(-1));
+    if (nextMobile) nextMobile.addEventListener('click', () => stepPreview(1));
     if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closePreview(); });
     if (panel) panel.addEventListener('click', (event) => event.stopPropagation());
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePreview(); });
+    document.addEventListener('keydown', (event) => {
+        if (!modal || modal.classList.contains('hidden')) return;
+        if (event.key === 'Escape') closePreview();
+        if (event.key === 'ArrowLeft') { event.preventDefault(); stepPreview(-1); }
+        if (event.key === 'ArrowRight') { event.preventDefault(); stepPreview(1); }
+    });
 })();
 </script>
 {% endblock %}
