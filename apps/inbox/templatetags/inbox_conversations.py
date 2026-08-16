@@ -42,15 +42,32 @@ def _best_identity(messages, fallback):
     return identity
 
 
+def _conversation_status(group, representative):
+    """Return the status that should represent a collapsed DM conversation.
+
+    Any unread inbound message makes the whole conversation unread. Once all
+    inbound messages have been read, the newest message owns the visible status.
+    This keeps collapsed rows from looking read while an older webhook/poll item
+    in the same conversation is still unread.
+    """
+    if any(item.status == InboxMessage.Status.UNREAD for item in group):
+        return InboxMessage.Status.UNREAD
+    return representative.status
+
+
 @register.simple_tag
 def conversation_rows(messages):
     """Collapse direct messages into one inbox row per person/account.
 
-    Comments, mentions and reviews remain individual work items.  The input is
+    Comments, mentions and reviews remain individual work items. The input is
     already newest-first, so the representative row for a DM conversation is
-    always its newest inbound message.  Sender identity is then upgraded from
-    any older message in the same visible batch when a webhook arrived before
+    always its newest inbound message. Sender identity is upgraded from any
+    older message in the same visible batch when a webhook arrived before
     Facebook's polling path resolved the person's display name/avatar.
+
+    The representative also receives presentation-only conversation metadata:
+    ``conversation_count``, ``conversation_unread_count`` and the aggregate
+    status. Nothing here is persisted to the database.
     """
     items = list(messages)
     dm_groups = {}
@@ -85,11 +102,15 @@ def conversation_rows(messages):
 
         group = dm_groups.get(key, [item])
         identity = _best_identity(group, item)
+        unread_count = sum(1 for inbound in group if inbound.status == InboxMessage.Status.UNREAD)
+
         # These are transient presentation values only; nothing is written to
         # the database by mutating a model instance that came from the queryset.
         item.sender_name = identity["name"]
         item.sender_avatar_url = identity["avatar_url"]
         item.conversation_count = len(group)
+        item.conversation_unread_count = unread_count
+        item.status = _conversation_status(group, item)
         rows.append(item)
 
     return rows
@@ -150,4 +171,7 @@ def conversation_thread(message):
         "timeline": timeline,
         "active_message": message,
         "conversation_count": len(messages),
+        "conversation_unread_count": sum(
+            1 for inbound in messages if inbound.status == InboxMessage.Status.UNREAD
+        ),
     }
