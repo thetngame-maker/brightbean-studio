@@ -119,6 +119,39 @@
         );
     }
 
+    if (!window.__tngInboxNotificationReadBridgeBound) {
+        window.__tngInboxNotificationReadBridgeBound = true;
+        document.addEventListener('click', function (event) {
+            if (event.target.closest('input, button, select, textarea, label, a')) return;
+            const row = event.target.closest('#inbox-message-list .inbox-row');
+            if (!row) return;
+
+            const messageId = String(row.id || '').replace(/^msg-/, '');
+            if (!messageId || row.dataset.notificationReadSynced === '1') return;
+            row.dataset.notificationReadSynced = '1';
+
+            const csrf = document.querySelector('[name=csrfmiddlewaretoken]');
+            const routeTemplate = '{% url "notifications:mark_message_read" message_id="00000000-0000-0000-0000-000000000000" %}';
+            fetch(routeTemplate.replace('00000000-0000-0000-0000-000000000000', messageId), {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {
+                    'X-CSRFToken': csrf ? csrf.value : '',
+                    'X-Requested-With': 'XMLHttpRequest',
+                },
+            })
+                .then(response => response.ok ? response.json() : null)
+                .then(payload => {
+                    if (payload && window.tngSetNotificationSidebarCount) {
+                        window.tngSetNotificationSidebarCount(payload.unread_count || 0);
+                    }
+                })
+                .catch(() => {
+                    row.dataset.notificationReadSynced = '';
+                });
+        }, true);
+    }
+
     if (!window.__tngInboxInstantReadBound) {
         window.__tngInboxInstantReadBound = true;
         document.addEventListener('click', function (event) {
