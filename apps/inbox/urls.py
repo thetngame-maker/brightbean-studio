@@ -7,6 +7,7 @@ from . import (
     conversation_views,
     facebook_health,
     instagram_health,
+    instagram_post_refresh,
     lead_dashboard,
     lead_views,
     team_views,
@@ -24,6 +25,7 @@ urlpatterns = [
     path("instagram-health/", instagram_health.instagram_health, name="instagram_health"),
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
+    path("<uuid:message_id>/instagram-post/refresh/", instagram_post_refresh.refresh_instagram_post, name="refresh_instagram_post"),
     path("<uuid:message_id>/conversation/", conversation_views.conversation_detail, name="conversation_detail"),
     path("<uuid:message_id>/conversation/customer/", conversation_views.conversation_customer_profile, name="conversation_customer_profile"),
     path("<uuid:message_id>/conversation/lead/", lead_views.save_lead_profile, name="conversation_lead_profile"),
