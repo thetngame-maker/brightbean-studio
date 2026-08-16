@@ -8,6 +8,7 @@
 {% endif %}
 <div id="msg-{{ message.id }}"
      class="inbox-row {% if message.status == 'unread' %}is-unread{% endif %}"
+     data-social-account-id="{{ message.social_account_id }}"
      @click="selectMessage('{{ message.id }}', '{{ detail_url }}')"
      role="button"
      tabindex="0">
