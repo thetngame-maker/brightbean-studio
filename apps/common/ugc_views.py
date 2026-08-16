@@ -19,6 +19,7 @@ from apps.workspaces.models import Workspace
 from .audit import record_audit_event
 from .models import UGCModerationEvent, UGCReport, UGCSubmission
 from .ugc import moderate_submission, resolve_report
+from .ugc_permissions import GRANTED, VALID_PERMISSION_STATUSES, set_permission
 from .ugc_provenance import build_provenance, get_provenance, set_provenance
 
 
@@ -34,22 +35,23 @@ def _get_workspace(request, workspace_id):
     return workspace
 
 
-def _discovered_q():
-    """Externally discovered content that has not entered the consent flow yet.
-
-    Manual/direct submissions use discovery_source=manual. Future discovery
-    providers can use their own stable key (for example ``apify``) and will
-    automatically land in the Discovered queue without a schema change.
-    """
+def _external_discovery_q():
     return Q(metadata__provenance__discovery_source__isnull=False) & ~Q(
         metadata__provenance__discovery_source="manual"
     )
 
 
+def _discovered_q():
+    """Externally discovered content that has not received permission yet."""
+    return _external_discovery_q() & ~Q(metadata__permission__status=GRANTED)
+
+
 def _pending_submission_q():
-    """Normal pending submissions, excluding externally discovered content."""
-    return Q(metadata__provenance__discovery_source__isnull=True) | Q(
-        metadata__provenance__discovery_source="manual"
+    """Normal pending submissions plus discovered items with granted permission."""
+    return (
+        Q(metadata__provenance__discovery_source__isnull=True)
+        | Q(metadata__provenance__discovery_source="manual")
+        | Q(metadata__permission__status=GRANTED)
     )
 
 
@@ -176,13 +178,6 @@ def moderation_queue(request, workspace_id):
 @require_permission("manage_workspace_settings")
 @require_POST
 def create_manual_submission_view(request, workspace_id):
-    """Create one pending item from the moderation screen.
-
-    Manual moderators may upload a new image or select one already in the
-    workspace media library. New uploads use the same validated media service
-    as the REST API, so UGC never gets a second, weaker storage path.
-    """
-
     workspace = _get_workspace(request, workspace_id)
     kind = request.POST.get("kind", "").strip()
     attribution = request.POST.get("attribution", UGCSubmission.Attribution.NAME).strip()
@@ -248,15 +243,11 @@ def create_manual_submission_view(request, workspace_id):
                 tags=["community-content", "ugc"],
             )
         except ValidationError as exc:
-            if hasattr(exc, "messages"):
-                upload_errors = exc.messages
-            else:
-                upload_errors = [str(exc)]
+            upload_errors = exc.messages if hasattr(exc, "messages") else [str(exc)]
             return _render_manual_errors(request, workspace, upload_errors)
 
         if media_asset.media_type != MediaAsset.MediaType.IMAGE:
             return _render_manual_errors(request, workspace, ["Community photo uploads must be an image."])
-
         process_media_asset(str(media_asset.id))
 
     provenance = build_provenance(
@@ -310,11 +301,66 @@ def create_manual_submission_view(request, workspace_id):
 
 
 @login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def update_permission_view(request, workspace_id, submission_id):
+    """Record creator outreach/permission for externally discovered UGC."""
+    workspace = _get_workspace(request, workspace_id)
+    submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
+    provenance = get_provenance(submission.metadata)
+    if provenance.get("discovery_source") == "manual":
+        messages.error(request, "Permission workflow is only for externally discovered content.")
+        return _return_to_queue(request, workspace)
+
+    status = request.POST.get("permission_status", "").strip().lower()
+    if status not in VALID_PERMISSION_STATUSES:
+        messages.error(request, "Choose a valid permission status.")
+        return _return_to_queue(request, workspace)
+
+    now = timezone.now()
+    metadata = set_permission(
+        submission.metadata,
+        status=status,
+        channel=request.POST.get("channel", "").strip(),
+        note=request.POST.get("note", "").strip(),
+        updated_at=now.isoformat(),
+    )
+    submission.metadata = metadata
+    update_fields = ["metadata", "updated_at"]
+
+    if status == GRANTED:
+        submission.consent_confirmed = True
+        submission.consent_version = request.POST.get("consent_version", "creator-permission-v1").strip()[:50] or "creator-permission-v1"
+        submission.consent_at = now
+        update_fields.extend(["consent_confirmed", "consent_version", "consent_at"])
+
+    submission.save(update_fields=update_fields)
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action=f"ugc.permission_{status}",
+        target=submission,
+        target_label=str(submission),
+        metadata={
+            "permission_status": status,
+            "channel": request.POST.get("channel", "").strip()[:50],
+            "discovery_source": provenance.get("discovery_source", ""),
+            "source_platform": provenance.get("platform", ""),
+        },
+        request=request,
+    )
+
+    if status == GRANTED:
+        messages.success(request, "Permission granted. The item is now in Pending for moderation.")
+    else:
+        messages.success(request, "Permission workflow updated.")
+    return _return_to_queue(request, workspace)
+
+
+@login_required
 @require_permission("create_posts")
 @require_POST
 def use_in_post_view(request, workspace_id, submission_id):
-    """Turn an approved UGC item into a normal editable Studio draft."""
-
     workspace = _get_workspace(request, workspace_id)
     submission = get_object_or_404(
         UGCSubmission.objects.select_related("media_asset"),
@@ -329,10 +375,7 @@ def use_in_post_view(request, workspace_id, submission_id):
         messages.error(request, "Contributor consent is required before community content can be reused.")
         return _return_to_queue(request, workspace)
 
-    source_bits = [
-        f"UGC submission: {submission.id}",
-        f"Target: {submission.target_type}:{submission.target_id}",
-    ]
+    source_bits = [f"UGC submission: {submission.id}", f"Target: {submission.target_type}:{submission.target_id}"]
     if submission.target_label:
         source_bits.append(f"Target name: {submission.target_label}")
     if submission.target_url:
@@ -401,13 +444,7 @@ def moderate_submission_view(request, workspace_id, submission_id):
         messages.error(request, "That moderation action is not supported.")
     else:
         try:
-            moderate_submission(
-                submission=submission,
-                action=action,
-                actor=request.user,
-                note=note,
-                request=request,
-            )
+            moderate_submission(submission=submission, action=action, actor=request.user, note=note, request=request)
         except ValidationError as exc:
             messages.error(request, " ".join(exc.messages))
         else:
