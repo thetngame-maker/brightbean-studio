@@ -7,6 +7,7 @@ from apps.members.decorators import require_permission
 from apps.members.models import WorkspaceMembership
 
 from . import views
+from .collaboration import record_activity, user_display_name
 from .forms import BulkActionForm
 from .models import InboxMessage, InboxSLAConfig
 
@@ -49,10 +50,18 @@ def bulk_assign(request, workspace_id):
         InboxMessage.objects.filter(
             workspace=workspace,
             id__in=form.cleaned_data["message_ids"],
-        ).select_related("social_account")
+        ).select_related("social_account", "assigned_to")
     )
     for message in selected:
+        previous_assignee_id = message.assigned_to_id
         _assign_work_item(message, assigned_to)
+        new_assignee_id = assigned_to.id if assigned_to else None
+        if previous_assignee_id != new_assignee_id:
+            if assigned_to:
+                target = "themselves" if assigned_to == request.user else user_display_name(assigned_to)
+                record_activity(message, request.user, f"assigned this work item to {target}.")
+            else:
+                record_activity(message, request.user, "moved this work item to Unassigned.")
 
     messages = InboxMessage.objects.for_workspace(workspace.id).select_related(
         "social_account", "assigned_to"
