@@ -23,6 +23,7 @@ urlpatterns = [
     path("leads/", lead_dashboard.lead_dashboard, name="lead_dashboard"),
     path("facebook-health/", facebook_health.facebook_health, name="facebook_health"),
     path("instagram-health/", instagram_health.instagram_health, name="instagram_health"),
+    path("instagram-health/sync-now/", instagram_health.sync_instagram_now, name="instagram_sync_now"),
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
     path("<uuid:message_id>/instagram-post/refresh/", instagram_post_refresh.refresh_instagram_post, name="refresh_instagram_post"),
