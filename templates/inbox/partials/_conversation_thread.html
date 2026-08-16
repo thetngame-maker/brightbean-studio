@@ -32,27 +32,7 @@
             </div>
         </div>
         {% elif item.kind == 'note' %}
-            {% if item.note.body|is_activity_note %}
-            <div class="flex items-center justify-center py-1">
-                <div class="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-3 py-1.5 text-[11px] text-stone-500">
-                    <svg class="w-3.5 h-3.5 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="9"/></svg>
-                    <span>{{ item.note.body|activity_note_text }}</span>
-                    <span class="text-stone-300">·</span>
-                    <span>{{ item.timestamp|date:"M j, g:i A" }}</span>
-                </div>
-            </div>
-            {% else %}
-            <div class="flex justify-center py-1">
-                <div class="max-w-[88%] rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
-                    <div class="flex items-center gap-2 font-semibold mb-0.5">
-                        <span>Internal note</span>
-                        {% if item.note.author %}<span class="font-normal text-amber-600">by {{ item.note.author|inbox_display_name }}</span>{% endif %}
-                    </div>
-                    <div class="whitespace-pre-wrap">{{ item.note.body }}</div>
-                    <div class="mt-1 text-[10px] text-amber-600">{{ item.timestamp|date:"M j, g:i A" }}</div>
-                </div>
-            </div>
-            {% endif %}
+            {% include "inbox/partials/_note_item.html" with note=item.note message=item.message %}
         {% endif %}
     {% empty %}
     <div class="text-sm text-stone-400 text-center py-6">No conversation history yet.</div>
