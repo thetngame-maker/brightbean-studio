@@ -6,11 +6,47 @@ either order, so a live lookup is more resilient than requiring the child row to
 be permanently linked at ingest time.
 """
 
+import re
+
 from django import template
 
 from apps.inbox.models import InboxMessage
 
 register = template.Library()
+
+
+def _looks_like_account_mention(message) -> bool:
+    """True when a top-level Instagram item @mentions the connected account.
+
+    This is intentionally evaluated at render time as a final safety net. Some
+    existing rows were stored as Comment before mention normalization was added,
+    and Instagram may not return those rows again soon enough for a database
+    repair. The SocialAccount row is authoritative for the current handle.
+    """
+    if message.social_account.platform != "instagram_login":
+        return False
+    if message.message_type not in {
+        InboxMessage.MessageType.COMMENT,
+        InboxMessage.MessageType.MENTION,
+    }:
+        return False
+    if str((message.extra or {}).get("parent_id") or "").strip():
+        return False
+
+    handle = str(message.social_account.account_handle or "").strip().lstrip("@")
+    if not handle:
+        return False
+
+    pattern = re.compile(rf"(?<![\w.])@{re.escape(handle)}\b", re.IGNORECASE)
+    return bool(pattern.search(str(message.body or "")))
+
+
+@register.simple_tag
+def instagram_effective_type(message):
+    """Presentation-safe message type, correcting stale Instagram mention rows."""
+    if message.message_type == InboxMessage.MessageType.MENTION or _looks_like_account_mention(message):
+        return "Mention"
+    return message.get_message_type_display()
 
 
 @register.simple_tag
@@ -42,7 +78,7 @@ def instagram_parent_context(message):
 @register.simple_tag
 def instagram_interaction_label(message):
     """Human label for the Instagram post-context control."""
-    if message.message_type == InboxMessage.MessageType.MENTION:
+    if message.message_type == InboxMessage.MessageType.MENTION or _looks_like_account_mention(message):
         return "Mentioned you on this post"
     if (message.extra or {}).get("parent_id"):
         return "Replied on this post"
