@@ -2,9 +2,11 @@
 
 from datetime import timedelta
 
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.utils import timezone
+from django.views.decorators.http import require_POST
 
 from apps.composer.models import PlatformPost
 from apps.members.decorators import require_permission
@@ -12,6 +14,7 @@ from apps.social_accounts.models import SocialAccount
 
 from . import views
 from .models import InboxMessage, InboxReply
+from .tasks import InboxSyncEngine
 
 
 @login_required
@@ -34,24 +37,24 @@ def instagram_health(request, workspace_id):
     attention_count = 0
 
     for account in accounts:
-        messages = InboxMessage.objects.filter(social_account=account)
+        inbox_messages = InboxMessage.objects.filter(social_account=account)
         replies = InboxReply.objects.filter(inbox_message__social_account=account)
         posts = PlatformPost.objects.filter(social_account=account)
 
-        latest_message = messages.order_by("-received_at").only(
+        latest_message = inbox_messages.order_by("-received_at").only(
             "received_at", "message_type", "sender_name"
         ).first()
         latest_reply = replies.exclude(platform_reply_id="").order_by("-sent_at").only(
             "sent_at", "platform_reply_id"
         ).first()
 
-        inbound_24h = messages.filter(received_at__gte=day_ago).count()
-        inbound_7d = messages.filter(received_at__gte=week_ago).count()
-        dms_7d = messages.filter(
+        inbound_24h = inbox_messages.filter(received_at__gte=day_ago).count()
+        inbound_7d = inbox_messages.filter(received_at__gte=week_ago).count()
+        dms_7d = inbox_messages.filter(
             received_at__gte=week_ago,
             message_type=InboxMessage.MessageType.DM,
         ).count()
-        comments_7d = messages.filter(
+        comments_7d = inbox_messages.filter(
             received_at__gte=week_ago,
             message_type=InboxMessage.MessageType.COMMENT,
         ).count()
@@ -165,3 +168,55 @@ def instagram_health(request, workspace_id):
             "checked_at": now,
         },
     )
+
+
+@login_required
+@require_permission("use_inbox")
+@require_POST
+def sync_instagram_now(request, workspace_id):
+    """Immediately poll this workspace's Instagram accounts for inbox activity.
+
+    This is intentionally a diagnostic/manual recovery path. The normal recurring
+    worker remains the primary polling mechanism; this lets an operator tell the
+    difference between a stopped scheduler and an Instagram read/webhook issue.
+    """
+    workspace = views._get_workspace(request, workspace_id)
+    accounts = list(
+        SocialAccount.objects.filter(
+            workspace=workspace,
+            platform__in=("instagram_login", "instagram"),
+            connection_status=SocialAccount.ConnectionStatus.CONNECTED,
+        )
+    )
+
+    if not accounts:
+        messages.warning(request, "No connected Instagram accounts are available to sync.")
+        return redirect("inbox:instagram_health", workspace_id=workspace.id)
+
+    before = InboxMessage.objects.filter(social_account__in=accounts).count()
+    engine = InboxSyncEngine()
+    failures = 0
+
+    for account in accounts:
+        try:
+            engine._sync_account(account)
+        except Exception:
+            failures += 1
+
+    after = InboxMessage.objects.filter(social_account__in=accounts).count()
+    added = max(after - before, 0)
+
+    if failures:
+        messages.error(
+            request,
+            f"Instagram sync completed with {failures} account error(s). {added} new inbox item(s) were added.",
+        )
+    elif added:
+        messages.success(request, f"Instagram sync completed. {added} new inbox item(s) were added.")
+    else:
+        messages.info(
+            request,
+            "Instagram sync completed successfully, but Instagram returned no new inbox items.",
+        )
+
+    return redirect("inbox:instagram_health", workspace_id=workspace.id)
