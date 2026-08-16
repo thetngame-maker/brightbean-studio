@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Community Content · TN Social Studio{% endblock %}
+
+{% block page_header %}
+<div class="flex flex-col gap-4 mb-5">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+            <div class="flex items-center gap-2">
+                <h1 class="text-xl font-semibold text-stone-900">Community Content</h1>
+                {% if queue_counts.pending %}
+                <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">{{ queue_counts.pending }}</span>
+                {% endif %}
+            </div>
+            <p class="text-sm text-stone-500 mt-1">Review submissions, handle reports, and keep a complete moderation trail.</p>
+        </div>
+        <div class="text-xs text-stone-400">Up to 100 items shown per view</div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-2 border-b border-stone-200">
+        <a href="?tab=pending{% if active_kind %}&kind={{ active_kind }}{% endif %}"
+           class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'pending' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">
+            Pending <span class="ml-1 text-xs">{{ queue_counts.pending }}</span>
+        </a>
+        <a href="?tab=approved{% if active_kind %}&kind={{ active_kind }}{% endif %}"
+           class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'approved' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">
+            Approved <span class="ml-1 text-xs">{{ queue_counts.approved }}</span>
+        </a>
+        <a href="?tab=reported{% if active_kind %}&kind={{ active_kind }}{% endif %}"
+           class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'reported' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">
+            Reported <span class="ml-1 text-xs">{{ queue_counts.reported }}</span>
+        </a>
+        <a href="?tab=removed{% if active_kind %}&kind={{ active_kind }}{% endif %}"
+           class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'removed' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">
+            Removed <span class="ml-1 text-xs">{{ queue_counts.removed }}</span>
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="flex flex-col min-h-0">
+    <form method="get" class="flex items-center gap-2 mb-4">
+        <input type="hidden" name="tab" value="{{ active_tab }}">
+        <label for="ugc-kind" class="text-xs font-medium text-stone-500">Content type</label>
+        <select id="ugc-kind" name="kind" onchange="this.form.submit()"
+                class="text-sm border border-stone-200 rounded-lg bg-white px-3 py-2 text-stone-700 outline-none focus:border-orange-400">
+            <option value="">All types</option>
+            {% for value, label in kind_choices %}
+            <option value="{{ value }}" {% if active_kind == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </form>
+
+    {% if submissions %}
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 pb-6">
+        {% for submission in submissions %}
+        <article class="rounded-2xl border border-stone-200 bg-white overflow-hidden shadow-sm">
+            {% if submission.media_asset %}
+            <div class="bg-stone-100 border-b border-stone-200 overflow-hidden" style="max-height: 320px;">
+                {% if submission.media_asset.is_image %}
+                <img src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" class="w-full h-full object-cover" style="max-height: 320px; min-height: 220px;">
+                {% elif submission.media_asset.is_video %}
+                <video controls preload="metadata" class="w-full bg-black" style="max-height: 320px;">
+                    <source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}">
+                </video>
+                {% else %}
+                <div class="p-8 text-sm text-stone-500 text-center">{{ submission.media_asset.filename }}</div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="p-4 sm:p-5">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-2 mb-2">
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-stone-100 text-stone-700">{{ submission.get_kind_display }}</span>
+                            {% if submission.status == 'pending' %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-amber-50 text-amber-700">Pending</span>
+                            {% elif submission.status == 'approved' %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-emerald-50 text-emerald-700">Approved</span>
+                            {% elif submission.status == 'removed' %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-red-50 text-red-700">Removed</span>
+                            {% else %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>
+                            {% endif %}
+                            {% if submission.open_report_count %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-red-50 text-red-700">{{ submission.open_report_count }} report{{ submission.open_report_count|pluralize }}</span>
+                            {% endif %}
+                        </div>
+                        <h2 class="text-base font-semibold text-stone-900 truncate">{{ submission.title|default:submission.target_label|default:"Community submission" }}</h2>
+                        <p class="text-xs text-stone-500 mt-1">
+                            {% if submission.attribution == 'anonymous' %}
+                                Anonymous contributor
+                            {% elif submission.attribution == 'handle' and submission.contributor_handle %}
+                                @{{ submission.contributor_handle }}
+                            {% elif submission.contributor_name %}
+                                {{ submission.contributor_name }}
+                            {% elif submission.contributor %}
+                                {{ submission.contributor.name|default:submission.contributor.email }}
+                            {% else %}
+                                Community contributor
+                            {% endif %}
+                            · {{ submission.submitted_at|naturaltime }}
+                        </p>
+                    </div>
+                    {% if submission.rating %}
+                    <div class="flex-shrink-0 text-sm font-semibold text-amber-600">★ {{ submission.rating }}/5</div>
+                    {% endif %}
+                </div>
+
+                {% if submission.body %}
+                <p class="text-sm text-stone-700 leading-6 mt-4 whitespace-pre-line">{{ submission.body }}</p>
+                {% endif %}
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 text-xs">
+                    <div class="rounded-xl bg-stone-50 p-3">
+                        <div class="text-stone-400 mb-1">Attached to</div>
+                        <div class="font-medium text-stone-700">{{ submission.target_label|default:submission.target_type }}</div>
+                        <div class="text-stone-400 mt-0.5">{{ submission.target_type }} · {{ submission.target_id }}</div>
+                    </div>
+                    <div class="rounded-xl {% if submission.consent_confirmed %}bg-emerald-50{% else %}bg-red-50{% endif %} p-3">
+                        <div class="{% if submission.consent_confirmed %}text-emerald-600{% else %}text-red-600{% endif %} mb-1">Contributor consent</div>
+                        {% if submission.consent_confirmed %}
+                        <div class="font-medium text-emerald-800">Confirmed{% if submission.consent_version %} · {{ submission.consent_version }}{% endif %}</div>
+                        {% if submission.consent_at %}<div class="text-emerald-600 mt-0.5">{{ submission.consent_at|date:"M j, Y g:i A" }}</div>{% endif %}
+                        {% else %}
+                        <div class="font-medium text-red-800">Not recorded</div>
+                        <div class="text-red-600 mt-0.5">Approval is blocked server-side.</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if submission.active_reports %}
+                <div class="mt-4 space-y-2">
+                    <div class="text-xs font-semibold uppercase tracking-wide text-red-600">Open reports</div>
+                    {% for report in submission.active_reports %}
+                    <div class="rounded-xl border border-red-100 bg-red-50/60 p-3">
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <div class="text-sm font-semibold text-red-800">{{ report.get_reason_display }}</div>
+                                <div class="text-xs text-red-600 mt-0.5">{{ report.reporter_name|default:"Community member" }} · {{ report.created_at|naturaltime }}</div>
+                                {% if report.details %}<p class="text-sm text-stone-700 mt-2">{{ report.details }}</p>{% endif %}
+                            </div>
+                            <div class="flex gap-1.5 flex-shrink-0">
+                                <form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="dismissed">
+                                    <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                                    <button class="px-2.5 py-1.5 text-xs font-medium rounded-lg border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 cursor-pointer">Dismiss</button>
+                                </form>
+                                <form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="status" value="resolved">
+                                    <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                                    <button class="px-2.5 py-1.5 text-xs font-medium rounded-lg bg-red-600 text-white hover:bg-red-700 cursor-pointer">Resolve</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
+                <div class="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-stone-100">
+                    {% if submission.status == 'pending' %}
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="approve">
+                        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                        <button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %}
+                                class="px-4 py-2 text-sm font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">
+                            Approve
+                        </button>
+                    </form>
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="reject">
+                        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                        <button class="px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button>
+                    </form>
+                    {% elif submission.status == 'approved' %}
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="remove">
+                        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                        <button class="px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Remove</button>
+                    </form>
+                    {% elif submission.status == 'removed' %}
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="action" value="restore">
+                        <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+                        <button {% if not submission.consent_confirmed %}disabled{% endif %}
+                                class="px-4 py-2 text-sm font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Restore</button>
+                    </form>
+                    {% endif %}
+
+                    {% if submission.target_url %}
+                    <a href="{{ submission.target_url }}" target="_blank" rel="noopener noreferrer" class="ml-auto text-sm font-medium text-stone-500 hover:text-stone-800">Open target ↗</a>
+                    {% endif %}
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6">
+        <div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3">
+            <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg>
+        </div>
+        <h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2>
+        <p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
