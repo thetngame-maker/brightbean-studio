@@ -4,7 +4,7 @@
 <!-- Team workload summary -->
 <div class="px-4 pt-3 pb-2 border-b border-stone-100 flex-shrink-0 bg-white">
     <div class="flex items-center justify-between gap-3 mb-2">
-        <div class="flex items-center gap-2 min-w-0">
+        <div class="flex items-center gap-2 min-w-0 flex-wrap">
             <span class="text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">Workload</span>
             <a href="{% url 'inbox:feed' workspace_id=workspace.id %}?view=mine"
                class="badge-pill hover:opacity-80 transition-opacity"
@@ -15,6 +15,11 @@
                class="badge-pill hover:opacity-80 transition-opacity"
                style="background: var(--warning-50); color: var(--warning-700);">
                 Unassigned {{ workload.unassigned }}
+            </a>
+            <a href="{% url 'inbox:followup_feed' workspace_id=workspace.id %}"
+               class="badge-pill hover:opacity-80 transition-opacity"
+               style="background: #fff7ed; color: #c2410c;">
+                Follow-up {{ workload.followup }}
             </a>
         </div>
         <div class="flex items-center gap-1.5 overflow-x-auto">
@@ -42,7 +47,7 @@
             <option value="">Unassign selected</option>
             {% for membership in team_members %}
             <option value="{{ membership.user.id }}">
-                Assign to {% if membership.user.id == request.user.id %}me{% else %}{{ membership.user.get_short_name|default:membership.user.email }}{% endif %}
+                Assign to {% if membership.user.id == request.user.id %}me{% else %}{{ membership.user|inbox_display_name }}{% endif %}
             </option>
             {% endfor %}
         </select>
@@ -63,7 +68,7 @@
                value="{{ active_filters.q|default:'' }}"
                placeholder="Search messages..."
                class="w-full pl-8 pr-3 py-1.5 text-[12px] bg-white border border-stone-200 rounded-md focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all"
-               hx-get="{% url 'inbox:feed' workspace_id=workspace.id %}"
+               hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
                hx-target="#inbox-message-list"
                hx-swap="innerHTML"
                hx-trigger="keyup changed delay:400ms"
@@ -72,7 +77,7 @@
 
     <!-- Platform filter -->
     <select name="platform" class="filter-select"
-            hx-get="{% url 'inbox:feed' workspace_id=workspace.id %}"
+            hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
             hx-include="[name='q'],[name='type'],[name='status'],[name='sentiment']">
@@ -97,7 +102,7 @@
 
     <!-- Status filter -->
     <select name="status" class="filter-select"
-            hx-get="{% url 'inbox:feed' workspace_id=workspace.id %}"
+            hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
             hx-include="[name='q'],[name='platform'],[name='type'],[name='sentiment']">
