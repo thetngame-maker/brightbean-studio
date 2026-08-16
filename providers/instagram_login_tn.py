@@ -7,6 +7,7 @@ core BrightBean provider remains easy to compare/update.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
@@ -114,6 +115,33 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
             extra=extra,
         )
 
+    @staticmethod
+    def _classify_mentions(messages: list[InboxMessage], owner_handle: str) -> None:
+        """Promote top-level comments that @mention this account to Mention.
+
+        Instagram's dedicated ``mentions`` webhook is the preferred real-time
+        signal, but the polling fallback reads the comments edge and therefore
+        sees a top-level @mention as an ordinary comment. Classifying it here
+        keeps webhook and poll behavior consistent without confusing genuine
+        nested replies (which carry ``parent_id``) with mentions.
+        """
+        handle = str(owner_handle or "").strip().lstrip("@")
+        if not handle:
+            return
+
+        pattern = re.compile(rf"(?<![\w.])@{re.escape(handle)}\b", re.IGNORECASE)
+        for message in messages:
+            if message.message_type != "comment":
+                continue
+            extra = dict(message.extra or {})
+            if str(extra.get("parent_id") or "").strip():
+                continue
+            if not pattern.search(str(message.text or "")):
+                continue
+            message.message_type = "mention"
+            extra["detected_mention"] = True
+            message.extra = extra
+
     # ------------------------------------------------------------------
     # Inbox comment polling
     # ------------------------------------------------------------------
@@ -218,5 +246,6 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
             except Exception as exc:
                 logger.warning("Instagram Login comment pagination failed for media %s: %s", media_id, exc)
 
+        self._classify_mentions(messages, owner_handle)
         logger.info("Instagram Login explicit comment poll produced %d message(s)", len(messages))
         return messages
