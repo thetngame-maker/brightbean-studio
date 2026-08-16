@@ -1,4 +1,4 @@
-{% load humanize %}
+{% load humanize inbox_team %}
 <!-- Reply composer -->
 <div class="border-t border-stone-200 px-5 py-3 flex-shrink-0" style="background: var(--surface-1);"
      x-data="{ mode: 'reply', noteText: '', replyText: '' }">
@@ -83,7 +83,27 @@
                       rows="2"
                       class="w-full px-3 py-2 text-[13px] bg-amber-50 border border-amber-200 rounded-lg resize-none focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
                       required></textarea>
-            <div class="flex items-center justify-end mt-2">
+
+            {% if team_members %}
+            <div class="flex items-center gap-1.5 mt-2 overflow-x-auto pb-0.5">
+                <span class="text-[10px] font-semibold uppercase tracking-wide text-stone-400 flex-shrink-0">Mention</span>
+                {% for membership in team_members %}
+                    {% with mention=membership.user|inbox_mention_key %}
+                    {% if mention and membership.user != request.user %}
+                    <button type="button"
+                            @click="noteText = (noteText ? noteText + ' ' : '') + '@{{ mention|escapejs }} '; $nextTick(() => $el.closest('form').querySelector('textarea').focus())"
+                            class="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-amber-200 bg-white text-[10px] font-medium text-amber-800 hover:bg-amber-50 transition-colors flex-shrink-0"
+                            title="Mention {{ membership.user|inbox_display_name }}">
+                        @{{ mention }}
+                    </button>
+                    {% endif %}
+                    {% endwith %}
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <div class="flex items-center justify-between mt-2">
+                <p class="text-[10px] text-stone-400">Internal notes stay inside TN Social Studio. @mentions notify that teammate.</p>
                 <button type="submit"
                         class="inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-semibold text-amber-800 bg-amber-100 border border-amber-200 rounded-full hover:bg-amber-200 transition-all duration-150 cursor-pointer">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
