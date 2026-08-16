@@ -1,4 +1,4 @@
-"""TN Social Studio compatibility fixes for Instagram Login publishing.
+"""TN Social Studio compatibility fixes for Instagram Login publishing and inbox.
 
 Keep TN-specific production fixes isolated from the upstream provider so the
 core BrightBean provider remains easy to compare/update.
@@ -7,16 +7,26 @@ core BrightBean provider remains easy to compare/update.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
-from .instagram_login import InstagramLoginProvider
-from .types import PostType, PublishContent, PublishResult
+from .instagram_login import API_BASE, InstagramLoginProvider
+from .meta_comments import (
+    INSTAGRAM_COMMENTS_PER_MEDIA,
+    INSTAGRAM_COMMENT_FIELD_SETS,
+    INSTAGRAM_COMMENT_LOOKBACK_HOURS,
+    INSTAGRAM_MEDIA_SCAN_LIMIT,
+    INSTAGRAM_MEDIA_WINDOW_DAYS,
+    _comment_to_messages,
+    _iter_comments,
+)
+from .types import InboxMessage, PostType, PublishContent, PublishResult
 
 logger = logging.getLogger(__name__)
 
 
 class TNInstagramLoginProvider(InstagramLoginProvider):
-    """Instagram Login provider with TN Social Studio publishing safeguards."""
+    """Instagram Login provider with TN Social Studio production safeguards."""
 
     @staticmethod
     def _content_is_video(content: PublishContent) -> bool:
@@ -103,3 +113,96 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
             url=primary.url,
             extra=extra,
         )
+
+    # ------------------------------------------------------------------
+    # Inbox comment polling
+    # ------------------------------------------------------------------
+
+    def _fetch_media_comments(self, access_token: str, since: datetime | None = None) -> list[InboxMessage]:
+        """Poll recent Instagram comments using explicit per-media comment edges.
+
+        BrightBean's shared fallback expands ``comments{...}`` inside ``/me/media``.
+        Direct Instagram Login can successfully return the media list while
+        refusing or omitting that nested expansion, which leaves the poll with
+        zero comments even though DMs work. Fetching media first and then calling
+        ``/{media-id}/comments`` is more reliable and also isolates a bad media
+        item so it cannot suppress every other comment in the cycle.
+        """
+        owner_id = str(self.credentials.get("ig_user_id") or "")
+        owner_handle = str(self.credentials.get("account_handle") or "")
+        if not owner_id and not owner_handle:
+            logger.warning("Skipping Instagram Login comment poll: no owner id or handle in credentials")
+            return []
+
+        media_floor = datetime.now(UTC) - timedelta(days=INSTAGRAM_MEDIA_WINDOW_DAYS)
+        media_resp = self._request(
+            "GET",
+            f"{API_BASE}/me/media",
+            access_token=access_token,
+            params={
+                "fields": "id,timestamp,permalink",
+                "limit": INSTAGRAM_MEDIA_SCAN_LIMIT,
+                "since": int(media_floor.timestamp()),
+            },
+        )
+        media_items = media_resp.json().get("data", [])
+
+        cutoff = None
+        if since:
+            aware_since = since if since.tzinfo else since.replace(tzinfo=UTC)
+            cutoff = aware_since - timedelta(hours=INSTAGRAM_COMMENT_LOOKBACK_HOURS)
+
+        messages: list[InboxMessage] = []
+        seen: set[str] = set()
+
+        for media in media_items:
+            media_id = str(media.get("id") or "")
+            if not media_id:
+                continue
+
+            comments_payload = None
+            last_error: Exception | None = None
+            for fields in INSTAGRAM_COMMENT_FIELD_SETS:
+                try:
+                    resp = self._request(
+                        "GET",
+                        f"{API_BASE}/{media_id}/comments",
+                        access_token=access_token,
+                        params={"fields": fields, "limit": INSTAGRAM_COMMENTS_PER_MEDIA},
+                    )
+                except Exception as exc:
+                    last_error = exc
+                    if getattr(exc, "status_code", None) == 400:
+                        logger.info(
+                            "Instagram Login rejected comment fields for media %s; retrying with fewer fields",
+                            media_id,
+                        )
+                        continue
+                    logger.warning("Skipping Instagram comments for media %s: %s", media_id, exc)
+                    break
+                else:
+                    comments_payload = resp.json()
+                    break
+
+            if comments_payload is None:
+                if last_error is not None:
+                    logger.warning("No readable Instagram comments for media %s: %s", media_id, last_error)
+                continue
+
+            try:
+                for comment in _iter_comments(self._request, API_BASE, access_token, comments_payload):
+                    messages.extend(
+                        _comment_to_messages(
+                            comment,
+                            media,
+                            owner_id,
+                            owner_handle,
+                            cutoff,
+                            seen,
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("Instagram Login comment pagination failed for media %s: %s", media_id, exc)
+
+        logger.info("Instagram Login explicit comment poll produced %d message(s)", len(messages))
+        return messages
