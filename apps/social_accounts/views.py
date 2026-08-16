@@ -40,11 +40,36 @@ OAUTH_SESSION_KEY = "social_oauth"
 
 
 def _get_visible_platform_choices():
-    """Return PlatformCredential.Platform.choices filtered to visible platforms.
+    """Return user-facing platform choices filtered to visible platforms.
 
-    Platforms without a PlatformVisibility row default to visible.
+    The legacy ``instagram`` provider uses the older Facebook-linked Instagram
+    Graph OAuth scopes. TN Social Studio now connects Instagram Professional
+    accounts through ``instagram_login`` instead. Keep the legacy provider in
+    the registry for existing accounts, but never present it as a new-connect
+    option. The direct provider is labelled simply "Instagram" in the UI.
     """
-    return PlatformVisibility.visible_choices()
+    choices = []
+    for value, label in PlatformVisibility.visible_choices():
+        if value == PlatformCredential.Platform.INSTAGRAM:
+            continue
+        if value == PlatformCredential.Platform.INSTAGRAM_LOGIN:
+            label = "Instagram"
+        choices.append((value, label))
+    return choices
+
+
+def _normalize_connect_platform(platform):
+    """Route old/user-facing Instagram connect requests to Instagram Login.
+
+    Some existing sidebar/template links still submit the historical
+    ``instagram`` platform key. Normalizing at the connection boundary lets us
+    switch those entry points safely without changing existing SocialAccount
+    rows that may have been created with the legacy provider.
+    """
+    platform = (platform or "").strip()
+    if platform == PlatformCredential.Platform.INSTAGRAM:
+        return PlatformCredential.Platform.INSTAGRAM_LOGIN
+    return platform
 
 
 def _apply_analytics_scope_flag(provider, platform):
@@ -234,8 +259,9 @@ def connect_platform(request, workspace_id):
             },
         )
 
-    # POST: initiate OAuth
-    platform = request.POST.get("platform", "").strip()
+    # POST: initiate OAuth. Normalize legacy Instagram entry points first so
+    # sidebar links that still submit `instagram` use the modern direct flow.
+    platform = _normalize_connect_platform(request.POST.get("platform", ""))
     if platform not in dict(visible_platform_choices):
         messages.error(request, "This platform is not available.")
         return redirect("social_accounts:connect", workspace_id=workspace_id)
@@ -243,7 +269,10 @@ def connect_platform(request, workspace_id):
     if platform not in configured_platforms:
         messages.error(
             request,
-            f"Platform credentials for {platform} are not configured. Please contact your administrator.",
+            "Instagram app credentials are not configured. Please add "
+            "PLATFORM_INSTAGRAM_APP_ID and PLATFORM_INSTAGRAM_APP_SECRET."
+            if platform == PlatformCredential.Platform.INSTAGRAM_LOGIN
+            else f"Platform credentials for {platform} are not configured. Please contact your administrator.",
         )
         return redirect("social_accounts:connect", workspace_id=workspace_id)
 
@@ -380,7 +409,7 @@ def oauth_callback(request, platform):
                         "Only Company Pages you administer can be connected — "
                         "personal profiles connect via the LinkedIn (Personal) option. "
                         "If you expected to see a Page, ask the page owner to grant "
-                        "you Admin access in LinkedIn \u2192 Admin tools \u2192 "
+                        "you Admin access in LinkedIn → Admin tools → "
                         "Manage admins, then reconnect."
                     )
                 else:
@@ -397,13 +426,13 @@ def oauth_callback(request, platform):
                             "Only Pages can be connected — personal profiles are not "
                             "supported by the Facebook API. "
                             "If you expected to see a Page, make sure you have admin "
-                            "access and try removing the app in Facebook Settings \u2192 "
+                            "access and try removing the app in Facebook Settings → "
                             "Business Integrations, then reconnect."
                         )
                 messages.warning(request, warning)
                 return redirect("social_accounts:list", workspace_id=workspace_id)
 
-        # Standard single-account flow (non-Facebook/Instagram platforms)
+        # Standard single-account flow (including Instagram Login)
         profile = provider.get_profile(tokens.access_token)
         _create_or_update_account(
             workspace_id=workspace_id,
@@ -557,372 +586,3 @@ def connect_bluesky(request, workspace_id):
             instance_url=provider.pds_url,
         )
         messages.success(request, f"Connected {profile.name} on Bluesky.")
-
-    except Exception:
-        logger.exception("Bluesky connection failed")
-        messages.error(
-            request,
-            "Failed to connect Bluesky account. Check your handle and app password.",
-        )
-        return render(
-            request,
-            "social_accounts/bluesky_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    return redirect("calendar:calendar", workspace_id=workspace_id)
-
-
-# ------------------------------------------------------------------
-# DEV.to Connect (API-key based, no OAuth)
-# ------------------------------------------------------------------
-
-
-@login_required
-@require_permission("manage_social_accounts")
-def connect_devto(request, workspace_id):
-    """Connect a DEV.to account via a personal API key."""
-    if request.method == "GET":
-        return render(
-            request,
-            "social_accounts/devto_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    api_key = request.POST.get("api_key", "").strip()
-    if not api_key:
-        messages.error(request, "A DEV.to API key is required.")
-        return render(
-            request,
-            "social_accounts/devto_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    try:
-        provider = _get_provider_for_platform(PlatformCredential.Platform.DEVTO, request.org.id)
-        profile = provider.get_profile(api_key)
-        _create_or_update_account(
-            workspace_id=workspace_id,
-            platform=PlatformCredential.Platform.DEVTO,
-            profile=profile,
-            access_token=api_key,
-        )
-        messages.success(request, f"Connected {profile.name} on DEV.to.")
-    except Exception:
-        logger.exception("DEV.to connection failed")
-        messages.error(request, "Failed to connect DEV.to account. Check your API key.")
-        return render(request, "social_accounts/devto_connect.html", {"workspace_id": workspace_id})
-
-    return redirect("calendar:calendar", workspace_id=workspace_id)
-
-
-# ------------------------------------------------------------------
-# Mastodon Connect (instance-based OAuth)
-# ------------------------------------------------------------------
-
-
-@csp_update(FORM_ACTION="'self' https:")
-@login_required
-@require_permission("manage_social_accounts")
-def connect_mastodon(request, workspace_id):
-    """Connect a Mastodon account via instance URL + OAuth."""
-    if request.method == "GET":
-        return render(
-            request,
-            "social_accounts/mastodon_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    instance_url = _normalize_mastodon_instance_url(request.POST.get("instance_url", ""))
-    if not instance_url:
-        messages.error(request, "Instance URL is required.")
-        return render(
-            request,
-            "social_accounts/mastodon_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    # Validate against SSRF - reject private/reserved IP ranges
-    if not _is_safe_url(instance_url):
-        messages.error(request, "Invalid instance URL. Private or reserved addresses are not allowed.")
-        return render(
-            request,
-            "social_accounts/mastodon_connect.html",
-            {"workspace_id": workspace_id},
-        )
-
-    # Check for existing app registration or create one
-    try:
-        registration = MastodonAppRegistration.objects.get(instance_url=instance_url)
-        client_id = registration.client_id
-        client_secret = registration.client_secret
-    except MastodonAppRegistration.DoesNotExist:
-        # Register app on this instance
-        try:
-            provider = _get_provider_for_platform(
-                PlatformCredential.Platform.MASTODON,
-                request.org.id,
-                instance_url=instance_url,
-            )
-            redirect_uri = _build_redirect_uri(request, PlatformCredential.Platform.MASTODON)
-            app_data = provider.register_app(instance_url, redirect_uri)
-            registration = MastodonAppRegistration.objects.create(
-                instance_url=instance_url,
-                client_id=app_data["client_id"],
-                client_secret=app_data["client_secret"],
-            )
-            client_id = app_data["client_id"]
-            client_secret = app_data["client_secret"]
-        except Exception:
-            logger.exception("Mastodon app registration failed for %s", instance_url)
-            messages.error(
-                request,
-                f"Failed to register with {instance_url}. Check the URL.",
-            )
-            return render(
-                request,
-                "social_accounts/mastodon_connect.html",
-                {"workspace_id": workspace_id},
-            )
-
-    # Initiate OAuth
-    provider = _get_provider_for_platform(
-        PlatformCredential.Platform.MASTODON,
-        request.org.id,
-        instance_url=instance_url,
-        client_id=client_id,
-        client_secret=client_secret,
-    )
-
-    nonce = secrets.token_urlsafe(32)
-    state = _sign_state(
-        workspace_id,
-        PlatformCredential.Platform.MASTODON,
-        request.user.id,
-        nonce,
-    )
-
-    request.session[OAUTH_SESSION_KEY] = {
-        "nonce": nonce,
-        "workspace_id": str(workspace_id),
-        "platform": PlatformCredential.Platform.MASTODON,
-        "instance_url": instance_url,
-    }
-
-    redirect_uri = _build_redirect_uri(request, PlatformCredential.Platform.MASTODON)
-    auth_url = provider.get_auth_url(redirect_uri, state)
-    return redirect(auth_url)
-
-
-# ------------------------------------------------------------------
-# Reconnect
-# ------------------------------------------------------------------
-
-
-@login_required
-@require_permission("manage_social_accounts")
-@require_POST
-def reconnect(request, workspace_id, account_id):
-    """Re-initiate OAuth for an existing account."""
-    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
-    platform = account.platform
-
-    if platform == PlatformCredential.Platform.BLUESKY:
-        return redirect("social_accounts:connect_bluesky", workspace_id=workspace_id)
-    if platform == PlatformCredential.Platform.MASTODON:
-        return redirect("social_accounts:connect_mastodon", workspace_id=workspace_id)
-    if platform == PlatformCredential.Platform.DEVTO:
-        return redirect("social_accounts:connect_devto", workspace_id=workspace_id)
-
-    # Standard OAuth reconnect
-    provider = _get_provider_for_platform(platform, request.org.id)
-    _apply_analytics_scope_flag(provider, platform)
-    nonce = secrets.token_urlsafe(32)
-    state = _sign_state(workspace_id, platform, request.user.id, nonce)
-    code_verifier = issue_pkce_verifier(provider)
-
-    request.session[OAUTH_SESSION_KEY] = {
-        "nonce": nonce,
-        "workspace_id": str(workspace_id),
-        "platform": platform,
-        "code_verifier": code_verifier,
-    }
-
-    redirect_uri = _build_redirect_uri(request, platform)
-    auth_url = provider.get_auth_url(redirect_uri, state, **pkce_kwargs(code_verifier))
-    return redirect(auth_url)
-
-
-@login_required
-@require_permission("manage_social_accounts")
-@require_POST
-@ratelimit(key="user", rate="10/m", method="POST", block=True)
-def retry_webhooks(request, workspace_id, account_id):
-    """Re-run a failed webhook subscription without a new OAuth grant.
-
-    A subscription can fail for reasons that have nothing to do with the token —
-    a transient Graph error, or a bug in what we asked for — and sending the
-    user through the full OAuth dance to retry one API call is theatre. Runs
-    inline rather than through ``subscribe_account_webhooks_task``: that task
-    exists so connecting *several* Pages at once doesn't stack a round trip per
-    Page inside the redirect the user is waiting on, which a single deliberate
-    retry doesn't. Rate limited because each press is a live round trip to the
-    platform on a request thread.
-    """
-    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
-
-    # A dead connection cannot carry a subscription: the call would spend a
-    # round trip to be rejected, then overwrite the warning with one about
-    # real-time delivery when the real problem is the connection itself. Gated
-    # on the same ``needs_reconnect`` the card uses to hide the retry button, so
-    # this can only be reached by a stale card or a direct POST — and answers
-    # both with the reconnect state rather than an unchanged card.
-    if account.needs_reconnect:
-        if request.headers.get("HX-Request"):
-            return _render_account_card(request, account, workspace_id)
-        messages.error(request, f"Reconnect {account.display_label} first — its connection isn't healthy.")
-        return redirect("social_accounts:list", workspace_id=workspace_id)
-
-    # An explicit press is a fresh mandate: clear the automatic retry budget so
-    # a user can always get one more attempt out of a capped-out account.
-    SocialAccount.objects.filter(pk=account.pk).update(webhook_retry_count=0)
-    account.webhook_retry_count = 0
-
-    subscribed = subscribe_account_webhooks(account)
-    account.refresh_from_db()
-
-    if request.headers.get("HX-Request"):
-        return _render_account_card(request, account, workspace_id)
-
-    if subscribed:
-        messages.success(request, f"Real-time updates are back on for {account.display_label}.")
-    else:
-        messages.error(request, account.webhook_error or "Couldn't set up real-time updates. Please try again.")
-    return redirect("social_accounts:list", workspace_id=workspace_id)
-
-
-def _render_account_card(request, account, workspace_id):
-    """Render one account card for an htmx ``outerHTML`` swap of ``#account-<id>``."""
-    return render(
-        request,
-        "social_accounts/partials/_account_card.html",
-        {"account": account, "workspace_id": workspace_id},
-    )
-
-
-# ------------------------------------------------------------------
-# Disconnect
-# ------------------------------------------------------------------
-
-
-@login_required
-@require_permission("manage_social_accounts")
-@require_POST
-def disconnect(request, workspace_id, account_id):
-    """Disconnect a social account."""
-    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
-
-    # Stop the platform pushing us this account's activity before we drop the
-    # token that would let us unsubscribe.
-    if account.oauth_access_token:
-        unsubscribe_account_webhooks(account)
-
-    # Try to revoke token
-    try:
-        provider = _get_provider_for_platform(account.platform, request.org.id)
-        if account.oauth_access_token:
-            provider.revoke_token(account.oauth_access_token)
-    except Exception:
-        logger.warning(
-            "Failed to revoke token for %s, proceeding with disconnect",
-            account,
-        )
-
-    # Delete posts that ONLY target this account (will be fully orphaned).
-    # Multi-platform posts keep their other PlatformPost targets via cascade.
-    from django.db.models import Count
-
-    from apps.composer.models import PlatformPost, Post
-
-    orphan_post_ids = list(
-        PlatformPost.objects.filter(social_account=account)
-        .values("post_id")
-        .annotate(total_platforms=Count("post__platform_posts"))
-        .filter(total_platforms=1)
-        .values_list("post_id", flat=True)
-    )
-    if orphan_post_ids:
-        Post.objects.filter(id__in=orphan_post_ids).delete()
-
-    account_name = account.account_name or account.account_handle
-    account.delete()
-
-    messages.success(request, f"Disconnected {account_name}.")
-
-    # HTMX partial response
-    if request.headers.get("HX-Request"):
-        return render(request, "social_accounts/partials/_empty.html")
-
-    return redirect("social_accounts:list", workspace_id=workspace_id)
-
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-
-def _create_or_update_account(
-    *,
-    workspace_id,
-    platform,
-    profile,
-    access_token,
-    refresh_token=None,
-    expires_in=None,
-    instance_url="",
-    webhook_target_id="",
-):
-    """Create or update a SocialAccount from OAuth results."""
-    token_expires_at = None
-    if expires_in:
-        token_expires_at = timezone.now() + timedelta(seconds=expires_in)
-
-    account, created = SocialAccount.objects.update_or_create(
-        workspace_id=workspace_id,
-        platform=platform,
-        account_platform_id=profile.platform_id,
-        defaults={
-            "account_name": profile.name,
-            "account_handle": profile.handle or "",
-            "avatar_url": profile.avatar_url or "",
-            "follower_count": profile.follower_count,
-            "oauth_access_token": access_token,
-            "oauth_refresh_token": refresh_token or "",
-            "token_expires_at": token_expires_at,
-            "instance_url": instance_url,
-            "webhook_target_id": webhook_target_id or "",
-            "connection_status": SocialAccount.ConnectionStatus.CONNECTED,
-            "last_error": "",
-            # Fresh OAuth grant invalidates any prior analytics-scope failure.
-            "analytics_needs_reconnect": False,
-            # Likewise the webhook verdict: the subscription is about to be
-            # retried below, and subscribe_account_webhooks returns early
-            # without recording when the provider has no webhooks at all — so
-            # without this reset a stale failure would outlive the reconnect
-            # that was supposed to clear it.
-            "webhooks_active": None,
-            "webhook_error": "",
-            "webhook_needs_reconnect": False,
-            "webhook_error_detail": "",
-            "webhook_retry_count": 0,
-        },
-    )
-
-    if created:
-        from apps.calendar.services import create_default_queue_and_slots
-
-        create_default_queue_and_slots(account)
-
-    subscribe_account_webhooks_task(str(account.id))
-
-    return account
