@@ -1,0 +1,97 @@
+{% load humanize inbox_team %}
+<div id="customer-profile-drawer-content" class="h-full flex flex-col bg-white">
+    <div class="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
+        <div>
+            <h3 class="text-sm font-semibold text-stone-900">Customer details</h3>
+            <p class="text-[11px] text-stone-400 mt-0.5">Conversation profile</p>
+        </div>
+        <button type="button" @click="detailsOpen = false" class="w-8 h-8 rounded-lg flex items-center justify-center text-stone-400 hover:text-stone-700 hover:bg-stone-100 transition-colors" aria-label="Close customer details">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path stroke-linecap="round" d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+        <div class="flex items-center gap-3">
+            {% if customer_identity.avatar_url %}
+            <img src="{{ customer_identity.avatar_url }}" alt="" class="w-12 h-12 rounded-full object-cover">
+            {% else %}
+            <div class="w-12 h-12 rounded-full flex items-center justify-center text-base font-bold text-stone-500" style="background: var(--surface-2);">
+                {{ customer_identity.name|make_list|first|upper }}
+            </div>
+            {% endif %}
+            <div class="min-w-0">
+                <div class="text-sm font-semibold text-stone-900 truncate">{{ customer_identity.name }}</div>
+                {% if customer_identity.handle %}<div class="text-[12px] text-stone-400 truncate">@{{ customer_identity.handle }}</div>{% endif %}
+                <div class="mt-1 text-[11px] text-stone-500">{{ message.social_account.get_platform_display }} · {{ message.social_account.account_name|default:message.social_account.account_handle }}</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+            <div class="rounded-xl border border-stone-100 bg-stone-50 p-3">
+                <div class="text-lg font-semibold text-stone-900">{{ conversation_stats.inbound_count }}</div>
+                <div class="text-[10px] uppercase tracking-wide text-stone-400 mt-0.5">Inbound</div>
+            </div>
+            <div class="rounded-xl border border-stone-100 bg-stone-50 p-3">
+                <div class="text-lg font-semibold text-stone-900">{{ conversation_stats.reply_count }}</div>
+                <div class="text-[10px] uppercase tracking-wide text-stone-400 mt-0.5">Replies</div>
+            </div>
+        </div>
+
+        <div class="rounded-xl border border-stone-100 divide-y divide-stone-100">
+            <div class="px-3.5 py-3 flex items-center justify-between gap-3">
+                <span class="text-[11px] text-stone-400">First message</span>
+                <span class="text-[11px] font-medium text-stone-700">{{ conversation_stats.first_seen|date:"M j, Y" }}</span>
+            </div>
+            <div class="px-3.5 py-3 flex items-center justify-between gap-3">
+                <span class="text-[11px] text-stone-400">Last message</span>
+                <span class="text-[11px] font-medium text-stone-700">{{ conversation_stats.last_seen|timesince }} ago</span>
+            </div>
+            <div class="px-3.5 py-3 flex items-center justify-between gap-3">
+                <span class="text-[11px] text-stone-400">Owner</span>
+                <span class="text-[11px] font-medium text-stone-700">{% if message.assigned_to %}{{ message.assigned_to|inbox_display_name }}{% else %}Unassigned{% endif %}</span>
+            </div>
+        </div>
+
+        <form hx-post="{% url 'inbox:conversation_customer_profile' workspace_id=workspace.id message_id=message.id %}"
+              hx-target="#customer-profile-drawer-content"
+              hx-swap="outerHTML"
+              class="space-y-3">
+            {% csrf_token %}
+            <div>
+                <label class="block text-[11px] font-semibold text-stone-600 mb-1">Email</label>
+                <input type="email" name="email" value="{{ customer_profile.email }}" placeholder="customer@example.com"
+                       class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+            </div>
+            <div>
+                <label class="block text-[11px] font-semibold text-stone-600 mb-1">Phone</label>
+                <input type="text" name="phone" value="{{ customer_profile.phone }}" placeholder="Phone number"
+                       class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+            </div>
+            <div>
+                <label class="block text-[11px] font-semibold text-stone-600 mb-1">Location</label>
+                <input type="text" name="location" value="{{ customer_profile.location }}" placeholder="City, state"
+                       class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+            </div>
+            <div>
+                <label class="block text-[11px] font-semibold text-stone-600 mb-1">Tags</label>
+                <input type="text" name="tags" value="{{ customer_tags|join:', ' }}" placeholder="trip planning, hiking, family"
+                       class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+                <p class="text-[10px] text-stone-400 mt-1">Separate tags with commas.</p>
+            </div>
+            <button type="submit" class="w-full rounded-lg px-3 py-2.5 text-[12px] font-semibold text-white transition-opacity hover:opacity-90" style="background: var(--primary);">
+                Save customer details
+            </button>
+        </form>
+
+        {% if customer_tags %}
+        <div>
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-stone-400 mb-2">Tags</div>
+            <div class="flex flex-wrap gap-1.5">
+                {% for tag in customer_tags %}
+                <span class="rounded-full bg-orange-50 text-orange-700 px-2.5 py-1 text-[10px] font-semibold">{{ tag }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
