@@ -164,6 +164,16 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
             if not media_id:
                 continue
 
+            # For image posts, the media URL is the actual photo and is the most
+            # reliable preview source. Instagram can sometimes return a
+            # thumbnail_url-shaped value even when the post is not a video;
+            # normalizing it here prevents the inbox card from showing the wrong
+            # asset. Videos keep their dedicated thumbnail when available.
+            media = dict(media)
+            media_type = str(media.get("media_type") or "").upper()
+            if media_type != "VIDEO" and media.get("media_url"):
+                media["thumbnail_url"] = media["media_url"]
+
             comments_payload = None
             last_error: Exception | None = None
             for fields in INSTAGRAM_COMMENT_FIELD_SETS:
