@@ -24,13 +24,7 @@
             class="group relative {% if not n.is_read %}bg-orange-50/50{% endif %} hover:bg-stone-50 transition-colors duration-150"
         >
             <a
-                href="{% if n.data.action_url %}{{ n.data.action_url }}{% else %}{% url 'notifications:list' %}{% endif %}"
-                {% if not n.is_read %}
-                hx-post="{% url 'notifications:mark_as_read' n.id %}"
-                hx-target="#notif-{{ n.id }}"
-                hx-swap="outerHTML"
-                hx-trigger="click"
-                {% endif %}
+                href="{% url 'notifications:open' n.id %}"
                 class="flex gap-3 px-5 py-3.5 cursor-pointer"
             >
                 {# Event type icon #}
@@ -70,6 +64,11 @@
                     <p class="text-[13px] font-semibold text-stone-900 leading-snug truncate">{{ n.title }}</p>
                     {% if n.body %}
                     <p class="text-[12px] text-stone-500 leading-relaxed mt-0.5 line-clamp-2">{{ n.body }}</p>
+                    {% endif %}
+                    {% if n.inbox_channel_name %}
+                    <p class="text-[11px] text-stone-500 mt-1 font-semibold truncate">
+                        {{ n.inbox_channel_name }}{% if n.inbox_platform_label %} · {{ n.inbox_platform_label }}{% endif %}
+                    </p>
                     {% endif %}
                     <p class="text-[11px] text-stone-400 mt-1 font-medium tabular-nums">{{ n.created_at|timesince }} ago</p>
                 </div>
