@@ -183,7 +183,7 @@ def sync_instagram_account_deep(account) -> int:
         platform_message_id = str(msg.platform_message_id or "")
         if platform_message_id and platform_message_id in outbound_reply_ids:
             continue
-        _normalize_instagram_mention(account, msg)
+        msg = _normalize_instagram_mention(account, msg)
         engine._upsert_message(
             account,
             msg,
