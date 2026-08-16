@@ -312,9 +312,16 @@ INBOX_SYNC_INTERVAL_SECONDS = 5 * 60  # every 5 minutes
 
 @background(schedule=0)
 def run_inbox_sync_cycle():
-    """Run one inbox cycle on the shared ``process_tasks`` worker (every deploy target).
+    """Run one resilient inbox cycle on the shared ``process_tasks`` worker.
 
-    Delegates to ``InboxSyncEngine.run_cycle`` — the same entry point the
-    ``run_inbox_sync`` management command uses — so the two never diverge.
+    django-background-tasks only schedules the next repetition after the current
+    task returns successfully. A provider/SLA bug must therefore be logged here
+    rather than allowed to escape and strand the entire automatic inbox-sync
+    chain in exponential retry backoff.
     """
-    InboxSyncEngine().run_cycle()
+    try:
+        InboxSyncEngine().run_cycle()
+    except Exception:
+        logger.exception(
+            "Automatic inbox sync cycle failed; keeping recurring schedule alive"
+        )
