@@ -19,13 +19,19 @@
     </div>
 
     <!-- Avatar -->
-    <div class="flex-shrink-0">
+    <div class="flex-shrink-0 relative">
         {% if message.sender_avatar_url %}
         <img src="{{ message.sender_avatar_url }}" alt="" class="w-8 h-8 rounded-full object-cover">
         {% else %}
         <div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold text-stone-500" style="background: var(--surface-2);">
             {{ message.sender_name|make_list|first|upper }}
         </div>
+        {% endif %}
+        {% if message.message_type == 'dm' and message.conversation_unread_count %}
+        <span class="absolute -right-1 -top-1 min-w-[17px] h-[17px] px-1 rounded-full bg-orange-500 text-white text-[9px] font-bold flex items-center justify-center ring-2 ring-white"
+              title="{{ message.conversation_unread_count }} unread message{{ message.conversation_unread_count|pluralize }}">
+            {{ message.conversation_unread_count }}
+        </span>
         {% endif %}
     </div>
 
@@ -42,6 +48,11 @@
         <div class="flex items-center gap-1.5 mt-1.5">
             <!-- Type badge -->
             <span class="badge-pill badge-type">{{ message.get_message_type_display }}</span>
+            {% if message.message_type == 'dm' and message.conversation_count > 1 %}
+            <span class="badge-pill" style="background: var(--surface-2); color: var(--text-muted);">
+                {{ message.conversation_count }} messages
+            </span>
+            {% endif %}
             <!-- Status badge -->
             <span class="badge-pill badge-status-{{ message.status }}">{{ message.get_status_display }}</span>
             <!-- Sentiment badge -->
