@@ -8,6 +8,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
+from apps.composer.models import Post, PostMedia
 from apps.media_library.models import MediaAsset
 from apps.media_library.services import create_asset
 from apps.media_library.tasks import process_media_asset
@@ -53,6 +54,33 @@ def _render_manual_errors(request, workspace, errors):
     for error in errors:
         messages.error(request, error)
     return redirect("ugc:manual_submission_form", workspace_id=workspace.id)
+
+
+def _ugc_attribution_line(submission):
+    if submission.attribution == UGCSubmission.Attribution.ANONYMOUS:
+        return ""
+    if submission.attribution == UGCSubmission.Attribution.HANDLE and submission.contributor_handle:
+        return f"Community content by @{submission.contributor_handle.lstrip('@')}"
+    if submission.contributor_name:
+        return f"Community content by {submission.contributor_name}"
+    if submission.contributor_handle:
+        return f"Community content by @{submission.contributor_handle.lstrip('@')}"
+    return "Community content"
+
+
+def _ugc_draft_caption(submission):
+    parts = []
+    if submission.body:
+        parts.append(submission.body.strip())
+    elif submission.title and submission.title != submission.target_label:
+        parts.append(submission.title.strip())
+
+    attribution = _ugc_attribution_line(submission)
+    if attribution:
+        parts.append(attribution)
+    if submission.target_label:
+        parts.append(f"📍 {submission.target_label}")
+    return "\n\n".join(part for part in parts if part)
 
 
 @login_required
@@ -164,8 +192,6 @@ def create_manual_submission_view(request, workspace_id):
     if consent_confirmed and not consent_version:
         errors.append("Consent version is required when consent is confirmed.")
 
-    # Validate the selected existing asset before creating a new upload. A new
-    # upload, when present, intentionally takes precedence over the selection.
     media_asset = None
     if media_asset_raw and not uploaded_media:
         media_asset = MediaAsset.objects.filter(
@@ -201,9 +227,6 @@ def create_manual_submission_view(request, workspace_id):
             return _render_manual_errors(request, workspace, upload_errors)
 
         if media_asset.media_type != MediaAsset.MediaType.IMAGE:
-            # create_asset has already validated/storage-accounted the file; do
-            # not attach a non-image to a Photo submission. Leave it in the
-            # library so the moderator can intentionally reuse/remove it there.
             return _render_manual_errors(request, workspace, ["Community photo uploads must be an image."])
 
         process_media_asset(str(media_asset.id))
@@ -244,6 +267,71 @@ def create_manual_submission_view(request, workspace_id):
     )
     messages.success(request, "Community submission added to the Pending queue.")
     return redirect("ugc:moderation_queue", workspace_id=workspace.id)
+
+
+@login_required
+@require_permission("create_posts")
+@require_POST
+def use_in_post_view(request, workspace_id, submission_id):
+    """Turn an approved UGC item into a normal editable Studio draft."""
+
+    workspace = _get_workspace(request, workspace_id)
+    submission = get_object_or_404(
+        UGCSubmission.objects.select_related("media_asset"),
+        id=submission_id,
+        workspace=workspace,
+    )
+
+    if submission.status != UGCSubmission.Status.APPROVED:
+        messages.error(request, "Only approved community content can be used in a post.")
+        return _return_to_queue(request, workspace)
+    if not submission.consent_confirmed:
+        messages.error(request, "Contributor consent is required before community content can be reused.")
+        return _return_to_queue(request, workspace)
+
+    source_bits = [
+        f"UGC submission: {submission.id}",
+        f"Target: {submission.target_type}:{submission.target_id}",
+    ]
+    if submission.target_label:
+        source_bits.append(f"Target name: {submission.target_label}")
+    if submission.target_url:
+        source_bits.append(f"Target URL: {submission.target_url}")
+
+    post = Post.objects.create(
+        workspace=workspace,
+        author=request.user,
+        title=submission.title or submission.target_label or "Community content",
+        caption=_ugc_draft_caption(submission),
+        internal_notes="\n".join(source_bits),
+    )
+
+    if submission.media_asset_id:
+        PostMedia.objects.create(
+            post=post,
+            media_asset=submission.media_asset,
+            position=0,
+            alt_text=getattr(submission.media_asset, "alt_text", "") or submission.title or submission.target_label,
+        )
+
+    metadata = dict(submission.metadata or {})
+    post_ids = list(metadata.get("studio_post_ids") or [])
+    post_ids.append(str(post.id))
+    metadata["studio_post_ids"] = post_ids[-20:]
+    submission.metadata = metadata
+    submission.save(update_fields=["metadata", "updated_at"])
+
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="ugc.used_in_post",
+        target=submission,
+        target_label=str(submission),
+        metadata={"post_id": str(post.id), "media_asset_id": str(submission.media_asset_id or "")},
+        request=request,
+    )
+    messages.success(request, "Draft created from approved community content.")
+    return redirect("composer:compose_edit", workspace_id=workspace.id, post_id=post.id)
 
 
 @login_required
