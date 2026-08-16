@@ -48,6 +48,19 @@
                     {% for value, label in kind_choices %}<option value="{{ value }}" {% if active_kind == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 </select>
             </form>
+            <label for="ugc-source" class="sr-only">Original source</label>
+            <select id="ugc-source" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
+                <option value="">All sources</option>
+                <option value="instagram">Instagram</option>
+                <option value="facebook">Facebook</option>
+                <option value="tiktok">TikTok</option>
+                <option value="website">Website</option>
+                <option value="direct">Direct submission</option>
+                <option value="api">API</option>
+                <option value="import">Import</option>
+                <option value="webhook">Webhook</option>
+                <option value="other">Other source</option>
+            </select>
             <label for="ugc-sort" class="sr-only">Sort community content</label>
             <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
                 <option value="newest">Newest</option>
@@ -62,7 +75,7 @@
     {% if submissions %}
     <div id="ugc-card-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
         {% for submission in submissions %}
-        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-submitted="{{ submission.submitted_at|date:'U' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
+        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
             {% if submission.media_asset %}
             <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
                 {% if submission.media_asset.is_image %}
@@ -86,6 +99,7 @@
                     <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-1.5 mb-2">
                             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-700">{{ submission.get_kind_display }}</span>
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-violet-50 text-violet-700">{{ submission.metadata|ugc_source_label:submission.source }}</span>
                             {% if submission.status == 'pending' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-700">Pending</span>{% elif submission.status == 'approved' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700">Approved</span>{% elif submission.status == 'removed' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">Removed</span>{% else %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>{% endif %}
                             {% if submission.metadata|ugc_usage_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-blue-50 text-blue-700">Used {{ submission.metadata|ugc_usage_count }}×</span>{% endif %}
                             {% if submission.open_report_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">{{ submission.open_report_count }} report{{ submission.open_report_count|pluralize }}</span>{% endif %}
@@ -102,6 +116,17 @@
                     <div class="rounded-lg bg-stone-50 p-2.5 min-w-0"><div class="text-stone-400 mb-0.5">Attached to</div><div class="font-medium text-stone-700 truncate">{{ submission.target_label|default:submission.target_type }}</div><div class="text-stone-400 mt-0.5 truncate">{{ submission.target_type }} · {{ submission.target_id }}</div></div>
                     <div class="rounded-lg {% if submission.consent_confirmed %}bg-emerald-50{% else %}bg-red-50{% endif %} p-2.5 min-w-0"><div class="{% if submission.consent_confirmed %}text-emerald-600{% else %}text-red-600{% endif %} mb-0.5">Contributor consent</div>{% if submission.consent_confirmed %}<div class="font-medium text-emerald-800 truncate">Confirmed{% if submission.consent_version %} · {{ submission.consent_version }}{% endif %}</div>{% if submission.consent_at %}<div class="text-emerald-600 mt-0.5 truncate">{{ submission.consent_at|date:"M j, Y g:i A" }}</div>{% endif %}{% else %}<div class="font-medium text-red-800">Not recorded</div><div class="text-red-600 mt-0.5">Approval blocked.</div>{% endif %}</div>
                 </div>
+
+                {% with source_url=submission.metadata|ugc_source_url source_handle=submission.metadata|ugc_source_handle source_external_id=submission.metadata|ugc_source_external_id %}
+                <div class="mt-3 rounded-lg border border-violet-100 bg-violet-50/50 p-2.5 flex items-center justify-between gap-3 min-w-0">
+                    <div class="min-w-0">
+                        <div class="text-[11px] font-semibold text-violet-700">Original source</div>
+                        <div class="text-xs text-violet-950 mt-0.5 truncate">{{ submission.metadata|ugc_source_label:submission.source }}{% if source_handle %} · {{ source_handle }}{% endif %}</div>
+                        {% if source_external_id %}<div class="text-[10px] text-violet-500 mt-0.5 truncate" title="External content ID">ID {{ source_external_id }}</div>{% endif %}
+                    </div>
+                    {% if source_url %}<a href="{{ source_url }}" target="_blank" rel="noopener noreferrer" class="inline-flex flex-shrink-0 items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-violet-200 text-[11px] font-semibold text-violet-700 hover:bg-violet-100">View source ↗</a>{% endif %}
+                </div>
+                {% endwith %}
 
                 {% if submission.metadata|ugc_usage_count %}
                 {% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}
@@ -135,7 +160,7 @@
         {% endfor %}
     </div>
 
-    <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6"><div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg></div><h2 class="text-sm font-semibold text-stone-800">No matching community content</h2><p class="text-xs text-stone-500 mt-1">Try a different title, contributor, caption, or location.</p><button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear search</button></div>
+    <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6"><div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg></div><h2 class="text-sm font-semibold text-stone-800">No matching community content</h2><p class="text-xs text-stone-500 mt-1">Try a different search or original source.</p><button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear filters</button></div>
     {% else %}
     <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div><h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p></div>
     {% endif %}
@@ -173,6 +198,7 @@
     const search = document.getElementById('ugc-search');
     const searchButton = document.getElementById('ugc-search-submit');
     const clearButton = document.getElementById('ugc-search-clear');
+    const source = document.getElementById('ugc-source');
     const sort = document.getElementById('ugc-sort');
     const grid = document.getElementById('ugc-card-grid');
 
@@ -189,15 +215,17 @@
             cards.forEach((card) => { card.dataset.searchText = (card.textContent || '').toLocaleLowerCase(); });
             function num(card, key) { const value = Number(card.dataset[key] || 0); return Number.isFinite(value) ? value : 0; }
             function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
-            function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; sorted.forEach((card) => { grid.appendChild(card); const matches = !activeQuery || card.dataset.searchText.includes(activeQuery); card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0; const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
+            function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; const activeSource = source ? source.value : ''; sorted.forEach((card) => { grid.appendChild(card); const matchesText = !activeQuery || card.dataset.searchText.includes(activeQuery); const matchesSource = !activeSource || card.dataset.source === activeSource; const matches = matchesText && matchesSource; card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0 || Boolean(activeSource); const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
+            function clearFilters() { search.value = ''; activeQuery = ''; if (source) source.value = ''; refresh(); search.focus(); }
             function clearSearch() { search.value = ''; activeQuery = ''; refresh(); search.focus(); }
             function applySearch() { activeQuery = (search.value || '').trim().toLocaleLowerCase(); refresh(); search.blur(); }
             searchButton.addEventListener('click', applySearch);
             search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } });
             search.addEventListener('input', () => { const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); });
+            if (source) source.addEventListener('change', refresh);
             sort.addEventListener('change', refresh);
             clearButton.addEventListener('click', clearSearch);
-            if (emptyClear) emptyClear.addEventListener('click', clearSearch);
+            if (emptyClear) emptyClear.addEventListener('click', clearFilters);
             refresh();
         }
     }
