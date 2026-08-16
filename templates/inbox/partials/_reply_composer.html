@@ -44,12 +44,12 @@
         <form hx-post="{% url 'inbox:conversation_send_reply' workspace_id=workspace.id message_id=message.id %}"
               hx-target="#inbox-thread"
               hx-swap="beforeend"
-              @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) replyText = ''">
+              @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) { replyText = ''; {% if message.social_account.platform == 'instagram_login' %}htmx.ajax('GET', '{% url 'inbox:conversation_detail' workspace_id=workspace.id message_id=message.id %}', {target:'#inbox-detail-panel', swap:'innerHTML'});{% endif %} }">
         {% else %}
         <form hx-post="{% url 'inbox:send_reply' workspace_id=workspace.id message_id=message.id %}"
               hx-target="#inbox-thread"
               hx-swap="beforeend"
-              @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) replyText = ''">
+              @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) { replyText = ''; {% if message.social_account.platform == 'instagram_login' %}htmx.ajax('GET', '{% url 'inbox:message_detail' workspace_id=workspace.id message_id=message.id %}', {target:'#inbox-detail-panel', swap:'innerHTML'});{% endif %} }">
         {% endif %}
             {% csrf_token %}
             <textarea name="body"
