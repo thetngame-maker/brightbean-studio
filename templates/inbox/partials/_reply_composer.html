@@ -59,7 +59,23 @@
                       class="w-full px-3 py-2 text-[13px] bg-white border border-stone-200 rounded-lg resize-none focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all"
                       required></textarea>
             <div class="flex items-center justify-between mt-2">
-                <p class="text-[10px] text-stone-400">Reply will be posted on {{ message.social_account.get_platform_display|default:message.social_account.platform|title }}</p>
+                <p class="text-[10px] text-stone-400">
+                    {% if message.social_account.platform == 'instagram' or message.social_account.platform == 'instagram_login' %}
+                        {% if message.message_type == 'dm' %}
+                            Reply will be sent as an Instagram Direct message
+                        {% elif message.message_type == 'mention' %}
+                            {% if message.extra.reply_edge == 'media' %}
+                                Reply will be posted publicly on the mentioned Instagram post
+                            {% else %}
+                                Reply will be posted publicly as a reply to this Instagram mention
+                            {% endif %}
+                        {% else %}
+                            Reply will be posted publicly on Instagram
+                        {% endif %}
+                    {% else %}
+                        Reply will be posted on {{ message.social_account.get_platform_display|default:message.social_account.platform|title }}
+                    {% endif %}
+                </p>
                 <button type="submit"
                         class="btn-primary-hover inline-flex items-center gap-1.5 px-4 py-1.5 text-[12px] font-semibold text-white rounded-full transition-all duration-150 cursor-pointer"
                         style="background: var(--primary); box-shadow: var(--shadow-primary);">
