@@ -9,6 +9,9 @@ class InboxConfig(AppConfig):
     def ready(self):
         from django.db.models.signals import post_migrate
 
+        # Import collaboration receivers once the app registry is ready.
+        from apps.inbox import collaboration  # noqa: F401
+
         post_migrate.connect(self._register_tasks, sender=self)
 
     @staticmethod
