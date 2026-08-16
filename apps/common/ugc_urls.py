@@ -1,6 +1,12 @@
 from django.urls import path
 
-from . import ugc_discovery_bulk_views, ugc_discovery_views, ugc_intake_views, ugc_views
+from . import (
+    ugc_bulk_permission_views,
+    ugc_discovery_bulk_views,
+    ugc_discovery_views,
+    ugc_intake_views,
+    ugc_views,
+)
 
 app_name = "ugc"
 
@@ -12,6 +18,7 @@ urlpatterns = [
     path("discovered/new/create/", ugc_discovery_views.create_discovered_item, name="create_discovered_item"),
     path("discovered/bulk/", ugc_discovery_bulk_views.bulk_discovery_form, name="bulk_discovery_form"),
     path("discovered/bulk/import/", ugc_discovery_bulk_views.bulk_discovery_import, name="bulk_discovery_import"),
+    path("discovered/bulk/permission/", ugc_bulk_permission_views.bulk_permission_update, name="bulk_permission_update"),
     path("<uuid:submission_id>/permission/", ugc_views.update_permission_view, name="update_permission"),
     path("<uuid:submission_id>/use-in-post/", ugc_views.use_in_post_view, name="use_in_post"),
     path("<uuid:submission_id>/moderate/", ugc_views.moderate_submission_view, name="moderate"),
