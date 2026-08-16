@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import conversation_views, views
+from . import conversation_views, team_views, views
 
 app_name = "inbox"
 
@@ -20,6 +20,7 @@ urlpatterns = [
     # Assignment
     path("<uuid:message_id>/assign/", views.assign_message, name="assign"),
     path("<uuid:message_id>/conversation/assign/", conversation_views.conversation_assign, name="conversation_assign"),
+    path("bulk-assign/", team_views.bulk_assign, name="bulk_assign"),
     # Status changes
     path("<uuid:message_id>/status/", views.change_status, name="change_status"),
     path("<uuid:message_id>/conversation/status/", conversation_views.conversation_change_status, name="conversation_change_status"),
