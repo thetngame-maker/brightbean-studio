@@ -2,6 +2,7 @@
 
 import logging
 import re
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -67,34 +68,35 @@ def resolve_related_posts(account, messages) -> dict[str, Any]:
     }
 
 
-def _normalize_instagram_mention(account, msg) -> None:
-    """Promote top-level Instagram comments that @mention this account.
+def _normalize_instagram_mention(account, msg):
+    """Return ``msg`` with top-level Instagram @mentions promoted to Mention.
 
-    The provider is allowed to classify these too, but the inbox owns the real
-    SocialAccount row and therefore has the authoritative account_handle. Doing
-    the final normalization here keeps webhook/poll variants consistent and also
-    repairs an existing Comment row when that same platform item is re-polled.
-    Genuine nested replies keep their Comment type because they carry parent_id.
+    Provider ``InboxMessage`` values are frozen dataclasses. Never mutate them in
+    place; use ``dataclasses.replace`` when the message type/extra needs to
+    change. This keeps both the normal poll and deep recovery path safe.
     """
     if account.platform != "instagram_login" or msg.message_type != InboxMessage.MessageType.COMMENT:
-        return
+        return msg
 
     extra = dict(getattr(msg, "extra", None) or {})
     if str(extra.get("parent_id") or "").strip():
-        return
+        return msg
 
     handle = str(account.account_handle or "").strip().lstrip("@")
     if not handle:
-        return
+        return msg
 
     pattern = re.compile(rf"(?<![\w.])@{re.escape(handle)}\b", re.IGNORECASE)
     if not pattern.search(str(getattr(msg, "text", "") or "")):
-        return
+        return msg
 
-    msg.message_type = InboxMessage.MessageType.MENTION
     extra["detected_mention"] = True
     extra["mention_detection_source"] = "inbox_sync"
-    msg.extra = extra
+    return replace(
+        msg,
+        message_type=InboxMessage.MessageType.MENTION,
+        extra=extra,
+    )
 
 
 class InboxSyncEngine:
@@ -194,7 +196,7 @@ class InboxSyncEngine:
                 )
                 continue
 
-            _normalize_instagram_mention(account, msg)
+            msg = _normalize_instagram_mention(account, msg)
 
             # Suppress notifications for the historical backlog pulled the first
             # time we see a message type, but still alert for genuinely recent
