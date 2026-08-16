@@ -44,6 +44,16 @@
                          x-transition
                          class="absolute right-0 top-full mt-1 bg-white rounded-lg shadow-lg ring-1 ring-stone-200 py-1 z-50 min-w-[120px]">
                         {% for value, label in status_choices %}
+                        {% if message.message_type == 'dm' %}
+                        <button hx-post="{% url 'inbox:conversation_change_status' workspace_id=workspace.id message_id=message.id %}"
+                                hx-vals='{"status": "{{ value }}"}'
+                                hx-target="#inbox-detail-panel"
+                                hx-swap="innerHTML"
+                                @click="statusOpen = false"
+                                class="w-full text-left px-3 py-1.5 text-[12px] text-stone-700 hover:bg-stone-50 transition-colors {% if message.status == value %}font-semibold{% endif %}">
+                            {{ label }}
+                        </button>
+                        {% else %}
                         <button hx-post="{% url 'inbox:change_status' workspace_id=workspace.id message_id=message.id %}"
                                 hx-vals='{"status": "{{ value }}"}'
                                 hx-target="#inbox-detail-panel"
@@ -52,6 +62,7 @@
                                 class="w-full text-left px-3 py-1.5 text-[12px] text-stone-700 hover:bg-stone-50 transition-colors {% if message.status == value %}font-semibold{% endif %}">
                             {{ label }}
                         </button>
+                        {% endif %}
                         {% endfor %}
                     </div>
                 </div>
