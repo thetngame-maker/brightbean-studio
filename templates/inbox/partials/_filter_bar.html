@@ -21,6 +21,11 @@
                style="background: #fff7ed; color: #c2410c;">
                 Follow-up {{ workload.followup }}
             </a>
+            <a href="{% url 'inbox:lead_dashboard' workspace_id=workspace.id %}"
+               class="badge-pill hover:opacity-80 transition-opacity"
+               style="background: #f0fdf4; color: #15803d;" title="Open lead dashboard">
+                Lead Dashboard
+            </a>
         </div>
         <div class="flex items-center gap-1.5 overflow-x-auto">
             {% for member in workload.members %}
