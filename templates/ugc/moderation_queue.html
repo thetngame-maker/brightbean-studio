@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize common_extras %}
 
 {% block title %}Community Content · TN Social Studio{% endblock %}
 
@@ -85,6 +85,9 @@
                             {% else %}
                             <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>
                             {% endif %}
+                            {% if submission.metadata|ugc_usage_count %}
+                            <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-blue-50 text-blue-700">Used in {{ submission.metadata|ugc_usage_count }} post{{ submission.metadata|ugc_usage_count|pluralize }}</span>
+                            {% endif %}
                             {% if submission.open_report_count %}
                             <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-red-50 text-red-700">{{ submission.open_report_count }} report{{ submission.open_report_count|pluralize }}</span>
                             {% endif %}
@@ -131,6 +134,20 @@
                         {% endif %}
                     </div>
                 </div>
+
+                {% if submission.metadata|ugc_usage_count %}
+                {% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}
+                <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50/60 p-3 flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-xs font-semibold text-blue-700">Studio usage</div>
+                        <div class="text-sm text-blue-900 mt-0.5">Used in {{ usage_count }} Studio post{{ usage_count|pluralize }}.</div>
+                    </div>
+                    {% if latest_post_id %}
+                    <a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=latest_post_id %}" class="text-xs font-semibold text-blue-700 hover:text-blue-900 whitespace-nowrap">Open latest post →</a>
+                    {% endif %}
+                </div>
+                {% endwith %}
+                {% endif %}
 
                 {% if submission.active_reports %}
                 <div class="mt-4 space-y-2">
@@ -185,7 +202,7 @@
                         {% csrf_token %}
                         <button class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer">
                             <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>
-                            Use in post
+                            {% if submission.metadata|ugc_usage_count %}Use again{% else %}Use in post{% endif %}
                         </button>
                     </form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
