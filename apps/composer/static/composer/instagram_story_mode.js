@@ -1,7 +1,7 @@
 /* TN Social Studio — Instagram Story composer controls.
  *
  * Adds an explicit Feed/Reel vs Story selector for Instagram Login accounts,
- * plus an "Also add to Story" option for a single photo/video.  The server
+ * plus an "Also add to Story" option for a single photo/video. The server
  * persists these controls into PlatformPost.platform_extra.
  */
 (function () {
@@ -9,6 +9,8 @@
 
     const ROOT_SELECTOR = '.composer-main';
     const CONTAINER_ID = 'tn-instagram-story-controls';
+    const STORY_PREVIEW_ID = 'tn-instagram-story-preview';
+    const STYLE_ID = 'tn-instagram-story-style';
     const stateByAccount = new Map();
     let lastSignature = '';
 
@@ -27,6 +29,7 @@
         const first = items[0] || null;
         return {
             items,
+            first,
             count,
             isVideo: !!(first && first.is_video),
             isImage: !!(first && !first.is_video),
@@ -56,8 +59,6 @@
             };
             stateByAccount.set(accountId, state);
         } else if (!state.userChoseFormat && state.format !== 'story') {
-            // Keep the automatic default in sync as media changes. A video
-            // becomes Reel; a photo becomes Post; multiple items become Carousel.
             state.format = defaultFormat(media);
         }
         if (state.format === 'story') state.alsoStory = false;
@@ -69,7 +70,7 @@
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
+            .replace(/\"/g, '&quot;')
             .replace(/'/g, '&#039;');
     }
 
@@ -83,8 +84,6 @@
     function findInsertAnchor(root) {
         const captionWrap = root.querySelector('.caption-wrap');
         if (!captionWrap) return null;
-        // Caption wrapper sits inside the direct composer section that also owns
-        // the label/template picker. Insert after that whole section.
         return captionWrap.parentElement || captionWrap;
     }
 
@@ -99,19 +98,17 @@
         const meta = entry.meta || {};
         const name = escapeHtml(meta.name || 'Instagram');
         const state = accountState(app, id, media);
-        const singleMedia = media.count === 1;
         const noMedia = media.count === 0;
         const multiple = media.count > 1;
-        const primaryLabel = media.isVideo ? 'Reel' : 'Post';
-        const primaryValue = media.isVideo ? 'reel' : (multiple ? 'carousel' : 'image');
+        const primaryLabel = multiple ? 'Carousel' : (media.isVideo ? 'Reel' : 'Post');
+        const primarySubLabel = multiple ? 'Feed carousel' : (media.isVideo ? 'Instagram Reel' : 'Feed post');
         const primaryDisabled = noMedia;
         const storyDisabled = noMedia || multiple;
         const alsoDisabled = noMedia || multiple || state.format === 'story';
 
-        let mediaHint = 'Add one photo or video to choose how Instagram should publish it.';
-        if (multiple) mediaHint = 'Multiple files publish as a carousel. Story mode is available for a single photo or video.';
-        else if (media.isVideo) mediaHint = 'Videos default to Reels. Choose Story to publish the video only as a Story.';
-        else if (singleMedia) mediaHint = 'Photos default to a feed post. Choose Story to publish the photo only as a Story.';
+        let mediaHint = '';
+        if (noMedia) mediaHint = 'Add one photo or video to choose how Instagram should publish it.';
+        else if (multiple) mediaHint = 'Multiple files publish as a carousel. Story mode is available for a single photo or video.';
 
         return `
             <section class="tn-ig-story-card border border-stone-200 rounded-xl bg-white p-4 space-y-3" data-account-id="${id}">
@@ -132,8 +129,8 @@
                     <div class="grid grid-cols-2 gap-2">
                         <button type="button" data-action="primary" ${primaryDisabled ? 'disabled' : ''}
                                 class="tn-ig-format-btn px-3 py-2 rounded-lg border text-sm font-semibold transition-all ${buttonClass(state.format !== 'story')} ${primaryDisabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'}">
-                            ${multiple ? 'Carousel' : primaryLabel}
-                            <span class="block text-[10px] font-normal mt-0.5 opacity-70">${multiple ? 'Feed carousel' : (media.isVideo ? 'Instagram Reel' : 'Feed post')}</span>
+                            ${primaryLabel}
+                            <span class="block text-[10px] font-normal mt-0.5 opacity-70">${primarySubLabel}</span>
                         </button>
                         <button type="button" data-action="story" ${storyDisabled ? 'disabled' : ''}
                                 class="tn-ig-format-btn px-3 py-2 rounded-lg border text-sm font-semibold transition-all ${buttonClass(state.format === 'story')} ${storyDisabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'}">
@@ -141,10 +138,10 @@
                             <span class="block text-[10px] font-normal mt-0.5 opacity-70">Story only</span>
                         </button>
                     </div>
-                    <p class="text-[11px] text-stone-400 mt-1.5">${escapeHtml(mediaHint)}</p>
+                    ${mediaHint ? `<p class="text-[11px] text-stone-400 mt-1.5">${escapeHtml(mediaHint)}</p>` : ''}
                 </div>
 
-                <div class="border-t border-stone-100 pt-3">
+                <div class="border-t border-stone-100 pt-3 ${state.format === 'story' ? 'hidden' : ''}">
                     <label class="flex items-start justify-between gap-3 ${alsoDisabled ? 'opacity-50' : 'cursor-pointer'}">
                         <span class="text-sm text-stone-700">
                             Also add to Story
@@ -157,12 +154,83 @@
                             <span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform peer-checked:translate-x-4"></span>
                         </span>
                     </label>
-                    ${state.format === 'story' ? '<p class="text-[11px] text-stone-400 mt-1">This is already a Story, so a second Story copy is not needed.</p>' : ''}
                     ${multiple ? '<p class="text-[11px] text-amber-600 mt-1">“Also add to Story” currently supports one photo or one video at a time.</p>' : ''}
                 </div>
 
-                ${state.format === 'story' ? '<div class="text-[11px] text-stone-500 bg-stone-50 rounded-lg px-3 py-2">Story publishing uses the media itself. The caption field is kept for your draft/history but is not placed onto the Story.</div>' : ''}
+                ${state.format === 'story' ? '<div class="text-[11px] text-stone-500 bg-stone-50 rounded-lg px-3 py-2">Story publishing uses the media itself. The caption is retained in your draft/history but is not placed onto the Story.</div>' : ''}
             </section>`;
+    }
+
+    function mediaUrl(item) {
+        if (!item) return '';
+        return item.preview_url || item.thumbnail_url || item.file_url || item.url || item.media_url || item.src || '';
+    }
+
+    function ensureStyles() {
+        if (document.getElementById(STYLE_ID)) return;
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = `
+            #${STORY_PREVIEW_ID}{padding:16px 12px 24px;display:flex;flex-direction:column;align-items:center;gap:10px}
+            #${STORY_PREVIEW_ID} .tn-story-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#78716c}
+            #${STORY_PREVIEW_ID} .tn-story-frame{position:relative;width:min(250px,88%);aspect-ratio:9/16;border-radius:20px;overflow:hidden;background:#111;box-shadow:0 8px 28px rgba(0,0,0,.14)}
+            #${STORY_PREVIEW_ID} .tn-story-frame img,#${STORY_PREVIEW_ID} .tn-story-frame video{width:100%;height:100%;object-fit:cover;display:block}
+            #${STORY_PREVIEW_ID} .tn-story-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#d6d3d1;font-size:13px;text-align:center;padding:24px}
+            #${STORY_PREVIEW_ID} .tn-story-top{position:absolute;top:0;left:0;right:0;padding:12px;z-index:2;background:linear-gradient(to bottom,rgba(0,0,0,.45),transparent);color:white;font-size:12px;font-weight:600}
+            #${STORY_PREVIEW_ID} .tn-story-note{font-size:11px;color:#a8a29e;text-align:center;max-width:260px}
+        `;
+        document.head.appendChild(style);
+    }
+
+    function findPreviewPane(root) {
+        let parent = root.parentElement;
+        for (let depth = 0; depth < 4 && parent; depth += 1, parent = parent.parentElement) {
+            const children = Array.from(parent.children || []);
+            const sibling = children.find(el => el !== root && /\bpreview\b/i.test((el.textContent || '').slice(0, 160)));
+            if (sibling) return sibling;
+        }
+        const candidates = Array.from(document.querySelectorAll('aside, [class*="preview"], [id*="preview"]'));
+        return candidates.find(el => /\bpreview\b/i.test((el.textContent || '').slice(0, 160))) || null;
+    }
+
+    function updateStoryPreview(root, app, accounts, media) {
+        ensureStyles();
+        const storyEntry = accounts.find(entry => {
+            const state = stateByAccount.get(entry.id);
+            return state && state.format === 'story';
+        });
+        const existing = document.getElementById(STORY_PREVIEW_ID);
+        if (!storyEntry) {
+            if (existing) existing.remove();
+            return;
+        }
+
+        const pane = findPreviewPane(root);
+        if (!pane) return;
+        let preview = existing;
+        if (!preview) {
+            preview = document.createElement('div');
+            preview.id = STORY_PREVIEW_ID;
+            pane.appendChild(preview);
+        }
+
+        const url = mediaUrl(media.first);
+        const accountName = escapeHtml((storyEntry.meta && storyEntry.meta.name) || 'Instagram');
+        let mediaHtml = '<div class="tn-story-empty">9:16 Story preview</div>';
+        if (url && media.isVideo) {
+            mediaHtml = `<video src="${escapeHtml(url)}" muted playsinline controls preload="metadata"></video>`;
+        } else if (url) {
+            mediaHtml = `<img src="${escapeHtml(url)}" alt="Story preview">`;
+        }
+
+        preview.innerHTML = `
+            <div class="tn-story-label">Story preview</div>
+            <div class="tn-story-frame">
+                ${mediaHtml}
+                <div class="tn-story-top">${accountName}</div>
+            </div>
+            <div class="tn-story-note">Stories publish vertically at 9:16. Captions are not overlaid onto the Story media.</div>
+        `;
     }
 
     function bindCard(card, app, media) {
@@ -208,6 +276,8 @@
         let container = document.getElementById(CONTAINER_ID);
         if (!accounts.length) {
             if (container) container.remove();
+            const preview = document.getElementById(STORY_PREVIEW_ID);
+            if (preview) preview.remove();
             return;
         }
         if (!container) {
@@ -219,6 +289,7 @@
 
         container.innerHTML = accounts.map(entry => renderAccountCard(entry, app, media)).join('');
         container.querySelectorAll('.tn-ig-story-card').forEach(card => bindCard(card, app, media));
+        updateStoryPreview(root, app, accounts, media);
     }
 
     function signature() {
@@ -229,7 +300,8 @@
         const media = Array.isArray(app.mediaItems)
             ? app.mediaItems.map(item => `${item.id || item.asset_id || ''}:${item.is_video ? 'v' : 'i'}`).join(',')
             : '';
-        return selected + '|' + media;
+        const formats = Array.from(stateByAccount.entries()).map(([id, state]) => `${id}:${state.format}:${state.alsoStory ? 1 : 0}`).join(',');
+        return selected + '|' + media + '|' + formats;
     }
 
     function tick() {
@@ -242,9 +314,6 @@
     }
 
     function boot() {
-        // Alpine can initialize just after DOMContentLoaded depending on script
-        // order. A short poll is also useful because media upload and account
-        // selection mutate Alpine state without replacing the whole page.
         render();
         window.setInterval(tick, 250);
         document.addEventListener('htmx:afterSwap', function () {
