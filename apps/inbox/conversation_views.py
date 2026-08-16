@@ -131,13 +131,7 @@ def conversation_assign(request, workspace_id, message_id):
 @require_permission("reply_from_inbox")
 @require_POST
 def conversation_send_reply(request, workspace_id, message_id):
-    """Use the proven send path, then synchronize conversation status.
-
-    The original send_reply view remains the only code that talks to providers,
-    records the reply, handles Meta errors and honors the SLA auto-resolve
-    setting. After a successful send we simply mirror the resulting state across
-    every inbound DM row in the conversation.
-    """
+    """Use the proven send path, then synchronize conversation status and ownership."""
     workspace = views._get_workspace(request, workspace_id)
     message = get_object_or_404(InboxMessage, id=message_id, workspace=workspace)
 
@@ -147,6 +141,12 @@ def conversation_send_reply(request, workspace_id, message_id):
 
     message = InboxMessage.objects.get(pk=message.pk)
     conversation = _conversation_queryset(message)
+
+    # Successfully replying to an unassigned conversation claims it for the
+    # teammate who answered. Never overwrite another teammate's ownership.
+    if not conversation.filter(assigned_to__isnull=False).exists():
+        conversation.update(assigned_to=request.user)
+
     if message.status == InboxMessage.Status.RESOLVED:
         conversation.update(status=InboxMessage.Status.RESOLVED)
     elif conversation.filter(status=InboxMessage.Status.UNREAD).exists():
