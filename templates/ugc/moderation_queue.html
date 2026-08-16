@@ -15,7 +15,14 @@
             </div>
             <p class="text-sm text-stone-500 mt-1">Discover, review, permission, and reuse community content with a complete moderation trail.</p>
         </div>
-        <div class="text-xs text-stone-400">Up to 100 items shown per view</div>
+        <div class="flex items-center gap-2">
+            {% if active_tab == 'discovered' %}
+            <a href="{% url 'ugc:discovered_item_form' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700">
+                <span class="text-base leading-none">+</span> Add discovered item
+            </a>
+            {% endif %}
+            <div class="text-xs text-stone-400">Up to 100 items shown per view</div>
+        </div>
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-b border-stone-200">
@@ -188,7 +195,7 @@
 
     <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6"><div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg></div><h2 class="text-sm font-semibold text-stone-800">No matching community content</h2><p class="text-xs text-stone-500 mt-1">Try a different search or original source.</p><button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear filters</button></div>
     {% else %}
-    <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div>{% if active_tab == 'discovered' %}<h2 class="text-base font-semibold text-stone-800">No discovered content yet</h2><p class="text-sm text-stone-500 mt-1 max-w-lg">Externally discovered posts will land here before they enter the permission and moderation workflow.</p>{% else %}<h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p>{% endif %}</div>
+    <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div>{% if active_tab == 'discovered' %}<h2 class="text-base font-semibold text-stone-800">No discovered content yet</h2><p class="text-sm text-stone-500 mt-1 max-w-lg">Externally discovered posts will land here before they enter the permission and moderation workflow.</p><a href="{% url 'ugc:discovered_item_form' workspace_id=workspace.id %}" class="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700">+ Add a test discovered item</a>{% else %}<h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p>{% endif %}</div>
     {% endif %}
 </div>
 
