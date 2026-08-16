@@ -17,6 +17,7 @@ from apps.notifications.engine import notify
 from apps.notifications.models import EventType
 
 from . import views
+from .collaboration import record_activity, user_display_name
 from .forms import AssignForm, StatusForm
 from .models import InboxMessage
 
@@ -78,8 +79,15 @@ def conversation_change_status(request, workspace_id, message_id):
     if not form.is_valid():
         return HttpResponse("Invalid status.", status=400)
 
-    _conversation_queryset(message).update(status=form.cleaned_data["status"])
+    new_status = form.cleaned_data["status"]
+    old_status = message.status
+    _conversation_queryset(message).update(status=new_status)
     message = _refresh_message(message)
+
+    if old_status != new_status:
+        label = dict(InboxMessage.Status.choices).get(new_status, new_status)
+        record_activity(message, request.user, f"changed the conversation status to {label}.")
+
     context = views._detail_context(workspace, message)
     return render(request, "inbox/partials/_message_panel.html", context)
 
@@ -90,12 +98,17 @@ def conversation_change_status(request, workspace_id, message_id):
 def conversation_assign(request, workspace_id, message_id):
     """Assign or unassign the entire DM conversation as one work item."""
     workspace = views._get_workspace(request, workspace_id)
-    message = get_object_or_404(InboxMessage, id=message_id, workspace=workspace)
+    message = get_object_or_404(
+        InboxMessage.objects.select_related("assigned_to"),
+        id=message_id,
+        workspace=workspace,
+    )
 
     form = AssignForm(request.POST)
     if not form.is_valid():
         return HttpResponse("Invalid assignment.", status=400)
 
+    previous_assignee_id = message.assigned_to_id
     assigned_to = None
     assigned_to_id = form.cleaned_data.get("assigned_to")
     if assigned_to_id:
@@ -110,6 +123,13 @@ def conversation_assign(request, workspace_id, message_id):
 
     _conversation_queryset(message).update(assigned_to=assigned_to)
     message = _refresh_message(message)
+
+    if previous_assignee_id != (assigned_to.id if assigned_to else None):
+        if assigned_to:
+            target = "themselves" if assigned_to == request.user else user_display_name(assigned_to)
+            record_activity(message, request.user, f"assigned this conversation to {target}.")
+        else:
+            record_activity(message, request.user, "moved this conversation to Unassigned.")
 
     if assigned_to and assigned_to != request.user:
         notify(
@@ -144,12 +164,18 @@ def conversation_send_reply(request, workspace_id, message_id):
 
     # Successfully replying to an unassigned conversation claims it for the
     # teammate who answered. Never overwrite another teammate's ownership.
+    claimed = False
     if not conversation.filter(assigned_to__isnull=False).exists():
         conversation.update(assigned_to=request.user)
+        claimed = True
 
     if message.status == InboxMessage.Status.RESOLVED:
         conversation.update(status=InboxMessage.Status.RESOLVED)
     elif conversation.filter(status=InboxMessage.Status.UNREAD).exists():
         conversation.update(status=InboxMessage.Status.OPEN)
+
+    if claimed:
+        message = _refresh_message(message)
+        record_activity(message, request.user, "took ownership after replying.")
 
     return response
