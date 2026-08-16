@@ -1,12 +1,9 @@
 """Deeper Instagram inbox recovery poll.
 
-The normal Instagram poll intentionally keeps its first media request small so
-it is cheap enough to run frequently. Active accounts can have more than 25
-recent media items, however, and a new comment on page 2+ of ``/me/media`` would
-otherwise be invisible whenever Meta's webhook delivery is delayed or missing.
-
-This recovery pass follows a bounded number of media pages and feeds the same
-message conversion/upsert pipeline used by the normal inbox sync.
+This recovery pass intentionally keeps media pagination lightweight, then reads
+comments from each media item's own ``/comments`` edge. Instagram is much more
+reliable with this shape than with a deeply-expanded ``/media`` query carried
+across several cursor pages.
 """
 
 from __future__ import annotations
@@ -34,8 +31,6 @@ from .tasks import InboxSyncEngine, _normalize_instagram_mention, _related_post_
 
 logger = logging.getLogger(__name__)
 
-# Four pages at 25 media each gives the recovery pass visibility into up to 100
-# recent posts without turning every five-minute cycle into an unbounded crawl.
 INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT = 4
 INSTAGRAM_DEEP_MEDIA_WINDOW_DAYS = 90
 INSTAGRAM_DEEP_SYNC_INTERVAL_SECONDS = 5 * 60
@@ -55,73 +50,76 @@ def _endpoints(account):
     raise ValueError(f"Unsupported platform for Instagram deep sync: {account.platform}")
 
 
-def _read_media_pages(provider, media_url: str, host: str, access_token: str) -> list[dict]:
-    """Read a bounded set of media pages, preserving pages already fetched.
+def _fetch_media_pages(provider, media_url: str, host: str, access_token: str) -> list[dict]:
+    """Fetch up to four pages of recent media without nested comment expansion.
 
-    Meta paging cursors are an optimization/recovery layer, not a reason to
-    discard a successful first page. If a later cursor expires, is refused, or
-    transiently fails, keep the media already collected and let the next cycle
-    try again. The initial request still raises normally because without page 1
-    we have no trustworthy deep-sync result at all.
+    Later-page failures are fail-soft: everything fetched before the failure is
+    still useful recovery data and is processed normally.
     """
     media_floor = timezone.now().astimezone(UTC) - timedelta(days=INSTAGRAM_DEEP_MEDIA_WINDOW_DAYS)
+    response = provider._request(
+        "GET",
+        media_url,
+        access_token=access_token,
+        params={
+            "fields": "id,timestamp,permalink,caption,media_type,media_url,thumbnail_url",
+            "limit": INSTAGRAM_MEDIA_SCAN_LIMIT,
+            "since": int(media_floor.timestamp()),
+        },
+    )
+
+    media: list[dict] = []
+    payload = response.json()
+    pages = 0
+
+    while payload and pages < INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
+        media.extend(payload.get("data", []))
+        pages += 1
+        next_url = (payload.get("paging") or {}).get("next")
+        if not next_url or pages >= INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
+            break
+        if urlparse(next_url).netloc != urlparse(host).netloc:
+            logger.warning("Ignoring off-host Instagram media paging URL")
+            break
+        try:
+            payload = provider._request("GET", next_url, access_token=access_token).json()
+        except Exception as exc:
+            logger.warning(
+                "Instagram deep media pagination stopped after %d page(s): %s",
+                pages,
+                exc,
+            )
+            break
+
+    return media
+
+
+def _fetch_media_comments(provider, host: str, access_token: str, media_id: str) -> dict:
+    """Read one media item's comments, degrading optional fields on HTTP 400."""
     last_error: Exception | None = None
 
     for fields in INSTAGRAM_COMMENT_FIELD_SETS:
         try:
             response = provider._request(
                 "GET",
-                media_url,
+                f"{host}/{media_id}/comments",
                 access_token=access_token,
                 params={
-                    "fields": f"id,timestamp,permalink,comments.limit({INSTAGRAM_COMMENTS_PER_MEDIA}){{{fields}}}",
-                    "limit": INSTAGRAM_MEDIA_SCAN_LIMIT,
-                    "since": int(media_floor.timestamp()),
+                    "fields": fields,
+                    "limit": INSTAGRAM_COMMENTS_PER_MEDIA,
                 },
             )
+            return response.json()
         except Exception as exc:
             if getattr(exc, "status_code", None) != 400:
                 raise
             last_error = exc
-            logger.info("Instagram deep sync field set rejected; retrying with fewer fields")
-            continue
+            logger.debug(
+                "Instagram deep comment field set rejected for media %s; trying a smaller set",
+                media_id,
+            )
 
-        media: list[dict] = []
-        payload = response.json()
-        pages = 0
-
-        while payload and pages < INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
-            media.extend(payload.get("data", []))
-            pages += 1
-
-            next_url = (payload.get("paging") or {}).get("next")
-            if not next_url or pages >= INSTAGRAM_DEEP_MEDIA_PAGE_LIMIT:
-                break
-            if urlparse(next_url).netloc != urlparse(host).netloc:
-                logger.warning("Ignoring off-host Instagram media paging URL after %d page(s)", pages)
-                break
-
-            try:
-                payload = provider._request(
-                    "GET",
-                    next_url,
-                    access_token=access_token,
-                ).json()
-            except Exception as exc:
-                # Do not throw away page 1+ just because a later cursor failed.
-                # The normal/next deep cycle can retry that cursor path later.
-                logger.warning(
-                    "Instagram deep sync stopped media pagination after %d page(s): %s",
-                    pages,
-                    exc,
-                )
-                break
-
-        return media
-
-    if last_error is not None:
-        raise last_error
-    return []
+    raise last_error  # type: ignore[misc]
 
 
 def sync_instagram_account_deep(account) -> int:
@@ -129,7 +127,7 @@ def sync_instagram_account_deep(account) -> int:
     provider, media_url, host = _endpoints(account)
     access_token = account.oauth_access_token
 
-    media_items = _read_media_pages(provider, media_url, host, access_token)
+    media_items = _fetch_media_pages(provider, media_url, host, access_token)
 
     last_received = (
         InboxMessage.objects.filter(social_account=account)
@@ -145,9 +143,13 @@ def sync_instagram_account_deep(account) -> int:
 
     messages = []
     seen: set[str] = set()
+
     for media in media_items:
-        comments = media.get("comments") or {}
+        media_id = str(media.get("id") or "")
+        if not media_id:
+            continue
         try:
+            comments = _fetch_media_comments(provider, host, access_token, media_id)
             for comment in _iter_comments(provider._request, host, access_token, comments):
                 messages.extend(
                     _comment_to_messages(
@@ -160,8 +162,9 @@ def sync_instagram_account_deep(account) -> int:
                     )
                 )
         except Exception as exc:
-            # One unreadable post must not poison the whole recovery sweep.
-            logger.warning("Instagram deep sync skipped media %s: %s", media.get("id"), exc)
+            # One unreadable media item should never fail the recovery pass for
+            # every other post. Log it and continue with the remaining media.
+            logger.warning("Instagram deep sync skipped media %s: %s", media_id, exc)
 
     if not messages:
         return 0
@@ -175,6 +178,7 @@ def sync_instagram_account_deep(account) -> int:
 
     before = InboxMessage.objects.filter(social_account=account).count()
     engine = InboxSyncEngine()
+
     for msg in messages:
         platform_message_id = str(msg.platform_message_id or "")
         if platform_message_id and platform_message_id in outbound_reply_ids:
