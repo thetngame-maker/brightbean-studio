@@ -1,4 +1,4 @@
-{% load humanize inbox_conversations %}
+{% load humanize inbox_conversations inbox_sidebar_counts %}
 {% conversation_rows inbox_messages as inbox_rows %}
 {% if inbox_rows %}
 {% for msg in inbox_rows %}
@@ -7,3 +7,52 @@
 {% else %}
 {% include "inbox/partials/_empty_state.html" %}
 {% endif %}
+
+{% inbox_sidebar_counts workspace as live_sidebar_counts %}
+{{ live_sidebar_counts|json_script:"inbox-live-sidebar-counts" }}
+<script nonce="{{ request.csp_nonce }}">
+(function syncInboxSidebarBadges() {
+    const payloadEl = document.getElementById('inbox-live-sidebar-counts');
+    if (!payloadEl) return;
+
+    let payload;
+    try {
+        payload = JSON.parse(payloadEl.textContent || '{}');
+    } catch (e) {
+        return;
+    }
+
+    const navItems = Array.from(document.querySelectorAll('.sidebar-nav-item'));
+
+    function findItem(label) {
+        return navItems.find(item => {
+            const labelEl = item.querySelector('.sidebar-nav-label');
+            return labelEl && labelEl.textContent.trim() === label;
+        });
+    }
+
+    function setBadge(item, count, hideWhenZero) {
+        if (!item) return;
+        let badge = item.querySelector('.sidebar-badge');
+        if (!badge && count > 0) {
+            badge = document.createElement('span');
+            badge.className = 'sidebar-badge';
+            item.appendChild(badge);
+        }
+        if (!badge) return;
+        badge.textContent = String(count || 0);
+        badge.style.display = hideWhenZero && !count ? 'none' : '';
+    }
+
+    setBadge(findItem('Social Inbox'), Number(payload.total || 0), true);
+
+    (payload.accounts || []).forEach(account => {
+        const item = findItem(account.name);
+        setBadge(item, Number(account.count || 0), false);
+        if (item) {
+            const count = Number(account.count || 0);
+            item.title = `${count} unread inbox item${count === 1 ? '' : 's'} for ${account.name}`;
+        }
+    });
+})();
+</script>
