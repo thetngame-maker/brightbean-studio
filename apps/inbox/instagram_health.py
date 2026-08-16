@@ -178,12 +178,7 @@ def instagram_health(request, workspace_id):
 @require_permission("use_inbox")
 @require_POST
 def sync_instagram_now(request, workspace_id):
-    """Immediately run both fast and deep Instagram inbox recovery polls.
-
-    The fast pass mirrors the recurring inbox sync. The deep pass follows the
-    Instagram media cursor across additional pages, so this button is also a
-    useful recovery/diagnostic tool when Meta's webhook delivery is delayed.
-    """
+    """Immediately run both fast and deep Instagram inbox recovery polls."""
     workspace = views._get_workspace(request, workspace_id)
     accounts = list(
         SocialAccount.objects.filter(
@@ -203,29 +198,37 @@ def sync_instagram_now(request, workspace_id):
     before = InboxMessage.objects.filter(social_account__in=accounts).count()
     engine = InboxSyncEngine()
     failures = []
-    deep_added = 0
 
     for account in accounts:
         try:
             engine._sync_account(account)
-        except Exception as exc:
+        except Exception:
             logger.exception("Manual Instagram fast sync failed for account %s", account.id)
             failures.append(f"{account.account_name}: fast sync")
 
         try:
-            deep_added += sync_instagram_account_deep(account)
-        except Exception as exc:
+            sync_instagram_account_deep(account)
+        except Exception:
             logger.exception("Manual Instagram deep sync failed for account %s", account.id)
             failures.append(f"{account.account_name}: deep sync")
 
     after = InboxMessage.objects.filter(social_account__in=accounts).count()
     added = max(after - before, 0)
 
-    if failures:
+    if failures and not added:
+        # Nothing was recovered and at least one primary/recovery path failed:
+        # this is the only condition that deserves a red operator alert.
         messages.error(
             request,
-            f"Instagram recovery sync had {len(failures)} error(s) ({'; '.join(failures)}). "
-            f"{added} new inbox item(s) were added.",
+            f"Instagram recovery sync had {len(failures)} error(s) ({'; '.join(failures)}). No new inbox items were recovered.",
+        )
+    elif failures:
+        # Recovery succeeded despite a secondary-path problem. Surface it as an
+        # amber warning, not a red failure, because the user's inbox was updated.
+        messages.warning(
+            request,
+            f"Instagram recovered {added} new inbox item(s). A secondary recovery check had "
+            f"{len(failures)} warning(s) ({'; '.join(failures)}); the recovered items were kept.",
         )
     elif added:
         messages.success(
