@@ -127,6 +127,10 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
         zero comments even though DMs work. Fetching media first and then calling
         ``/{media-id}/comments`` is more reliable and also isolates a bad media
         item so it cannot suppress every other comment in the cycle.
+
+        The media query also carries lightweight post context into each inbox
+        comment so the UI can show what post the customer commented on without a
+        new Graph request every time an agent opens the conversation.
         """
         owner_id = str(self.credentials.get("ig_user_id") or "")
         owner_handle = str(self.credentials.get("account_handle") or "")
@@ -140,7 +144,7 @@ class TNInstagramLoginProvider(InstagramLoginProvider):
             f"{API_BASE}/me/media",
             access_token=access_token,
             params={
-                "fields": "id,timestamp,permalink",
+                "fields": "id,timestamp,permalink,caption,media_type,media_url,thumbnail_url",
                 "limit": INSTAGRAM_MEDIA_SCAN_LIMIT,
                 "since": int(media_floor.timestamp()),
             },
