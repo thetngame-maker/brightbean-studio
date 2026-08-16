@@ -93,7 +93,7 @@ def _local_post_image(platform_post):
     if asset is None:
         attachment = (
             platform_post.post.media_attachments.select_related("media_asset")
-            .order_by("position", "created_at")
+            .order_by("position", "id")
             .first()
         )
         if attachment:
