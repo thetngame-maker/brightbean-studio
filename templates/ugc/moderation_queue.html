@@ -336,6 +336,13 @@
     }
 
     search.addEventListener('input', refresh);
+    search.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            refresh();
+            search.blur();
+        }
+    });
     sort.addEventListener('change', refresh);
     clearButton.addEventListener('click', clearSearch);
     if (emptyClear) emptyClear.addEventListener('click', clearSearch);
