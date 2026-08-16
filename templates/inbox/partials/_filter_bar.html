@@ -26,6 +26,11 @@
                style="background: #f0fdf4; color: #15803d;" title="Open lead dashboard">
                 Lead Dashboard
             </a>
+            <a href="{% url 'inbox:facebook_health' workspace_id=workspace.id %}"
+               class="badge-pill hover:opacity-80 transition-opacity"
+               style="background: #eff6ff; color: #1d4ed8;" title="Check Facebook production health">
+                Facebook Health
+            </a>
         </div>
         <div class="flex items-center gap-1.5 overflow-x-auto">
             {% for member in workload.members %}
