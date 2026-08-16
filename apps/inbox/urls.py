@@ -2,17 +2,19 @@
 
 from django.urls import path
 
-from . import collaboration_views, conversation_views, team_views, views
+from . import collaboration_views, conversation_views, lead_views, team_views, views
 
 app_name = "inbox"
 
 urlpatterns = [
     # Main inbox feed
     path("", views.inbox_feed, name="feed"),
+    path("follow-up/", lead_views.followup_feed, name="followup_feed"),
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
     path("<uuid:message_id>/conversation/", conversation_views.conversation_detail, name="conversation_detail"),
     path("<uuid:message_id>/conversation/customer/", conversation_views.conversation_customer_profile, name="conversation_customer_profile"),
+    path("<uuid:message_id>/conversation/lead/", lead_views.save_lead_profile, name="conversation_lead_profile"),
     # Reply to message
     path("<uuid:message_id>/reply/", views.send_reply, name="send_reply"),
     path("<uuid:message_id>/conversation/reply/", conversation_views.conversation_send_reply, name="conversation_send_reply"),
