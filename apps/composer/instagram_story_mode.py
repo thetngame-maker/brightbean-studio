@@ -93,8 +93,8 @@ def install_instagram_story_mode() -> None:
     views._sync_platform_posts = sync_with_instagram_story_fields
 
     # ``composer.views`` imports django.shortcuts.render into a module global,
-    # so wrapping that reference lets us add one static JS file without copying
-    # or forking the 200KB composer template.
+    # so wrapping that reference lets us add small static JS files without
+    # copying or forking the 200KB composer template.
     original_render = views.render
 
     @wraps(original_render)
@@ -118,7 +118,8 @@ def install_instagram_story_mode() -> None:
         if not static_url.endswith("/"):
             static_url += "/"
         tag = (
-            f'<script defer src="{static_url}composer/instagram_story_mode.js?v=20260816-2"></script>'
+            f'<script defer src="{static_url}composer/instagram_story_mode.js?v=20260816-3"></script>'
+            f'<script defer src="{static_url}composer/instagram_story_dom_fix.js?v=20260816-1"></script>'
         )
         if "</body>" in html:
             html = html.replace("</body>", f"{tag}</body>", 1)
