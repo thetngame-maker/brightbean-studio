@@ -1,7 +1,12 @@
 {% load humanize %}
+{% if message.message_type == 'dm' %}
+{% url 'inbox:conversation_detail' workspace_id=workspace.id message_id=message.id as detail_url %}
+{% else %}
+{% url 'inbox:message_detail' workspace_id=workspace.id message_id=message.id as detail_url %}
+{% endif %}
 <div id="msg-{{ message.id }}"
      class="inbox-row {% if message.status == 'unread' %}is-unread{% endif %}"
-     @click="selectMessage('{{ message.id }}', '{% url 'inbox:message_detail' workspace_id=workspace.id message_id=message.id %}')"
+     @click="selectMessage('{{ message.id }}', '{{ detail_url }}')"
      role="button"
      tabindex="0">
 
