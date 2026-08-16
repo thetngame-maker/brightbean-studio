@@ -181,6 +181,13 @@
                         <button class="px-4 py-2 text-sm font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button>
                     </form>
                     {% elif submission.status == 'approved' %}
+                    <form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">
+                        {% csrf_token %}
+                        <button class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer">
+                            <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>
+                            Use in post
+                        </button>
+                    </form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
                         {% csrf_token %}
                         <input type="hidden" name="action" value="remove">
