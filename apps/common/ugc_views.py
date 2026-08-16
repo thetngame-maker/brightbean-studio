@@ -19,6 +19,7 @@ from apps.workspaces.models import Workspace
 from .audit import record_audit_event
 from .models import UGCModerationEvent, UGCReport, UGCSubmission
 from .ugc import moderate_submission, resolve_report
+from .ugc_provenance import build_provenance, get_provenance, set_provenance
 
 
 VALID_TABS = {"pending", "approved", "reported", "removed"}
@@ -169,6 +170,10 @@ def create_manual_submission_view(request, workspace_id):
     uploaded_media = request.FILES.get("media_upload")
     consent_confirmed = request.POST.get("consent_confirmed") == "on"
     consent_version = request.POST.get("consent_version", "").strip()
+    contributor_handle = request.POST.get("contributor_handle", "").strip().lstrip("@")[:255]
+    source_platform = request.POST.get("source_platform", "direct").strip() or "direct"
+    source_url = request.POST.get("source_url", "").strip()[:2000]
+    source_external_id = request.POST.get("source_external_id", "").strip()[:255]
 
     errors = []
     if kind not in dict(UGCSubmission.Kind.choices):
@@ -231,13 +236,21 @@ def create_manual_submission_view(request, workspace_id):
 
         process_media_asset(str(media_asset.id))
 
+    provenance = build_provenance(
+        platform=source_platform,
+        source_url=source_url,
+        external_id=source_external_id,
+        creator_handle=contributor_handle,
+        discovery_source="manual",
+    )
+
     submission = UGCSubmission.objects.create(
         workspace=workspace,
         kind=kind,
         status=UGCSubmission.Status.PENDING,
         source=UGCSubmission.Source.UI,
         contributor_name=request.POST.get("contributor_name", "").strip()[:255],
-        contributor_handle=request.POST.get("contributor_handle", "").strip().lstrip("@")[:255],
+        contributor_handle=contributor_handle,
         attribution=attribution,
         target_type=target_type[:100],
         target_id=target_id[:255],
@@ -250,6 +263,7 @@ def create_manual_submission_view(request, workspace_id):
         consent_confirmed=consent_confirmed,
         consent_version=consent_version[:50],
         consent_at=timezone.now() if consent_confirmed else None,
+        metadata=set_provenance({}, provenance),
     )
     record_audit_event(
         workspace=workspace,
@@ -259,6 +273,9 @@ def create_manual_submission_view(request, workspace_id):
         target_label=str(submission),
         metadata={
             "source": "manual",
+            "source_platform": provenance["platform"],
+            "source_url": provenance["source_url"],
+            "source_external_id": provenance["external_id"],
             "kind": kind,
             "consent_confirmed": consent_confirmed,
             "media_asset_id": str(media_asset.id) if media_asset else "",
@@ -297,6 +314,14 @@ def use_in_post_view(request, workspace_id, submission_id):
         source_bits.append(f"Target name: {submission.target_label}")
     if submission.target_url:
         source_bits.append(f"Target URL: {submission.target_url}")
+
+    provenance = get_provenance(submission.metadata)
+    if provenance["platform"] != "direct":
+        source_bits.append(f"Original source: {provenance['platform']}")
+    if provenance["source_url"]:
+        source_bits.append(f"Original source URL: {provenance['source_url']}")
+    if provenance["external_id"]:
+        source_bits.append(f"Original source ID: {provenance['external_id']}")
 
     post = Post.objects.create(
         workspace=workspace,
