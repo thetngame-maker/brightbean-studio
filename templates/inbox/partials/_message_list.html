@@ -189,5 +189,29 @@
             newestUnread.click();
         }, true);
     }
+
+    if (!window.__tngInboxInitialAutoOpenScheduled) {
+        window.__tngInboxInitialAutoOpenScheduled = true;
+
+        const autoOpenNewestUnread = function () {
+            if (window.innerWidth < 768) return;
+            if (document.querySelector('#inbox-message-list .inbox-row.is-active')) return;
+
+            const detailPanel = document.getElementById('inbox-detail-panel');
+            if (!detailPanel || !detailPanel.querySelector('.inbox-empty-detail')) return;
+
+            const newestUnread = document.querySelector('#inbox-message-list .inbox-row.is-unread');
+            if (!newestUnread) return;
+            newestUnread.click();
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function () {
+                window.setTimeout(autoOpenNewestUnread, 50);
+            }, { once: true });
+        } else {
+            window.setTimeout(autoOpenNewestUnread, 50);
+        }
+    }
 })();
 </script>
