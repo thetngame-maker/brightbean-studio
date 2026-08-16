@@ -1,12 +1,13 @@
 from django.urls import path
 
-from . import ugc_views
+from . import ugc_intake_views, ugc_views
 
 app_name = "ugc"
 
 urlpatterns = [
     path("", ugc_views.moderation_queue, name="moderation_queue"),
-    path("new/", ugc_views.create_manual_submission_view, name="create_manual_submission"),
+    path("new/", ugc_intake_views.manual_submission_form, name="manual_submission_form"),
+    path("new/create/", ugc_views.create_manual_submission_view, name="create_manual_submission"),
     path("<uuid:submission_id>/moderate/", ugc_views.moderate_submission_view, name="moderate"),
     path("reports/<uuid:report_id>/resolve/", ugc_views.resolve_report_view, name="resolve_report"),
 ]
