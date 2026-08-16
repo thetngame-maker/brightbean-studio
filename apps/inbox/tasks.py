@@ -13,7 +13,7 @@ from apps.notifications.models import EventType
 from apps.social_accounts.models import SocialAccount
 from providers import get_provider
 
-from .models import InboxMessage, InboxSLAConfig
+from .models import InboxMessage, InboxReply, InboxSLAConfig
 from .sentiment import analyze_sentiment
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,36 @@ class InboxSyncEngine:
 
         related_posts = resolve_related_posts(account, messages)
 
+        # Meta can omit the author on comments returned by the read edge. That
+        # means an outbound comment reply can look indistinguishable from a new
+        # inbound "Instagram user" comment on the next poll. The platform reply
+        # ID is authoritative: if TN Social Studio already recorded that exact
+        # comment ID as an InboxReply, it is ours and must never be ingested as
+        # customer activity.
+        outbound_reply_ids = set(
+            InboxReply.objects.filter(
+                inbox_message__social_account=account,
+            )
+            .exclude(platform_reply_id="")
+            .values_list("platform_reply_id", flat=True)
+        )
+
         for msg in messages:
+            platform_message_id = str(msg.platform_message_id or "")
+            if platform_message_id and platform_message_id in outbound_reply_ids:
+                # Clean up a duplicate that may have slipped in on an earlier
+                # cycle before this guard existed.
+                InboxMessage.objects.filter(
+                    social_account=account,
+                    platform_message_id=platform_message_id,
+                ).delete()
+                logger.info(
+                    "Skipped outbound platform reply %s while syncing account %s",
+                    platform_message_id,
+                    account.id,
+                )
+                continue
+
             # Suppress notifications for the historical backlog pulled the first
             # time we see a message type, but still alert for genuinely recent
             # messages: a long-quiet account's first real message also looks like
