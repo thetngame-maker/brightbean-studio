@@ -4,7 +4,12 @@
 {% if notifications %}
 <div class="divide-y divide-stone-100">
     {% for n in notifications %}
-    <div class="group flex gap-4 px-5 py-4 {% if not n.is_read %}bg-orange-50/40{% endif %} hover:bg-stone-50/80 transition-colors duration-150">
+    <div class="group flex gap-4 px-5 py-4 {% if not n.is_read %}bg-orange-50/40{% endif %} hover:bg-stone-50/80 transition-colors duration-150 cursor-pointer"
+         x-data
+         @click="if (!$event.target.closest('button,a,input,select,textarea,label')) window.location.href='{% url 'notifications:open' n.id %}'"
+         @keydown.enter="window.location.href='{% url 'notifications:open' n.id %}'"
+         role="link"
+         tabindex="0">
         {# Event icon #}
         <div class="flex-shrink-0 mt-0.5">
             {% if n.event_type == "post_approved" %}
@@ -61,14 +66,20 @@
                 </div>
                 {% endif %}
             </div>
-            <div class="flex items-center gap-3 mt-1.5">
+            <div class="flex items-center gap-3 mt-1.5 flex-wrap">
                 <span class="text-[11px] text-stone-400 font-medium tabular-nums">{{ n.created_at|timesince }} ago</span>
                 <span class="text-[10px] font-semibold uppercase tracking-wider text-stone-400">{{ n.get_event_type_display }}</span>
+                {% if n.inbox_channel_name %}
+                <span class="text-[10px] font-semibold text-stone-500">
+                    {{ n.inbox_channel_name }}{% if n.inbox_platform_label %} · {{ n.inbox_platform_label }}{% endif %}
+                </span>
+                {% endif %}
                 {% if not n.is_read %}
                 <button
                     hx-post="{% url 'notifications:mark_as_read' n.id %}"
                     hx-target="closest div.group"
                     hx-swap="outerHTML"
+                    @click.stop
                     class="text-[11px] font-semibold text-orange-600 hover:text-orange-700 ml-auto opacity-0 group-hover:opacity-100 transition-opacity duration-150 cursor-pointer"
                 >
                     Mark read
