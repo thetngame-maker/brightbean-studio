@@ -2,12 +2,13 @@ import re
 
 from django.db.models.signals import post_save
 from django.dispatch import receiver
+from django.urls import reverse
 
 from apps.members.models import WorkspaceMembership
 from apps.notifications.engine import notify
 from apps.notifications.models import EventType
 
-from .models import InternalNote
+from .models import InboxMessage, InternalNote
 
 ACTIVITY_PREFIX = "[activity] "
 _MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z0-9._+-]+)")
@@ -40,6 +41,18 @@ def mention_key(user):
         return username
     first = str(getattr(user, "first_name", "") or "").strip().lower()
     return re.sub(r"[^a-z0-9._+-]", "", first)
+
+
+def inbox_action_url(message):
+    """Return the direct workspace inbox URL for a message or DM conversation."""
+    route = "inbox:conversation_detail" if message.message_type == InboxMessage.MessageType.DM else "inbox:message_detail"
+    return reverse(
+        route,
+        kwargs={
+            "workspace_id": message.workspace_id,
+            "message_id": message.id,
+        },
+    )
 
 
 def record_activity(message, actor, text):
@@ -78,6 +91,7 @@ def notify_internal_note_mentions(sender, instance, created, **kwargs):
 
     message = instance.inbox_message
     author_name = user_display_name(instance.author)
+    action_url = inbox_action_url(message)
     for user in _mentioned_users(instance):
         notify(
             user=user,
@@ -88,5 +102,6 @@ def notify_internal_note_mentions(sender, instance, created, **kwargs):
                 "message_id": str(message.id),
                 "workspace_id": str(message.workspace_id),
                 "internal_note_id": str(instance.id),
+                "action_url": action_url,
             },
         )
