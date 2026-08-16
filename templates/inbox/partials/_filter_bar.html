@@ -81,16 +81,32 @@
                hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
                hx-target="#inbox-message-list"
                hx-swap="innerHTML"
+               hx-push-url="true"
                hx-trigger="keyup changed delay:400ms"
-               hx-include="[name='platform'],[name='type'],[name='status'],[name='sentiment']">
+               hx-include="[name='account'],[name='platform'],[name='type'],[name='status'],[name='sentiment']">
     </div>
+
+    <!-- Account filter -->
+    <select name="account" class="filter-select"
+            title="Filter by connected channel"
+            hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
+            hx-target="#inbox-message-list"
+            hx-swap="innerHTML"
+            hx-push-url="true"
+            hx-include="[name='q'],[name='platform'],[name='type'],[name='status'],[name='sentiment']">
+        <option value="">All channels</option>
+        {% for account in social_accounts %}
+        <option value="{{ account.id }}" {% if account.id|stringformat:'s' in active_filters.account %}selected{% endif %}>{{ account.account_name|default:account.account_handle }}</option>
+        {% endfor %}
+    </select>
 
     <!-- Platform filter -->
     <select name="platform" class="filter-select"
             hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
-            hx-include="[name='q'],[name='type'],[name='status'],[name='sentiment']">
+            hx-push-url="true"
+            hx-include="[name='q'],[name='account'],[name='type'],[name='status'],[name='sentiment']">
         <option value="">All platforms</option>
         {% for account in social_accounts %}
         <option value="{{ account.platform }}" {% if account.platform in active_filters.platform %}selected{% endif %}>{{ account.get_platform_display|default:account.platform|title }}</option>
@@ -102,7 +118,8 @@
             hx-get="{% url 'inbox:feed' workspace_id=workspace.id %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
-            hx-include="[name='q'],[name='platform'],[name='status'],[name='sentiment']">
+            hx-push-url="true"
+            hx-include="[name='q'],[name='account'],[name='platform'],[name='status'],[name='sentiment']">
         <option value="">All types</option>
         <option value="comment" {% if 'comment' in active_filters.type %}selected{% endif %}>Comments</option>
         <option value="mention" {% if 'mention' in active_filters.type %}selected{% endif %}>Mentions</option>
@@ -115,7 +132,8 @@
             hx-get="{% if current_view == 'followup' %}{% url 'inbox:followup_feed' workspace_id=workspace.id %}{% else %}{% url 'inbox:feed' workspace_id=workspace.id %}{% endif %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
-            hx-include="[name='q'],[name='platform'],[name='type'],[name='sentiment']">
+            hx-push-url="true"
+            hx-include="[name='q'],[name='account'],[name='platform'],[name='type'],[name='sentiment']">
         <option value="">All statuses</option>
         <option value="unread" {% if 'unread' in active_filters.status %}selected{% endif %}>Unread</option>
         <option value="open" {% if 'open' in active_filters.status %}selected{% endif %}>Open</option>
@@ -128,10 +146,47 @@
             hx-get="{% url 'inbox:feed' workspace_id=workspace.id %}"
             hx-target="#inbox-message-list"
             hx-swap="innerHTML"
-            hx-include="[name='q'],[name='platform'],[name='type'],[name='status']">
+            hx-push-url="true"
+            hx-include="[name='q'],[name='account'],[name='platform'],[name='type'],[name='status']">
         <option value="">All sentiment</option>
         <option value="positive" {% if 'positive' in active_filters.sentiment %}selected{% endif %}>Positive</option>
         <option value="neutral" {% if 'neutral' in active_filters.sentiment %}selected{% endif %}>Neutral</option>
         <option value="negative" {% if 'negative' in active_filters.sentiment %}selected{% endif %}>Negative</option>
     </select>
 </div>
+
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+    const inboxBaseUrl = '{% url "inbox:feed" workspace_id=workspace.id %}';
+    const accountLinks = {
+        {% for account in social_accounts %}
+        '{{ account.id }}': {
+            name: '{{ account.account_name|default:account.account_handle|escapejs }}',
+            url: inboxBaseUrl + '?account={{ account.id }}'
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    };
+
+    function wireInboxChannelShortcuts() {
+        const links = Array.from(document.querySelectorAll('a.sidebar-nav-item'));
+        const selected = new URLSearchParams(window.location.search).get('account') || '';
+
+        Object.entries(accountLinks).forEach(([accountId, account]) => {
+            const link = links.find(candidate => {
+                const label = candidate.querySelector('.sidebar-nav-label.truncate');
+                return label && label.textContent.trim() === account.name;
+            });
+            if (!link) return;
+
+            link.href = account.url;
+            link.dataset.inboxAccountId = accountId;
+            link.title = 'Show inbox for ' + account.name;
+            link.classList.toggle('active', selected === accountId);
+        });
+    }
+
+    wireInboxChannelShortcuts();
+    document.body.addEventListener('htmx:pushedIntoHistory', wireInboxChannelShortcuts);
+    window.addEventListener('popstate', wireInboxChannelShortcuts);
+})();
+</script>
