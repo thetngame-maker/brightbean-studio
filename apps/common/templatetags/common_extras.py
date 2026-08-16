@@ -4,6 +4,7 @@ from django import template
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
+from apps.common.ugc_permissions import get_permission, permission_label
 from apps.common.ugc_provenance import get_provenance, provenance_label
 
 register = template.Library()
@@ -85,6 +86,24 @@ def ugc_source_external_id(metadata):
     return get_provenance(metadata).get("external_id", "")
 
 
+@register.filter
+def ugc_permission_status(metadata):
+    """Stable permission workflow status for discovered UGC."""
+    return get_permission(metadata).get("status", "not_contacted")
+
+
+@register.filter
+def ugc_permission_label(metadata):
+    """Human-readable permission workflow status."""
+    return permission_label(metadata)
+
+
+@register.filter
+def ugc_permission_updated_at(metadata):
+    """ISO timestamp of the most recent permission-state change."""
+    return get_permission(metadata).get("updated_at", "")
+
+
 @register.inclusion_tag("components/ui_select.html")
 def ui_select(
     *,
@@ -124,7 +143,6 @@ def ui_select(
         if isinstance(o, dict):
             value, label, opt_icon = o.get("value"), o.get("label"), o.get("icon")
         elif isinstance(o, (tuple, list)) and len(o) >= 2:
-            # (value, label) pairs, e.g. Django `choices`.
             value, label, opt_icon = o[0], o[1], None
         elif isinstance(o, str):
             value = label = o
@@ -138,7 +156,6 @@ def ui_select(
     return {
         "model": model,
         "options": norm,
-        # value+label only, for the Alpine trigger-label lookup in single mode.
         "options_js": [{"value": o["value"], "label": str(o["label"])} for o in norm],
         "multiple": bool(multiple),
         "onchange": onchange,
