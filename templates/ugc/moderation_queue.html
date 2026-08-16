@@ -42,12 +42,15 @@
 {% block content %}
 <div class="flex flex-col min-h-0">
     <div class="flex flex-col lg:flex-row lg:items-center gap-2.5 mb-4">
-        <div class="relative flex-1 min-w-0">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg>
-            <input id="ugc-search" type="search" autocomplete="off" placeholder="Search content, contributor, caption, or location…"
-                   class="w-full h-9 pl-9 pr-9 text-sm border border-stone-200 rounded-lg bg-white text-stone-700 placeholder:text-stone-400 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
-            <button id="ugc-search-clear" type="button" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 items-center justify-center rounded text-stone-400 hover:text-stone-700 hover:bg-stone-100" aria-label="Clear search">×</button>
-        </div>
+        <form id="ugc-search-form" class="relative flex-1 min-w-0 flex items-center gap-2" role="search">
+            <div class="relative flex-1 min-w-0">
+                <svg class="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400 pointer-events-none" width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg>
+                <input id="ugc-search" type="search" autocomplete="off" placeholder="Search content, contributor, caption, or location…"
+                       class="w-full h-9 pl-9 pr-9 text-sm border border-stone-200 rounded-lg bg-white text-stone-700 placeholder:text-stone-400 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100">
+                <button id="ugc-search-clear" type="button" class="hidden absolute right-2.5 top-1/2 -translate-y-1/2 w-5 h-5 items-center justify-center rounded text-stone-400 hover:text-stone-700 hover:bg-stone-100" aria-label="Clear search">×</button>
+            </div>
+            <button id="ugc-search-submit" type="submit" class="h-9 px-4 rounded-lg bg-orange-500 text-white text-xs font-semibold hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-200">Search</button>
+        </form>
 
         <div class="flex flex-wrap items-center gap-2">
             <form method="get" class="flex items-center gap-2">
@@ -282,6 +285,7 @@
     const grid = document.getElementById('ugc-card-grid');
     if (!grid) return;
 
+    const searchForm = document.getElementById('ugc-search-form');
     const search = document.getElementById('ugc-search');
     const clearButton = document.getElementById('ugc-search-clear');
     const emptyClear = document.getElementById('ugc-empty-clear');
@@ -289,6 +293,7 @@
     const empty = document.getElementById('ugc-filter-empty');
     const resultCount = document.getElementById('ugc-result-count');
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
+    let activeQuery = '';
 
     cards.forEach((card) => {
         card.dataset.searchText = (card.textContent || '').toLocaleLowerCase();
@@ -309,20 +314,20 @@
     }
 
     function refresh() {
-        const query = (search.value || '').trim().toLocaleLowerCase();
         const sorted = cards.slice().sort(compareCards);
         let visible = 0;
 
         sorted.forEach((card) => {
             grid.appendChild(card);
-            const matches = !query || card.dataset.searchText.includes(query);
+            const matches = !activeQuery || card.dataset.searchText.includes(activeQuery);
             card.classList.toggle('hidden', !matches);
             if (matches) visible += 1;
         });
 
-        const filtering = query.length > 0;
-        clearButton.classList.toggle('hidden', !filtering);
-        clearButton.classList.toggle('flex', filtering);
+        const filtering = activeQuery.length > 0;
+        const hasTypedValue = (search.value || '').trim().length > 0;
+        clearButton.classList.toggle('hidden', !hasTypedValue);
+        clearButton.classList.toggle('flex', hasTypedValue);
         empty.classList.toggle('hidden', visible !== 0);
         empty.classList.toggle('flex', visible === 0);
         grid.classList.toggle('hidden', visible === 0);
@@ -332,41 +337,25 @@
 
     function clearSearch() {
         search.value = '';
-        search.focus();
+        activeQuery = '';
         refresh();
+        search.focus();
     }
 
-    function commitSearch() {
-        const visible = refresh();
+    function applySearch() {
+        activeQuery = (search.value || '').trim().toLocaleLowerCase();
+        refresh();
         search.blur();
-
-        window.requestAnimationFrame(() => {
-            if (visible > 0) {
-                const firstMatch = cards.find((card) => !card.classList.contains('hidden'));
-                if (firstMatch) {
-                    firstMatch.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    firstMatch.animate(
-                        [
-                            { boxShadow: '0 0 0 0 rgba(249, 115, 22, 0)' },
-                            { boxShadow: '0 0 0 3px rgba(249, 115, 22, 0.28)' },
-                            { boxShadow: '0 0 0 0 rgba(249, 115, 22, 0)' }
-                        ],
-                        { duration: 700, easing: 'ease-out' }
-                    );
-                }
-            } else if (empty) {
-                empty.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-        });
     }
 
-    search.addEventListener('input', refresh);
-    search.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            event.stopPropagation();
-            commitSearch();
-        }
+    searchForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        applySearch();
+    });
+    search.addEventListener('input', () => {
+        const hasTypedValue = (search.value || '').trim().length > 0;
+        clearButton.classList.toggle('hidden', !hasTypedValue);
+        clearButton.classList.toggle('flex', hasTypedValue);
     });
     sort.addEventListener('change', refresh);
     clearButton.addEventListener('click', clearSearch);
