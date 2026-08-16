@@ -1,4 +1,5 @@
 from django import template
+from django.utils import timezone
 
 from apps.inbox.collaboration import ACTIVITY_PREFIX, mention_key, user_display_name
 from apps.inbox.models import InboxMessage
@@ -75,8 +76,18 @@ def inbox_workload(workspace, user):
         )
 
     members.sort(key=lambda item: (not item["is_me"], item["count"], item["name"].lower()))
+
+    today = timezone.localdate().isoformat()
+    followups = (
+        InboxMessage.objects.filter(workspace=workspace, message_type=InboxMessage.MessageType.DM)
+        .exclude(extra__lead_profile__follow_up_on="")
+        .filter(extra__lead_profile__follow_up_on__lte=today)
+        .exclude(extra__lead_profile__stage__in=["booked", "closed", "lost"])
+    )
+
     return {
         "mine": _work_item_count(active.filter(assigned_to=user)),
         "unassigned": _work_item_count(active.filter(assigned_to__isnull=True)),
+        "followup": _work_item_count(followups),
         "members": members,
     }
