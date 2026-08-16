@@ -3,6 +3,7 @@
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import render
 
+from apps.media_library.models import MediaAsset
 from apps.members.decorators import require_permission
 
 from .models import UGCSubmission
@@ -13,6 +14,13 @@ from .ugc_views import _get_workspace
 @require_permission("manage_workspace_settings")
 def manual_submission_form(request, workspace_id):
     workspace = _get_workspace(request, workspace_id)
+    recent_images = list(
+        MediaAsset.objects.filter(
+            workspace=workspace,
+            media_type=MediaAsset.MediaType.IMAGE,
+        )
+        .order_by("-created_at")[:24]
+    )
     return render(
         request,
         "ugc/manual_submission_form.html",
@@ -20,5 +28,6 @@ def manual_submission_form(request, workspace_id):
             "workspace": workspace,
             "kind_choices": UGCSubmission.Kind.choices,
             "attribution_choices": UGCSubmission.Attribution.choices,
+            "recent_images": recent_images,
         },
     )
