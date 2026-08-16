@@ -37,6 +37,13 @@ def _queue_counts(workspace):
     }
 
 
+def _return_to_queue(request, workspace):
+    return_to = request.POST.get("return_to") or request.META.get("HTTP_REFERER")
+    if return_to:
+        return redirect(return_to)
+    return redirect("ugc:moderation_queue", workspace_id=workspace.id)
+
+
 @login_required
 @require_permission("manage_workspace_settings")
 def moderation_queue(request, workspace_id):
@@ -133,7 +140,7 @@ def moderate_submission_view(request, workspace_id, submission_id):
         else:
             messages.success(request, f"{submission.get_kind_display()} moderation updated.")
 
-    return redirect(f"{request.POST.get('return_to') or request.META.get('HTTP_REFERER') or ''}" or "ugc:moderation_queue", workspace_id=workspace.id)
+    return _return_to_queue(request, workspace)
 
 
 @login_required
@@ -152,4 +159,4 @@ def resolve_report_view(request, workspace_id, report_id):
     else:
         messages.success(request, "Report updated.")
 
-    return redirect(request.POST.get("return_to") or request.META.get("HTTP_REFERER") or "ugc:moderation_queue", workspace_id=workspace.id)
+    return _return_to_queue(request, workspace)
