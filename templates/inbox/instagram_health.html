@@ -15,7 +15,7 @@
             <h1 class="text-2xl font-semibold text-stone-900">Instagram Health</h1>
             <p class="text-sm text-stone-500 mt-1">Connection, webhook, inbox, reply, and publishing checks for connected Instagram accounts.</p>
         </div>
-        <div class="text-right">
+        <div class="text-right flex flex-col items-end gap-2">
             {% if all_ready %}
             <span class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-semibold">
                 <span class="w-2 h-2 rounded-full bg-emerald-500"></span>Instagram ready
@@ -25,9 +25,26 @@
                 <span class="w-2 h-2 rounded-full bg-amber-500"></span>Instagram needs review
             </span>
             {% endif %}
-            <p class="text-[11px] text-stone-400 mt-2">Checked {{ checked_at|naturaltime }}</p>
+            <form method="post" action="{% url 'inbox:instagram_sync_now' workspace_id=workspace.id %}">
+                {% csrf_token %}
+                <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-stone-900 text-white text-sm font-semibold hover:bg-stone-800 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8.1 8.1 0 00-15.5-2M4 4v5h5"/><path d="M4 13a8.1 8.1 0 0015.5 2M20 20v-5h-5"/></svg>
+                    Sync Instagram Now
+                </button>
+            </form>
+            <p class="text-[11px] text-stone-400">Checked {{ checked_at|naturaltime }}</p>
         </div>
     </div>
+
+    {% if messages %}
+    <div class="space-y-2 mb-5">
+        {% for message in messages %}
+        <div class="rounded-xl border px-4 py-3 text-sm {% if message.tags == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-800{% elif message.tags == 'error' %}bg-red-50 border-red-200 text-red-800{% elif message.tags == 'warning' %}bg-amber-50 border-amber-200 text-amber-800{% else %}bg-blue-50 border-blue-200 text-blue-800{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
 
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <div class="rounded-2xl border border-stone-200 bg-white p-4">
