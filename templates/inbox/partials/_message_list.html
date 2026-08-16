@@ -12,6 +12,10 @@
 {{ live_sidebar_counts|json_script:"inbox-live-sidebar-counts" }}
 <script nonce="{{ request.csp_nonce }}">
 (function () {
+    const selectedAccountIds = [{% for account_id in active_filters.account %}'{{ account_id|escapejs }}'{% if not forloop.last %}, {% endif %}{% endfor %}];
+    const unreadOnly = {% if 'unread' in active_filters.status %}true{% else %}false{% endif %};
+    const inboxHasRows = {% if inbox_rows %}true{% else %}false{% endif %};
+
     function navItems() {
         return Array.from(document.querySelectorAll('.sidebar-nav-item'));
     }
@@ -79,8 +83,25 @@
         return String(item.dataset.inboxAccountId || '') === id ? item : null;
     }
 
+    function reconcilePayloadWithFilteredView(payload) {
+        // An explicit one-account + Unread view is the strongest source of
+        // truth for that account. If the server returned no inbox rows, there
+        // cannot be an actionable unread item for the selected account even if
+        // a stale/legacy row elsewhere still leaks into a global counter.
+        if (!unreadOnly || inboxHasRows || selectedAccountIds.length !== 1) return payload;
+
+        const selectedId = String(selectedAccountIds[0]);
+        const account = (payload.accounts || []).find(row => String(row.id) === selectedId);
+        if (!account) return payload;
+
+        const staleCount = Math.max(0, Number(account.count || 0));
+        account.count = 0;
+        payload.total = Math.max(0, Number(payload.total || 0) - staleCount);
+        return payload;
+    }
+
     window.tngSyncInboxSidebarBadges = function (payload) {
-        payload = payload || {};
+        payload = reconcilePayloadWithFilteredView(payload || {});
         setBadge(findItem('Social Inbox'), Number(payload.total || 0), true);
 
         (payload.accounts || []).forEach(account => {
