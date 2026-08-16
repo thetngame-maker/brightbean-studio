@@ -1,5 +1,6 @@
-{% load humanize %}
+{% load humanize inbox_team inbox_leads %}
 {% if message.message_type == 'dm' %}
+{% inbox_lead_profile message as lead_profile %}
 {% url 'inbox:conversation_detail' workspace_id=workspace.id message_id=message.id as detail_url %}
 {% else %}
 {% url 'inbox:message_detail' workspace_id=workspace.id message_id=message.id as detail_url %}
@@ -50,7 +51,7 @@
             <span class="text-[11px] text-stone-400 ml-auto flex-shrink-0" title="{{ message.received_at|date:'N j, Y g:i A' }}">{{ message.received_at|timesince }} ago</span>
         </div>
         <p class="inbox-row-preview text-[12px] text-stone-500 truncate leading-snug">{{ message.body|truncatewords:20 }}</p>
-        <div class="flex items-center gap-1.5 mt-1.5">
+        <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
             <span class="badge-pill badge-type">{{ message.get_message_type_display }}</span>
             {% if message.message_type == 'dm' and message.conversation_count > 1 %}
             <span class="badge-pill" style="background: var(--surface-2); color: var(--text-muted);">
@@ -60,10 +61,25 @@
             <span class="badge-pill badge-status-{{ message.status }}">{{ message.get_status_display }}</span>
             {% include "inbox/partials/_sentiment_badge.html" %}
 
+            {% if message.message_type == 'dm' and lead_profile.inquiry_type %}
+            <span class="badge-pill" style="background: #f5f3ff; color: #6d28d9;" title="Inquiry type">
+                {{ lead_profile.inquiry_label }}
+            </span>
+            {% endif %}
+            {% if message.message_type == 'dm' and lead_profile.follow_up_due %}
+            <span class="badge-pill" style="background: #fff7ed; color: #c2410c;" title="Follow-up due {{ lead_profile.follow_up_on }}">
+                Follow-up due
+            </span>
+            {% elif message.message_type == 'dm' and lead_profile.follow_up_on %}
+            <span class="badge-pill" style="background: #f0fdf4; color: #15803d;" title="Follow-up date">
+                Follow-up {{ lead_profile.follow_up_date|date:'M j' }}
+            </span>
+            {% endif %}
+
             {% if message.assigned_to %}
             <span class="badge-pill" style="background: var(--accent-indigo-soft); color: var(--accent-indigo);">
                 <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                {% if message.assigned_to.id == request.user.id %}You{% else %}{{ message.assigned_to.get_short_name|default:message.assigned_to.email|truncatechars:10 }}{% endif %}
+                {% if message.assigned_to.id == request.user.id %}You{% else %}{{ message.assigned_to|inbox_display_name|truncatechars:10 }}{% endif %}
             </span>
             {% else %}
             <span class="badge-pill" style="background: var(--warning-50); color: var(--warning-700);">
