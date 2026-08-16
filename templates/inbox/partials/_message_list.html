@@ -108,5 +108,53 @@
             }
         }, true);
     }
+
+    if (!window.__tngInboxActionableToastBound) {
+        window.__tngInboxActionableToastBound = true;
+
+        const enrichToast = function () {
+            const toast = document.querySelector('.inbox-live-toast');
+            const titleEl = toast && toast.querySelector('.inbox-live-toast-title');
+            if (!toast || !titleEl) return;
+
+            const rawTitle = (titleEl.textContent || '').trim();
+            const isInboxAlert = rawTitle.startsWith('New message from ') || /new inbox messages$/i.test(rawTitle);
+            if (!isInboxAlert) {
+                toast.style.cursor = '';
+                toast.removeAttribute('title');
+                return;
+            }
+
+            const newestUnread = document.querySelector('#inbox-message-list .inbox-row.is-unread');
+            if (!newestUnread) return;
+
+            const channel = (newestUnread.dataset.channelName || '').trim();
+            if (channel && !rawTitle.includes(` · ${channel}`)) {
+                titleEl.textContent = `${rawTitle} · ${channel}`;
+            }
+            toast.style.cursor = 'pointer';
+            toast.title = 'Open this inbox message';
+        };
+
+        const titleEl = document.querySelector('.inbox-live-toast-title');
+        if (titleEl && window.MutationObserver) {
+            const observer = new MutationObserver(() => window.setTimeout(enrichToast, 0));
+            observer.observe(titleEl, { childList: true, characterData: true, subtree: true });
+        }
+
+        document.addEventListener('click', function (event) {
+            const toast = event.target.closest('.inbox-live-toast');
+            if (!toast) return;
+
+            const titleEl = toast.querySelector('.inbox-live-toast-title');
+            const title = (titleEl && titleEl.textContent || '').trim();
+            const isInboxAlert = title.startsWith('New message from ') || /new inbox messages(?: · .+)?$/i.test(title);
+            if (!isInboxAlert) return;
+
+            const newestUnread = document.querySelector('#inbox-message-list .inbox-row.is-unread');
+            if (!newestUnread) return;
+            newestUnread.click();
+        }, true);
+    }
 })();
 </script>
