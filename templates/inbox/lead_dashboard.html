@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Lead Dashboard - {{ workspace.name }} - Brightbean{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+            <div class="flex items-center gap-2 mb-1">
+                <a href="{% url 'inbox:feed' workspace_id=workspace.id %}" class="text-sm text-stone-500 hover:text-stone-800">Inbox</a>
+                <span class="text-stone-300">/</span>
+                <span class="text-sm text-stone-700">Lead Dashboard</span>
+            </div>
+            <h1 class="text-2xl font-semibold text-stone-900">Lead Dashboard</h1>
+            <p class="text-sm text-stone-500 mt-1">Follow-ups, tourism inquiries, and conversion progress from your social inbox.</p>
+        </div>
+        <a href="{% url 'inbox:followup_feed' workspace_id=workspace.id %}"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 transition-colors">
+            Follow-up queue
+            {% if overdue_count or today_count %}<span class="inline-flex min-w-5 h-5 px-1 items-center justify-center rounded-full bg-white/20 text-[11px]">{{ overdue_count|add:today_count }}</span>{% endif %}
+        </a>
+    </div>
+
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div class="rounded-2xl border border-stone-200 bg-white p-4">
+            <p class="text-[11px] uppercase tracking-wider font-semibold text-stone-400">Tracked leads</p>
+            <p class="text-3xl font-semibold text-stone-900 mt-2">{{ total_leads }}</p>
+            <p class="text-xs text-stone-500 mt-1">{{ active_leads }} active</p>
+        </div>
+        <div class="rounded-2xl border border-red-200 bg-red-50 p-4">
+            <p class="text-[11px] uppercase tracking-wider font-semibold text-red-500">Overdue</p>
+            <p class="text-3xl font-semibold text-red-700 mt-2">{{ overdue_count }}</p>
+            <p class="text-xs text-red-600 mt-1">Needs attention</p>
+        </div>
+        <div class="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <p class="text-[11px] uppercase tracking-wider font-semibold text-orange-500">Due today</p>
+            <p class="text-3xl font-semibold text-orange-700 mt-2">{{ today_count }}</p>
+            <p class="text-xs text-orange-600 mt-1">{{ upcoming_count }} upcoming this week</p>
+        </div>
+        <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <p class="text-[11px] uppercase tracking-wider font-semibold text-emerald-600">Converted</p>
+            <div class="flex items-end gap-2 mt-2">
+                <p class="text-3xl font-semibold text-emerald-800">{{ converted_leads }}</p>
+                <span class="text-sm font-semibold text-emerald-700 mb-1">{{ conversion_rate }}%</span>
+            </div>
+            <p class="text-xs text-emerald-700 mt-1">Booked / converted</p>
+        </div>
+    </div>
+
+    <div class="grid lg:grid-cols-3 gap-5 mb-6">
+        <section class="lg:col-span-2 rounded-2xl border border-stone-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-stone-100 flex items-center justify-between">
+                <div>
+                    <h2 class="font-semibold text-stone-900">Follow-up reminders</h2>
+                    <p class="text-xs text-stone-500 mt-0.5">Overdue, today, and the next 7 days.</p>
+                </div>
+                <span class="text-xs font-semibold text-stone-400">{{ today|date:'M j, Y' }}</span>
+            </div>
+
+            {% if overdue or due_today or upcoming %}
+            <div class="divide-y divide-stone-100">
+                {% for lead in overdue %}
+                <a href="{{ lead.url }}" class="flex items-center gap-3 px-4 py-3 hover:bg-red-50 transition-colors">
+                    <span class="w-2 h-2 rounded-full bg-red-500 flex-shrink-0"></span>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-semibold text-stone-900 truncate">{{ lead.name }}</span>
+                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{{ lead.inquiry_label }}</span>
+                            {% if lead.priority == 'urgent' or lead.priority == 'high' %}<span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-red-50 text-red-700">{{ lead.priority_label }}</span>{% endif %}
+                        </div>
+                        <p class="text-xs text-stone-500 mt-0.5">{{ lead.stage_label }} · Last contact {{ lead.last_contact|naturaltime }}</p>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                        <p class="text-xs font-bold text-red-600">Overdue</p>
+                        <p class="text-[11px] text-stone-400">{{ lead.follow_up_date|date:'M j' }}</p>
+                    </div>
+                </a>
+                {% endfor %}
+                {% for lead in due_today %}
+                <a href="{{ lead.url }}" class="flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors">
+                    <span class="w-2 h-2 rounded-full bg-orange-500 flex-shrink-0"></span>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-semibold text-stone-900 truncate">{{ lead.name }}</span>
+                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{{ lead.inquiry_label }}</span>
+                        </div>
+                        <p class="text-xs text-stone-500 mt-0.5">{{ lead.stage_label }} · Last contact {{ lead.last_contact|naturaltime }}</p>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                        <p class="text-xs font-bold text-orange-600">Today</p>
+                        <p class="text-[11px] text-stone-400">{{ lead.priority_label }}</p>
+                    </div>
+                </a>
+                {% endfor %}
+                {% for lead in upcoming %}
+                <a href="{{ lead.url }}" class="flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0"></span>
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-sm font-semibold text-stone-900 truncate">{{ lead.name }}</span>
+                            <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{{ lead.inquiry_label }}</span>
+                        </div>
+                        <p class="text-xs text-stone-500 mt-0.5">{{ lead.stage_label }} · Last contact {{ lead.last_contact|naturaltime }}</p>
+                    </div>
+                    <div class="text-right flex-shrink-0">
+                        <p class="text-xs font-semibold text-stone-700">{{ lead.follow_up_date|date:'D, M j' }}</p>
+                        <p class="text-[11px] text-stone-400">{{ lead.priority_label }}</p>
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="px-5 py-12 text-center">
+                <div class="w-10 h-10 mx-auto rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600 mb-3">✓</div>
+                <p class="text-sm font-semibold text-stone-800">You’re caught up</p>
+                <p class="text-xs text-stone-500 mt-1">No follow-ups are due in the next 7 days.</p>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="rounded-2xl border border-stone-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-stone-100">
+                <h2 class="font-semibold text-stone-900">Lead stages</h2>
+                <p class="text-xs text-stone-500 mt-0.5">Current CRM funnel.</p>
+            </div>
+            <div class="p-4 space-y-3">
+                {% for stage in stage_cards %}
+                <div class="flex items-center gap-3">
+                    <span class="text-xs text-stone-600 flex-1">{{ stage.label }}</span>
+                    <div class="w-24 h-2 bg-stone-100 rounded-full overflow-hidden">
+                        <div class="h-full bg-orange-400 rounded-full" style="width: {% if total_leads %}{% widthratio stage.count total_leads 100 %}{% else %}0{% endif %}%;"></div>
+                    </div>
+                    <span class="text-xs font-semibold text-stone-800 w-6 text-right">{{ stage.count }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+
+    <div class="grid lg:grid-cols-2 gap-5">
+        <section class="rounded-2xl border border-stone-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-stone-100">
+                <h2 class="font-semibold text-stone-900">Inquiry mix</h2>
+                <p class="text-xs text-stone-500 mt-0.5">What people are asking about.</p>
+            </div>
+            <div class="p-4 grid sm:grid-cols-2 gap-2">
+                {% for inquiry in inquiry_cards %}
+                <div class="rounded-xl bg-stone-50 px-3 py-2.5 flex items-center justify-between gap-3">
+                    <span class="text-xs font-medium text-stone-700">{{ inquiry.label }}</span>
+                    <span class="text-sm font-bold text-stone-900">{{ inquiry.count }}</span>
+                </div>
+                {% empty %}
+                <p class="text-sm text-stone-500">Categorize a DM to start building this view.</p>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-stone-200 bg-white overflow-hidden">
+            <div class="px-4 py-3 border-b border-stone-100">
+                <h2 class="font-semibold text-stone-900">Recent leads</h2>
+                <p class="text-xs text-stone-500 mt-0.5">Most recently active tracked conversations.</p>
+            </div>
+            <div class="divide-y divide-stone-100 max-h-80 overflow-y-auto">
+                {% for lead in recent_leads %}
+                <a href="{{ lead.url }}" class="flex items-center gap-3 px-4 py-3 hover:bg-stone-50 transition-colors">
+                    <div class="w-8 h-8 rounded-full bg-stone-100 flex items-center justify-center text-xs font-bold text-stone-500 flex-shrink-0">{{ lead.name|slice:':1'|upper }}</div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-sm font-semibold text-stone-800 truncate">{{ lead.name }}</p>
+                        <p class="text-[11px] text-stone-500 truncate">{{ lead.inquiry_label }} · {{ lead.stage_label }}</p>
+                    </div>
+                    <span class="text-[11px] text-stone-400 flex-shrink-0">{{ lead.last_contact|naturaltime }}</span>
+                </a>
+                {% empty %}
+                <div class="px-4 py-8 text-center text-sm text-stone-500">No tracked leads yet.</div>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}
