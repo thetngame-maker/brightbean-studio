@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import views
+from . import conversation_views, views
 
 app_name = "inbox"
 
@@ -11,14 +11,18 @@ urlpatterns = [
     path("", views.inbox_feed, name="feed"),
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
+    path("<uuid:message_id>/conversation/", conversation_views.conversation_detail, name="conversation_detail"),
     # Reply to message
     path("<uuid:message_id>/reply/", views.send_reply, name="send_reply"),
+    path("<uuid:message_id>/conversation/reply/", conversation_views.conversation_send_reply, name="conversation_send_reply"),
     # Internal notes
     path("<uuid:message_id>/note/", views.add_note, name="add_note"),
     # Assignment
     path("<uuid:message_id>/assign/", views.assign_message, name="assign"),
+    path("<uuid:message_id>/conversation/assign/", conversation_views.conversation_assign, name="conversation_assign"),
     # Status changes
     path("<uuid:message_id>/status/", views.change_status, name="change_status"),
+    path("<uuid:message_id>/conversation/status/", conversation_views.conversation_change_status, name="conversation_change_status"),
     # Sentiment override
     path("<uuid:message_id>/sentiment/", views.change_sentiment, name="change_sentiment"),
     # Bulk actions
