@@ -36,14 +36,47 @@
         badge.style.display = hideWhenZero && !count ? 'none' : '';
     }
 
+    function bindSidebarAccountItem(item, id, label) {
+        if (!item) return null;
+        item.dataset.inboxAccountId = String(id || '');
+        item.href = window.location.pathname + '?account=' + encodeURIComponent(String(id || ''));
+        item.title = 'Show inbox for ' + label;
+        return item;
+    }
+
     function findAccountItem(accountId) {
         const id = String(accountId || '');
         let item = navItems().find(candidate => String(candidate.dataset.inboxAccountId || '') === id);
         if (item) return item;
 
-        const option = document.querySelector(`select[name="account"] option[value="${id}"]`);
-        if (option) item = findItem(option.textContent.trim());
-        return item || null;
+        const select = document.querySelector('select[name="account"]');
+        const option = select && select.querySelector(`option[value="${id}"]`);
+        if (!option) return null;
+
+        const label = option.textContent.trim();
+        item = findItem(label);
+        if (!item) return null;
+
+        const selectedId = String(select.value || '');
+        const sameLabelOptions = Array.from(select.options).filter(candidate =>
+            candidate.value && candidate.textContent.trim() === label
+        );
+
+        // The currently selected account always owns the visible sidebar row.
+        // This prevents a same-named legacy/duplicate account from overwriting
+        // the badge or link for the account the inbox is actually filtering.
+        if (selectedId === id) {
+            return bindSidebarAccountItem(item, id, label);
+        }
+
+        // Away from an account-specific view, bind by display name only when
+        // that name uniquely identifies one connected account.
+        if (sameLabelOptions.length === 1 &&
+            (!item.dataset.inboxAccountId || String(item.dataset.inboxAccountId) === id)) {
+            return bindSidebarAccountItem(item, id, label);
+        }
+
+        return String(item.dataset.inboxAccountId || '') === id ? item : null;
     }
 
     window.tngSyncInboxSidebarBadges = function (payload) {
@@ -51,12 +84,11 @@
         setBadge(findItem('Social Inbox'), Number(payload.total || 0), true);
 
         (payload.accounts || []).forEach(account => {
-            const item = findAccountItem(account.id) || findItem(account.name);
+            const item = findAccountItem(account.id);
+            if (!item) return;
             setBadge(item, Number(account.count || 0), false);
-            if (item) {
-                const count = Number(account.count || 0);
-                item.title = `${count} unread inbox item${count === 1 ? '' : 's'} for ${account.name}`;
-            }
+            const count = Number(account.count || 0);
+            item.title = `${count} unread inbox item${count === 1 ? '' : 's'} for ${account.name}`;
         });
     };
 
