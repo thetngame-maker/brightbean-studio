@@ -4,6 +4,8 @@ from django import template
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
+from apps.common.ugc_provenance import get_provenance, provenance_label
+
 register = template.Library()
 
 
@@ -44,6 +46,31 @@ def ugc_latest_post_id(metadata):
     if not isinstance(post_ids, list) or not post_ids:
         return ""
     return str(post_ids[-1])
+
+
+@register.filter
+def ugc_source_label(metadata, fallback_source=""):
+    """Human-friendly original source label for a UGC submission."""
+    return provenance_label(metadata, fallback_source=fallback_source)
+
+
+@register.filter
+def ugc_source_url(metadata):
+    """Original public source URL, if recorded."""
+    return get_provenance(metadata).get("source_url", "")
+
+
+@register.filter
+def ugc_source_handle(metadata):
+    """Creator handle recorded by the discovery/import source."""
+    handle = get_provenance(metadata).get("creator_handle", "")
+    return f"@{handle}" if handle else ""
+
+
+@register.filter
+def ugc_source_external_id(metadata):
+    """Provider content identifier used for dedupe/re-import safety."""
+    return get_provenance(metadata).get("external_id", "")
 
 
 @register.inclusion_tag("components/ui_select.html")
