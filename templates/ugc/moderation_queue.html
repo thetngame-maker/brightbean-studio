@@ -54,15 +54,15 @@
     </form>
 
     {% if submissions %}
-    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 pb-6">
+    <div class="grid grid-cols-1 {% if submissions|length > 1 %}xl:grid-cols-2{% endif %} gap-4 pb-6">
         {% for submission in submissions %}
-        <article class="rounded-2xl border border-stone-200 bg-white overflow-hidden shadow-sm">
+        <article class="rounded-2xl border border-stone-200 bg-white overflow-hidden shadow-sm {% if submissions|length == 1 and submission.media_asset %}xl:grid xl:grid-cols-2{% endif %}">
             {% if submission.media_asset %}
-            <div class="bg-stone-100 border-b border-stone-200 overflow-hidden" style="max-height: 320px;">
+            <div class="bg-stone-100 border-b border-stone-200 overflow-hidden {% if submissions|length == 1 %}xl:border-b-0 xl:border-r{% endif %}" {% if submissions|length > 1 %}style="max-height: 320px;"{% endif %}>
                 {% if submission.media_asset.is_image %}
-                <img src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" class="w-full h-full object-cover" style="max-height: 320px; min-height: 220px;">
+                <img src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" class="w-full h-full object-cover" {% if submissions|length > 1 %}style="max-height: 320px; min-height: 220px;"{% else %}style="min-height: 420px;"{% endif %}>
                 {% elif submission.media_asset.is_video %}
-                <video controls preload="metadata" class="w-full bg-black" style="max-height: 320px;">
+                <video controls preload="metadata" class="w-full h-full bg-black" {% if submissions|length > 1 %}style="max-height: 320px;"{% else %}style="min-height: 420px;"{% endif %}>
                     <source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}">
                 </video>
                 {% else %}
