@@ -23,6 +23,7 @@ from apps.api.routers.analytics import router as analytics_router
 from apps.api.routers.me import router as me_router
 from apps.api.routers.media import router as media_router
 from apps.api.routers.posts import router as posts_router
+from apps.api.routers.ugc import router as ugc_router
 from apps.mcp.transport import router as mcp_router
 
 
@@ -76,6 +77,7 @@ api.add_router("/accounts", accounts_router)
 api.add_router("/posts", posts_router)
 api.add_router("/media", media_router)
 api.add_router("/analytics", analytics_router)
+api.add_router("/community-content", ugc_router)
 # MCP Streamable HTTP transport. Same audit + rate limits as REST, but a
 # wider auth class: ``McpAuth`` accepts both bb_studio_ keys AND OAuth 2.1
 # access tokens (Claude Desktop's native connector flow). Mounted last so
@@ -217,6 +219,10 @@ def _action_for_path(method: str, path: str, *, status_code: int) -> str:
         return f"analytics.read.account.{status_code}"
     if "/analytics/posts/" in path:
         return f"analytics.read.post.{status_code}"
+    if "/community-content/" in path or path.endswith("/community-content"):
+        if method == "POST":
+            return f"community_content.create.{status_code}"
+        return f"community_content.read.{status_code}"
     if "/posts/" in path:
         if path.endswith("/schedule"):
             return f"post.schedule.{status_code}"
