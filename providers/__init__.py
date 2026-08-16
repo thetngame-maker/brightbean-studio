@@ -13,7 +13,7 @@ from .devto import DevtoProvider
 from .facebook import FacebookProvider
 from .google_business import GoogleBusinessProvider
 from .instagram import InstagramProvider
-from .instagram_login import InstagramLoginProvider
+from .instagram_login_tn import TNInstagramLoginProvider
 from .linkedin import LINKEDIN_RESERVED_CHARS
 from .linkedin_company import LinkedInCompanyProvider
 from .linkedin_personal import LinkedInPersonalProvider
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 PROVIDER_REGISTRY: dict[str, type[SocialProvider]] = {
     "facebook": FacebookProvider,
     "instagram": InstagramProvider,
-    "instagram_login": InstagramLoginProvider,
+    "instagram_login": TNInstagramLoginProvider,
     "linkedin_personal": LinkedInPersonalProvider,
     "linkedin_company": LinkedInCompanyProvider,
     "tiktok": TikTokProvider,
