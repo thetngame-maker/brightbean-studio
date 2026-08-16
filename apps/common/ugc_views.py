@@ -22,7 +22,7 @@ from .ugc import moderate_submission, resolve_report
 from .ugc_provenance import build_provenance, get_provenance, set_provenance
 
 
-VALID_TABS = {"pending", "approved", "reported", "removed"}
+VALID_TABS = {"discovered", "pending", "approved", "reported", "removed"}
 
 
 def _get_workspace(request, workspace_id):
@@ -34,10 +34,31 @@ def _get_workspace(request, workspace_id):
     return workspace
 
 
+def _discovered_q():
+    """Externally discovered content that has not entered the consent flow yet.
+
+    Manual/direct submissions use discovery_source=manual. Future discovery
+    providers can use their own stable key (for example ``apify``) and will
+    automatically land in the Discovered queue without a schema change.
+    """
+    return Q(metadata__provenance__discovery_source__isnull=False) & ~Q(
+        metadata__provenance__discovery_source="manual"
+    )
+
+
+def _pending_submission_q():
+    """Normal pending submissions, excluding externally discovered content."""
+    return Q(metadata__provenance__discovery_source__isnull=True) | Q(
+        metadata__provenance__discovery_source="manual"
+    )
+
+
 def _queue_counts(workspace):
     base = UGCSubmission.objects.for_workspace(workspace.id)
+    pending_base = base.filter(status=UGCSubmission.Status.PENDING)
     return {
-        "pending": base.filter(status=UGCSubmission.Status.PENDING).count(),
+        "discovered": pending_base.filter(_discovered_q()).count(),
+        "pending": pending_base.filter(_pending_submission_q()).count(),
         "approved": base.filter(status=UGCSubmission.Status.APPROVED).count(),
         "reported": base.filter(reports__status__in=[UGCReport.Status.OPEN, UGCReport.Status.REVIEWING]).distinct().count(),
         "removed": base.filter(status=UGCSubmission.Status.REMOVED).count(),
@@ -104,8 +125,10 @@ def moderation_queue(request, workspace_id):
         )
     )
 
-    if tab == "pending":
-        qs = qs.filter(status=UGCSubmission.Status.PENDING)
+    if tab == "discovered":
+        qs = qs.filter(status=UGCSubmission.Status.PENDING).filter(_discovered_q())
+    elif tab == "pending":
+        qs = qs.filter(status=UGCSubmission.Status.PENDING).filter(_pending_submission_q())
     elif tab == "approved":
         qs = qs.filter(status=UGCSubmission.Status.APPROVED)
     elif tab == "reported":
