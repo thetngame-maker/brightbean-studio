@@ -42,11 +42,9 @@ OAUTH_SESSION_KEY = "social_oauth"
 def _get_visible_platform_choices():
     """Return user-facing platform choices filtered to visible platforms.
 
-    The legacy ``instagram`` provider uses the older Facebook-linked Instagram
-    Graph OAuth scopes. TN Social Studio now connects Instagram Professional
-    accounts through ``instagram_login`` instead. Keep the legacy provider in
-    the registry for existing accounts, but never present it as a new-connect
-    option. The direct provider is labelled simply "Instagram" in the UI.
+    New Instagram connections use the Instagram Login provider. Keep the
+    legacy Facebook-linked provider available internally for existing accounts,
+    but do not offer it as a new-connect option.
     """
     choices = []
     for value, label in PlatformVisibility.visible_choices():
@@ -59,13 +57,7 @@ def _get_visible_platform_choices():
 
 
 def _normalize_connect_platform(platform):
-    """Route old/user-facing Instagram connect requests to Instagram Login.
-
-    Some existing sidebar/template links still submit the historical
-    ``instagram`` platform key. Normalizing at the connection boundary lets us
-    switch those entry points safely without changing existing SocialAccount
-    rows that may have been created with the legacy provider.
-    """
+    """Map historical/user-facing Instagram requests to Instagram Login."""
     platform = (platform or "").strip()
     if platform == PlatformCredential.Platform.INSTAGRAM:
         return PlatformCredential.Platform.INSTAGRAM_LOGIN
@@ -98,19 +90,9 @@ def _get_configured_platforms(org_id):
     )
     env_creds = getattr(settings, "PLATFORM_CREDENTIALS_FROM_ENV", {})
     for platform, creds in env_creds.items():
-        # Same completeness rule the credential resolver applies, so the grid can
-        # never offer a Connect button that resolution will reject. A truthiness
-        # check here would let a half-filled pair (app id set, secret missing)
-        # render as connectable, walk the user through the platform's consent
-        # screen, and only fail at token exchange with a generic error.
         if derive_is_configured(platform, creds):
             configured.add(platform)
 
-    # Session-auth platforms (e.g. Bluesky) don't need app-level credentials —
-    # the user supplies their own handle + app password at connect time.
-    # Instance-OAuth platforms (e.g. Mastodon) don't need them either —
-    # we register a per-instance OAuth app on first connect and persist it in
-    # MastodonAppRegistration.
     for platform, provider_cls in PROVIDER_REGISTRY.items():
         if provider_cls().auth_type in (AuthType.SESSION, AuthType.INSTANCE_OAUTH):
             configured.add(platform)
@@ -155,20 +137,11 @@ def _unsign_state(state_str):
 
 
 def _normalize_mastodon_instance_url(raw):
-    """Normalize user-supplied Mastodon instance input to `scheme://host[:port]`.
-
-    Accepts: bare hosts (`mastodon.social`), URLs with paths (`https://mastodon.social/@user`),
-    fediverse handles (`@user@mastodon.social`, `user@mastodon.social`), and values with
-    extra whitespace or trailing slashes. Defaults the scheme to https when missing.
-    Returns an empty string when the input has no host.
-    """
+    """Normalize user-supplied Mastodon instance input to `scheme://host[:port]`."""
     value = (raw or "").strip()
     if not value:
         return ""
 
-    # Fediverse handle form: `@user@host` or `user@host`. If there's exactly one '@'
-    # and no scheme, treat it as a handle and extract the host. Two '@'s means a
-    # leading '@' plus user@host.
     if "://" not in value and "@" in value:
         parts = value.lstrip("@").split("@")
         if len(parts) == 2 and parts[1]:
@@ -185,12 +158,7 @@ def _normalize_mastodon_instance_url(raw):
 
 
 def _resolve_mastodon_extra_creds(session_data):
-    """Resolve Mastodon instance-specific credentials from the OAuth session.
-
-    Returns a dict suitable for `_get_provider_for_platform(**extra_creds)`
-    containing `instance_url`, and `client_id`/`client_secret` when a matching
-    `MastodonAppRegistration` exists. Empty dict when no instance_url is set.
-    """
+    """Resolve Mastodon instance-specific credentials from the OAuth session."""
     extra_creds: dict = {}
     instance_url = (session_data or {}).get("instance_url", "")
     if not instance_url:
@@ -204,11 +172,6 @@ def _resolve_mastodon_extra_creds(session_data):
     except MastodonAppRegistration.DoesNotExist:
         pass
     return extra_creds
-
-
-# ------------------------------------------------------------------
-# Account List
-# ------------------------------------------------------------------
 
 
 @login_required
@@ -235,11 +198,6 @@ def account_list(request, workspace_id):
     )
 
 
-# ------------------------------------------------------------------
-# Connect Platform (OAuth redirect)
-# ------------------------------------------------------------------
-
-
 @login_required
 @require_permission("manage_social_accounts")
 @ratelimit(key="user", rate="20/m", method="POST", block=True)
@@ -259,24 +217,25 @@ def connect_platform(request, workspace_id):
             },
         )
 
-    # POST: initiate OAuth. Normalize legacy Instagram entry points first so
-    # sidebar links that still submit `instagram` use the modern direct flow.
     platform = _normalize_connect_platform(request.POST.get("platform", ""))
     if platform not in dict(visible_platform_choices):
         messages.error(request, "This platform is not available.")
         return redirect("social_accounts:connect", workspace_id=workspace_id)
 
     if platform not in configured_platforms:
-        messages.error(
-            request,
-            "Instagram app credentials are not configured. Please add "
-            "PLATFORM_INSTAGRAM_APP_ID and PLATFORM_INSTAGRAM_APP_SECRET."
-            if platform == PlatformCredential.Platform.INSTAGRAM_LOGIN
-            else f"Platform credentials for {platform} are not configured. Please contact your administrator.",
-        )
+        if platform == PlatformCredential.Platform.INSTAGRAM_LOGIN:
+            messages.error(
+                request,
+                "Instagram app credentials are not configured. Add PLATFORM_INSTAGRAM_APP_ID "
+                "and PLATFORM_INSTAGRAM_APP_SECRET to the deployment.",
+            )
+        else:
+            messages.error(
+                request,
+                f"Platform credentials for {platform} are not configured. Please contact your administrator.",
+            )
         return redirect("social_accounts:connect", workspace_id=workspace_id)
 
-    # Special auth flows
     if platform == PlatformCredential.Platform.BLUESKY:
         return redirect("social_accounts:connect_bluesky", workspace_id=workspace_id)
     if platform == PlatformCredential.Platform.MASTODON:
@@ -284,16 +243,12 @@ def connect_platform(request, workspace_id):
     if platform == PlatformCredential.Platform.DEVTO:
         return redirect("social_accounts:connect_devto", workspace_id=workspace_id)
 
-    # Standard OAuth flow
     provider = _get_provider_for_platform(platform, request.org.id)
     _apply_analytics_scope_flag(provider, platform)
     nonce = secrets.token_urlsafe(32)
     state = _sign_state(workspace_id, platform, request.user.id, nonce)
-
-    # PKCE verifier (e.g. TikTok); round-trips via the session alongside the nonce.
     code_verifier = issue_pkce_verifier(provider)
 
-    # Store nonce in session to prevent replay
     request.session[OAUTH_SESSION_KEY] = {
         "nonce": nonce,
         "workspace_id": str(workspace_id),
@@ -306,21 +261,11 @@ def connect_platform(request, workspace_id):
     return redirect(auth_url)
 
 
-# ------------------------------------------------------------------
-# OAuth Callback
-# ------------------------------------------------------------------
-
-
 @login_required
 @ratelimit(key="user", rate="20/m", block=True)
 @require_GET
 def oauth_callback(request, platform):
-    """Handle OAuth callback from the platform.
-
-    ``platform`` arrives as the URL slug, which may be an alias (e.g.
-    ``social1`` for TikTok). Normalise it before any platform-keyed lookup
-    or comparison against the signed state.
-    """
+    """Handle OAuth callback from the platform."""
     platform = from_url_slug(platform)
     error = request.GET.get("error")
     if error:
@@ -339,31 +284,26 @@ def oauth_callback(request, platform):
         messages.error(request, "Missing authorization code or state parameter.")
         return redirect("dashboard")
 
-    # Validate state
     try:
         state_data = _unsign_state(state_str)
     except signing.BadSignature:
         messages.error(request, "Invalid or expired OAuth state. Please try again.")
         return redirect("dashboard")
 
-    # Validate nonce from session
     session_data = request.session.pop(OAUTH_SESSION_KEY, {})
     if not session_data or session_data.get("nonce") != state_data.get("nonce"):
         messages.error(request, "OAuth session mismatch. Please try again.")
         return redirect("dashboard")
 
-    # Validate platform matches
     if state_data.get("platform") != platform:
         messages.error(request, "Platform mismatch in OAuth callback.")
         return redirect("dashboard")
 
-    # Validate user
     if str(request.user.id) != state_data.get("user_id"):
         raise PermissionDenied("OAuth state does not match current user.")
 
     workspace_id = state_data["workspace_id"]
 
-    # Re-check workspace membership - user may have lost access during OAuth
     from apps.members.models import WorkspaceMembership
 
     ws_membership = WorkspaceMembership.objects.filter(user=request.user, workspace_id=workspace_id).first()
@@ -374,7 +314,6 @@ def oauth_callback(request, platform):
         raise PermissionDenied("You no longer have permission to manage social accounts.")
 
     try:
-        # For Mastodon, we need instance-specific credentials from session + registration
         extra_creds: dict = {}
         if platform == PlatformCredential.Platform.MASTODON:
             extra_creds = _resolve_mastodon_extra_creds(session_data)
@@ -383,7 +322,6 @@ def oauth_callback(request, platform):
         redirect_uri = redirect_uri_from_request(request)
         tokens = provider.exchange_code(code, redirect_uri, **pkce_kwargs(session_data.get("code_verifier")))
 
-        # Facebook/Instagram/LinkedIn Company: connect Pages, not personal profiles
         if platform in (
             PlatformCredential.Platform.FACEBOOK,
             PlatformCredential.Platform.INSTAGRAM,
@@ -391,7 +329,6 @@ def oauth_callback(request, platform):
         ) and hasattr(provider, "get_user_pages"):
             pages = provider.get_user_pages(tokens.access_token)
             if pages:
-                # Store in session for account selection
                 request.session["oauth_page_select"] = {
                     "workspace_id": workspace_id,
                     "platform": platform,
@@ -409,30 +346,22 @@ def oauth_callback(request, platform):
                         "Only Company Pages you administer can be connected — "
                         "personal profiles connect via the LinkedIn (Personal) option. "
                         "If you expected to see a Page, ask the page owner to grant "
-                        "you Admin access in LinkedIn → Admin tools → "
-                        "Manage admins, then reconnect."
+                        "you Admin access in LinkedIn → Admin tools → Manage admins, then reconnect."
+                    )
+                elif platform == PlatformCredential.Platform.INSTAGRAM:
+                    warning = (
+                        "No Instagram Business accounts were found for your account. "
+                        "Only Instagram Business or Creator accounts linked to a Facebook Page "
+                        "can be connected through this legacy Instagram option."
                     )
                 else:
-                    if platform == PlatformCredential.Platform.INSTAGRAM:
-                        warning = (
-                            "No Instagram Business accounts were found for your account. "
-                            "Only Instagram Business or Creator accounts linked to a Facebook Page "
-                            "can be connected through this Instagram option. If you expected to "
-                            "see an account, make sure it is linked to a Page you manage, then reconnect."
-                        )
-                    else:
-                        warning = (
-                            "No Facebook Pages were found for your account. "
-                            "Only Pages can be connected — personal profiles are not "
-                            "supported by the Facebook API. "
-                            "If you expected to see a Page, make sure you have admin "
-                            "access and try removing the app in Facebook Settings → "
-                            "Business Integrations, then reconnect."
-                        )
+                    warning = (
+                        "No Facebook Pages were found for your account. Only Pages can be connected — "
+                        "personal profiles are not supported by the Facebook API."
+                    )
                 messages.warning(request, warning)
                 return redirect("social_accounts:list", workspace_id=workspace_id)
 
-        # Standard single-account flow (including Instagram Login)
         profile = provider.get_profile(tokens.access_token)
         _create_or_update_account(
             workspace_id=workspace_id,
@@ -449,17 +378,9 @@ def oauth_callback(request, platform):
         raise
     except Exception:
         logger.exception("OAuth callback failed for %s", platform)
-        messages.error(
-            request,
-            "Failed to connect account. Please try again.",
-        )
+        messages.error(request, "Failed to connect account. Please try again.")
 
     return redirect("calendar:calendar", workspace_id=workspace_id)
-
-
-# ------------------------------------------------------------------
-# Account Selection (Facebook multi-page)
-# ------------------------------------------------------------------
 
 
 @login_required
@@ -483,7 +404,6 @@ def select_account(request):
             },
         )
 
-    # POST: create accounts for selected pages
     selected_ids = request.POST.getlist("selected_pages")
     if not selected_ids:
         messages.error(request, "Please select at least one account.")
@@ -529,8 +449,6 @@ def select_account(request):
                 access_token=access_token,
                 refresh_token=user_tokens.get("refresh_token"),
                 expires_in=None,
-                # Instagram-via-Facebook receives its webhooks through the
-                # linked Page, so remember which Page to subscribe.
                 webhook_target_id=page.get("page_id", ""),
             )
             connected.append(page["name"])
@@ -538,15 +456,9 @@ def select_account(request):
     request.session.pop("oauth_page_select", None)
 
     if connected:
-        names = ", ".join(connected)
-        messages.success(request, f"Connected: {names}")
+        messages.success(request, f"Connected: {', '.join(connected)}")
 
     return redirect("calendar:calendar", workspace_id=workspace_id)
-
-
-# ------------------------------------------------------------------
-# Bluesky Connect (session-based, no OAuth)
-# ------------------------------------------------------------------
 
 
 @login_required
@@ -554,28 +466,19 @@ def select_account(request):
 def connect_bluesky(request, workspace_id):
     """Connect a Bluesky account via handle + app password."""
     if request.method == "GET":
-        return render(
-            request,
-            "social_accounts/bluesky_connect.html",
-            {"workspace_id": workspace_id},
-        )
+        return render(request, "social_accounts/bluesky_connect.html", {"workspace_id": workspace_id})
 
     handle = request.POST.get("handle", "").strip().lstrip("@")
     app_password = request.POST.get("app_password", "").strip()
 
     if not handle or not app_password:
         messages.error(request, "Handle and app password are required.")
-        return render(
-            request,
-            "social_accounts/bluesky_connect.html",
-            {"workspace_id": workspace_id},
-        )
+        return render(request, "social_accounts/bluesky_connect.html", {"workspace_id": workspace_id})
 
     try:
         provider = _get_provider_for_platform(PlatformCredential.Platform.BLUESKY, request.org.id)
         tokens = provider.create_session(handle, app_password)
         profile = provider.get_profile(tokens.access_token)
-
         _create_or_update_account(
             workspace_id=workspace_id,
             platform=PlatformCredential.Platform.BLUESKY,
@@ -586,3 +489,272 @@ def connect_bluesky(request, workspace_id):
             instance_url=provider.pds_url,
         )
         messages.success(request, f"Connected {profile.name} on Bluesky.")
+    except Exception:
+        logger.exception("Bluesky connection failed")
+        messages.error(request, "Failed to connect Bluesky account. Check your handle and app password.")
+        return render(request, "social_accounts/bluesky_connect.html", {"workspace_id": workspace_id})
+
+    return redirect("calendar:calendar", workspace_id=workspace_id)
+
+
+@login_required
+@require_permission("manage_social_accounts")
+def connect_devto(request, workspace_id):
+    """Connect a DEV.to account via a personal API key."""
+    if request.method == "GET":
+        return render(request, "social_accounts/devto_connect.html", {"workspace_id": workspace_id})
+
+    api_key = request.POST.get("api_key", "").strip()
+    if not api_key:
+        messages.error(request, "A DEV.to API key is required.")
+        return render(request, "social_accounts/devto_connect.html", {"workspace_id": workspace_id})
+
+    try:
+        provider = _get_provider_for_platform(PlatformCredential.Platform.DEVTO, request.org.id)
+        profile = provider.get_profile(api_key)
+        _create_or_update_account(
+            workspace_id=workspace_id,
+            platform=PlatformCredential.Platform.DEVTO,
+            profile=profile,
+            access_token=api_key,
+        )
+        messages.success(request, f"Connected {profile.name} on DEV.to.")
+    except Exception:
+        logger.exception("DEV.to connection failed")
+        messages.error(request, "Failed to connect DEV.to account. Check your API key.")
+        return render(request, "social_accounts/devto_connect.html", {"workspace_id": workspace_id})
+
+    return redirect("calendar:calendar", workspace_id=workspace_id)
+
+
+@csp_update(FORM_ACTION="'self' https:")
+@login_required
+@require_permission("manage_social_accounts")
+def connect_mastodon(request, workspace_id):
+    """Connect a Mastodon account via instance URL + OAuth."""
+    if request.method == "GET":
+        return render(request, "social_accounts/mastodon_connect.html", {"workspace_id": workspace_id})
+
+    instance_url = _normalize_mastodon_instance_url(request.POST.get("instance_url", ""))
+    if not instance_url:
+        messages.error(request, "Instance URL is required.")
+        return render(request, "social_accounts/mastodon_connect.html", {"workspace_id": workspace_id})
+
+    if not _is_safe_url(instance_url):
+        messages.error(request, "Invalid instance URL. Private or reserved addresses are not allowed.")
+        return render(request, "social_accounts/mastodon_connect.html", {"workspace_id": workspace_id})
+
+    try:
+        registration = MastodonAppRegistration.objects.get(instance_url=instance_url)
+        client_id = registration.client_id
+        client_secret = registration.client_secret
+    except MastodonAppRegistration.DoesNotExist:
+        try:
+            provider = _get_provider_for_platform(
+                PlatformCredential.Platform.MASTODON,
+                request.org.id,
+                instance_url=instance_url,
+            )
+            redirect_uri = _build_redirect_uri(request, PlatformCredential.Platform.MASTODON)
+            app_data = provider.register_app(instance_url, redirect_uri)
+            registration = MastodonAppRegistration.objects.create(
+                instance_url=instance_url,
+                client_id=app_data["client_id"],
+                client_secret=app_data["client_secret"],
+            )
+            client_id = app_data["client_id"]
+            client_secret = app_data["client_secret"]
+        except Exception:
+            logger.exception("Mastodon app registration failed for %s", instance_url)
+            messages.error(request, f"Failed to register with {instance_url}. Check the URL.")
+            return render(request, "social_accounts/mastodon_connect.html", {"workspace_id": workspace_id})
+
+    provider = _get_provider_for_platform(
+        PlatformCredential.Platform.MASTODON,
+        request.org.id,
+        instance_url=instance_url,
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+
+    nonce = secrets.token_urlsafe(32)
+    state = _sign_state(
+        workspace_id,
+        PlatformCredential.Platform.MASTODON,
+        request.user.id,
+        nonce,
+    )
+
+    request.session[OAUTH_SESSION_KEY] = {
+        "nonce": nonce,
+        "workspace_id": str(workspace_id),
+        "platform": PlatformCredential.Platform.MASTODON,
+        "instance_url": instance_url,
+    }
+
+    redirect_uri = _build_redirect_uri(request, PlatformCredential.Platform.MASTODON)
+    auth_url = provider.get_auth_url(redirect_uri, state)
+    return redirect(auth_url)
+
+
+@login_required
+@require_permission("manage_social_accounts")
+@require_POST
+def reconnect(request, workspace_id, account_id):
+    """Re-initiate OAuth for an existing account."""
+    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
+    platform = account.platform
+
+    if platform == PlatformCredential.Platform.BLUESKY:
+        return redirect("social_accounts:connect_bluesky", workspace_id=workspace_id)
+    if platform == PlatformCredential.Platform.MASTODON:
+        return redirect("social_accounts:connect_mastodon", workspace_id=workspace_id)
+    if platform == PlatformCredential.Platform.DEVTO:
+        return redirect("social_accounts:connect_devto", workspace_id=workspace_id)
+
+    provider = _get_provider_for_platform(platform, request.org.id)
+    _apply_analytics_scope_flag(provider, platform)
+    nonce = secrets.token_urlsafe(32)
+    state = _sign_state(workspace_id, platform, request.user.id, nonce)
+    code_verifier = issue_pkce_verifier(provider)
+
+    request.session[OAUTH_SESSION_KEY] = {
+        "nonce": nonce,
+        "workspace_id": str(workspace_id),
+        "platform": platform,
+        "code_verifier": code_verifier,
+    }
+
+    redirect_uri = _build_redirect_uri(request, platform)
+    auth_url = provider.get_auth_url(redirect_uri, state, **pkce_kwargs(code_verifier))
+    return redirect(auth_url)
+
+
+@login_required
+@require_permission("manage_social_accounts")
+@require_POST
+@ratelimit(key="user", rate="10/m", method="POST", block=True)
+def retry_webhooks(request, workspace_id, account_id):
+    """Re-run a failed webhook subscription without a new OAuth grant."""
+    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
+
+    if account.needs_reconnect:
+        if request.headers.get("HX-Request"):
+            return _render_account_card(request, account, workspace_id)
+        messages.error(request, f"Reconnect {account.display_label} first — its connection isn't healthy.")
+        return redirect("social_accounts:list", workspace_id=workspace_id)
+
+    SocialAccount.objects.filter(pk=account.pk).update(webhook_retry_count=0)
+    account.webhook_retry_count = 0
+
+    subscribed = subscribe_account_webhooks(account)
+    account.refresh_from_db()
+
+    if request.headers.get("HX-Request"):
+        return _render_account_card(request, account, workspace_id)
+
+    if subscribed:
+        messages.success(request, f"Real-time updates are back on for {account.display_label}.")
+    else:
+        messages.error(request, account.webhook_error or "Couldn't set up real-time updates. Please try again.")
+    return redirect("social_accounts:list", workspace_id=workspace_id)
+
+
+def _render_account_card(request, account, workspace_id):
+    """Render one account card for an htmx outerHTML swap."""
+    return render(
+        request,
+        "social_accounts/partials/_account_card.html",
+        {"account": account, "workspace_id": workspace_id},
+    )
+
+
+@login_required
+@require_permission("manage_social_accounts")
+@require_POST
+def disconnect(request, workspace_id, account_id):
+    """Disconnect a social account."""
+    account = get_object_or_404(SocialAccount.objects.for_workspace(workspace_id), id=account_id)
+
+    if account.oauth_access_token:
+        unsubscribe_account_webhooks(account)
+
+    try:
+        provider = _get_provider_for_platform(account.platform, request.org.id)
+        if account.oauth_access_token:
+            provider.revoke_token(account.oauth_access_token)
+    except Exception:
+        logger.warning("Failed to revoke token for %s, proceeding with disconnect", account)
+
+    from django.db.models import Count
+    from apps.composer.models import PlatformPost, Post
+
+    orphan_post_ids = list(
+        PlatformPost.objects.filter(social_account=account)
+        .values("post_id")
+        .annotate(total_platforms=Count("post__platform_posts"))
+        .filter(total_platforms=1)
+        .values_list("post_id", flat=True)
+    )
+    if orphan_post_ids:
+        Post.objects.filter(id__in=orphan_post_ids).delete()
+
+    account_name = account.account_name or account.account_handle
+    account.delete()
+
+    messages.success(request, f"Disconnected {account_name}.")
+
+    if request.headers.get("HX-Request"):
+        return render(request, "social_accounts/partials/_empty.html")
+
+    return redirect("social_accounts:list", workspace_id=workspace_id)
+
+
+def _create_or_update_account(
+    *,
+    workspace_id,
+    platform,
+    profile,
+    access_token,
+    refresh_token=None,
+    expires_in=None,
+    instance_url="",
+    webhook_target_id="",
+):
+    """Create or update a SocialAccount from OAuth results."""
+    token_expires_at = None
+    if expires_in:
+        token_expires_at = timezone.now() + timedelta(seconds=expires_in)
+
+    account, created = SocialAccount.objects.update_or_create(
+        workspace_id=workspace_id,
+        platform=platform,
+        account_platform_id=profile.platform_id,
+        defaults={
+            "account_name": profile.name,
+            "account_handle": profile.handle or "",
+            "avatar_url": profile.avatar_url or "",
+            "follower_count": profile.follower_count,
+            "oauth_access_token": access_token,
+            "oauth_refresh_token": refresh_token or "",
+            "token_expires_at": token_expires_at,
+            "instance_url": instance_url,
+            "webhook_target_id": webhook_target_id or "",
+            "connection_status": SocialAccount.ConnectionStatus.CONNECTED,
+            "last_error": "",
+            "analytics_needs_reconnect": False,
+            "webhooks_active": None,
+            "webhook_error": "",
+            "webhook_needs_reconnect": False,
+            "webhook_error_detail": "",
+            "webhook_retry_count": 0,
+        },
+    )
+
+    if created:
+        from apps.calendar.services import create_default_queue_and_slots
+        create_default_queue_and_slots(account)
+
+    subscribe_account_webhooks_task(str(account.id))
+
+    return account
