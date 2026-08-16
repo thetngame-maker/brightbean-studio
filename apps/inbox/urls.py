@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import conversation_views, team_views, views
+from . import collaboration_views, conversation_views, team_views, views
 
 app_name = "inbox"
 
@@ -17,6 +17,8 @@ urlpatterns = [
     path("<uuid:message_id>/conversation/reply/", conversation_views.conversation_send_reply, name="conversation_send_reply"),
     # Internal notes
     path("<uuid:message_id>/note/", views.add_note, name="add_note"),
+    path("notes/<uuid:note_id>/edit/", collaboration_views.edit_note, name="edit_note"),
+    path("notes/<uuid:note_id>/delete/", collaboration_views.delete_note, name="delete_note"),
     # Assignment
     path("<uuid:message_id>/assign/", views.assign_message, name="assign"),
     path("<uuid:message_id>/conversation/assign/", conversation_views.conversation_assign, name="conversation_assign"),
