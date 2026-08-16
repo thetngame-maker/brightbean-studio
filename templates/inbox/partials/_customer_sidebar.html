@@ -1,4 +1,5 @@
-{% load humanize inbox_team %}
+{% load humanize inbox_team inbox_leads %}
+{% inbox_lead_profile message as lead_profile %}
 <div id="customer-profile-drawer-content" class="h-full flex flex-col bg-white">
     <div class="px-5 py-4 border-b border-stone-100 flex items-center justify-between">
         <div>
@@ -50,6 +51,71 @@
                 <span class="text-[11px] text-stone-400">Owner</span>
                 <span class="text-[11px] font-medium text-stone-700">{% if message.assigned_to %}{{ message.assigned_to|inbox_display_name }}{% else %}Unassigned{% endif %}</span>
             </div>
+        </div>
+
+        <!-- Lead / tourism inquiry tracking -->
+        <div class="rounded-xl border border-stone-200 overflow-hidden">
+            <div class="px-3.5 py-3 bg-stone-50 border-b border-stone-100 flex items-center justify-between gap-2">
+                <div>
+                    <div class="text-[11px] font-semibold text-stone-700">Lead & follow-up</div>
+                    <div class="text-[10px] text-stone-400 mt-0.5">Track why they contacted you and what happens next.</div>
+                </div>
+                {% if lead_profile.follow_up_due %}
+                <span class="rounded-full bg-orange-100 text-orange-700 px-2 py-1 text-[9px] font-bold uppercase tracking-wide">Due</span>
+                {% endif %}
+            </div>
+            <form hx-post="{% url 'inbox:conversation_lead_profile' workspace_id=workspace.id message_id=message.id %}"
+                  hx-target="#customer-profile-drawer-content"
+                  hx-swap="outerHTML"
+                  class="p-3.5 space-y-3">
+                {% csrf_token %}
+                <div>
+                    <label class="block text-[11px] font-semibold text-stone-600 mb-1">Inquiry type</label>
+                    <select name="inquiry_type" class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+                        <option value="" {% if not lead_profile.inquiry_type %}selected{% endif %}>Not set</option>
+                        <option value="trip_planning" {% if lead_profile.inquiry_type == 'trip_planning' %}selected{% endif %}>Planning a Trip</option>
+                        <option value="trail_question" {% if lead_profile.inquiry_type == 'trail_question' %}selected{% endif %}>Trail Question</option>
+                        <option value="lodging" {% if lead_profile.inquiry_type == 'lodging' %}selected{% endif %}>Lodging</option>
+                        <option value="event" {% if lead_profile.inquiry_type == 'event' %}selected{% endif %}>Event Question</option>
+                        <option value="restaurant" {% if lead_profile.inquiry_type == 'restaurant' %}selected{% endif %}>Restaurant</option>
+                        <option value="attraction" {% if lead_profile.inquiry_type == 'attraction' %}selected{% endif %}>Attraction / Things to Do</option>
+                        <option value="partnership" {% if lead_profile.inquiry_type == 'partnership' %}selected{% endif %}>Partnership</option>
+                        <option value="business" {% if lead_profile.inquiry_type == 'business' %}selected{% endif %}>Business / Listing</option>
+                        <option value="support" {% if lead_profile.inquiry_type == 'support' %}selected{% endif %}>General Support</option>
+                        <option value="other" {% if lead_profile.inquiry_type == 'other' %}selected{% endif %}>Other</option>
+                    </select>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-[11px] font-semibold text-stone-600 mb-1">Stage</label>
+                        <select name="stage" class="w-full rounded-lg border border-stone-200 px-2.5 py-2 text-[12px] bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+                            <option value="new" {% if lead_profile.stage == 'new' %}selected{% endif %}>New Lead</option>
+                            <option value="qualified" {% if lead_profile.stage == 'qualified' %}selected{% endif %}>Qualified</option>
+                            <option value="planning" {% if lead_profile.stage == 'planning' %}selected{% endif %}>Planning</option>
+                            <option value="booked" {% if lead_profile.stage == 'booked' %}selected{% endif %}>Booked / Converted</option>
+                            <option value="closed" {% if lead_profile.stage == 'closed' %}selected{% endif %}>Closed</option>
+                            <option value="lost" {% if lead_profile.stage == 'lost' %}selected{% endif %}>Not Moving Forward</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-semibold text-stone-600 mb-1">Priority</label>
+                        <select name="priority" class="w-full rounded-lg border border-stone-200 px-2.5 py-2 text-[12px] bg-white text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+                            <option value="low" {% if lead_profile.priority == 'low' %}selected{% endif %}>Low</option>
+                            <option value="normal" {% if lead_profile.priority == 'normal' %}selected{% endif %}>Normal</option>
+                            <option value="high" {% if lead_profile.priority == 'high' %}selected{% endif %}>High</option>
+                            <option value="urgent" {% if lead_profile.priority == 'urgent' %}selected{% endif %}>Urgent</option>
+                        </select>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-semibold text-stone-600 mb-1">Follow-up date</label>
+                    <input type="date" name="follow_up_on" value="{{ lead_profile.follow_up_on }}"
+                           class="w-full rounded-lg border border-stone-200 px-3 py-2 text-[12px] text-stone-800 focus:outline-none focus:ring-2 focus:ring-orange-100 focus:border-orange-300">
+                </div>
+                <button type="submit" class="w-full rounded-lg px-3 py-2.5 text-[12px] font-semibold text-stone-700 border border-stone-200 bg-white hover:bg-stone-50 transition-colors">
+                    Save lead details
+                </button>
+            </form>
         </div>
 
         <form hx-post="{% url 'inbox:conversation_customer_profile' workspace_id=workspace.id message_id=message.id %}"
