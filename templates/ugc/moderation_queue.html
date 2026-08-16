@@ -9,16 +9,17 @@
         <div>
             <div class="flex items-center gap-2">
                 <h1 class="text-xl font-semibold text-stone-900">Community Content</h1>
-                {% if queue_counts.pending %}
-                <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">{{ queue_counts.pending }}</span>
+                {% if queue_counts.discovered or queue_counts.pending %}
+                <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">{{ queue_counts.discovered|add:queue_counts.pending }}</span>
                 {% endif %}
             </div>
-            <p class="text-sm text-stone-500 mt-1">Review submissions, handle reports, and keep a complete moderation trail.</p>
+            <p class="text-sm text-stone-500 mt-1">Discover, review, permission, and reuse community content with a complete moderation trail.</p>
         </div>
         <div class="text-xs text-stone-400">Up to 100 items shown per view</div>
     </div>
 
     <div class="flex flex-wrap items-center gap-2 border-b border-stone-200">
+        <a href="?tab=discovered{% if active_kind %}&kind={{ active_kind }}{% endif %}" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'discovered' %}border-violet-500 text-violet-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">Discovered <span class="ml-1 text-xs">{{ queue_counts.discovered }}</span></a>
         <a href="?tab=pending{% if active_kind %}&kind={{ active_kind }}{% endif %}" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'pending' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">Pending <span class="ml-1 text-xs">{{ queue_counts.pending }}</span></a>
         <a href="?tab=approved{% if active_kind %}&kind={{ active_kind }}{% endif %}" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'approved' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">Approved <span class="ml-1 text-xs">{{ queue_counts.approved }}</span></a>
         <a href="?tab=reported{% if active_kind %}&kind={{ active_kind }}{% endif %}" class="px-3 py-2 text-sm font-medium border-b-2 -mb-px {% if active_tab == 'reported' %}border-orange-500 text-orange-700{% else %}border-transparent text-stone-500 hover:text-stone-800{% endif %}">Reported <span class="ml-1 text-xs">{{ queue_counts.reported }}</span></a>
@@ -100,7 +101,7 @@
                         <div class="flex flex-wrap items-center gap-1.5 mb-2">
                             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-700">{{ submission.get_kind_display }}</span>
                             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-violet-50 text-violet-700">{{ submission.metadata|ugc_source_label:submission.source }}</span>
-                            {% if submission.status == 'pending' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-700">Pending</span>{% elif submission.status == 'approved' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700">Approved</span>{% elif submission.status == 'removed' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">Removed</span>{% else %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>{% endif %}
+                            {% if active_tab == 'discovered' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-violet-100 text-violet-800">Discovered</span>{% elif submission.status == 'pending' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-700">Pending</span>{% elif submission.status == 'approved' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700">Approved</span>{% elif submission.status == 'removed' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">Removed</span>{% else %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>{% endif %}
                             {% if submission.metadata|ugc_usage_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-blue-50 text-blue-700">Used {{ submission.metadata|ugc_usage_count }}×</span>{% endif %}
                             {% if submission.open_report_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">{{ submission.open_report_count }} report{{ submission.open_report_count|pluralize }}</span>{% endif %}
                         </div>
@@ -114,7 +115,7 @@
 
                 <div class="grid grid-cols-2 gap-2 mt-3 text-[11px]">
                     <div class="rounded-lg bg-stone-50 p-2.5 min-w-0"><div class="text-stone-400 mb-0.5">Attached to</div><div class="font-medium text-stone-700 truncate">{{ submission.target_label|default:submission.target_type }}</div><div class="text-stone-400 mt-0.5 truncate">{{ submission.target_type }} · {{ submission.target_id }}</div></div>
-                    <div class="rounded-lg {% if submission.consent_confirmed %}bg-emerald-50{% else %}bg-red-50{% endif %} p-2.5 min-w-0"><div class="{% if submission.consent_confirmed %}text-emerald-600{% else %}text-red-600{% endif %} mb-0.5">Contributor consent</div>{% if submission.consent_confirmed %}<div class="font-medium text-emerald-800 truncate">Confirmed{% if submission.consent_version %} · {{ submission.consent_version }}{% endif %}</div>{% if submission.consent_at %}<div class="text-emerald-600 mt-0.5 truncate">{{ submission.consent_at|date:"M j, Y g:i A" }}</div>{% endif %}{% else %}<div class="font-medium text-red-800">Not recorded</div><div class="text-red-600 mt-0.5">Approval blocked.</div>{% endif %}</div>
+                    <div class="rounded-lg {% if submission.consent_confirmed %}bg-emerald-50{% else %}bg-red-50{% endif %} p-2.5 min-w-0"><div class="{% if submission.consent_confirmed %}text-emerald-600{% else %}text-red-600{% endif %} mb-0.5">Contributor consent</div>{% if submission.consent_confirmed %}<div class="font-medium text-emerald-800 truncate">Confirmed{% if submission.consent_version %} · {{ submission.consent_version }}{% endif %}</div>{% if submission.consent_at %}<div class="text-emerald-600 mt-0.5 truncate">{{ submission.consent_at|date:"M j, Y g:i A" }}</div>{% endif %}{% else %}<div class="font-medium text-red-800">Not recorded</div><div class="text-red-600 mt-0.5">{% if active_tab == 'discovered' %}Permission needed before approval.{% else %}Approval blocked.{% endif %}</div>{% endif %}</div>
                 </div>
 
                 {% with source_url=submission.metadata|ugc_source_url source_handle=submission.metadata|ugc_source_handle source_external_id=submission.metadata|ugc_source_external_id %}
@@ -144,7 +145,9 @@
                 {% endif %}
 
                 <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3 border-t border-stone-100 {% if not submission.body and not submission.metadata|ugc_usage_count %}mt-3{% else %}mt-4{% endif %}">
-                    {% if submission.status == 'pending' %}
+                    {% if active_tab == 'discovered' %}
+                    <span class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-50 text-violet-700 border border-violet-100">Permission workflow next</span>
+                    {% elif submission.status == 'pending' %}
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Approve</button></form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button></form>
                     {% elif submission.status == 'approved' %}
@@ -162,31 +165,18 @@
 
     <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6"><div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg></div><h2 class="text-sm font-semibold text-stone-800">No matching community content</h2><p class="text-xs text-stone-500 mt-1">Try a different search or original source.</p><button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear filters</button></div>
     {% else %}
-    <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div><h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p></div>
+    <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div>{% if active_tab == 'discovered' %}<h2 class="text-base font-semibold text-stone-800">No discovered content yet</h2><p class="text-sm text-stone-500 mt-1 max-w-lg">Externally discovered posts will land here before they enter the permission and moderation workflow.</p>{% else %}<h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p>{% endif %}</div>
     {% endif %}
 </div>
 
 <div id="ugc-preview-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm p-4 sm:p-8 items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="ugc-preview-title">
     <div id="ugc-preview-panel" class="relative w-full max-w-6xl max-h-full flex flex-col rounded-2xl bg-stone-950 border border-white/10 shadow-2xl overflow-hidden">
         <div class="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/10 text-white">
-            <div class="min-w-0">
-                <div class="flex items-center gap-2 min-w-0">
-                    <div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div>
-                    <span id="ugc-preview-counter" class="text-[11px] text-stone-400 whitespace-nowrap"></span>
-                </div>
-                <div id="ugc-preview-contributor" class="text-xs text-stone-400 truncate mt-0.5"></div>
-            </div>
+            <div class="min-w-0"><div class="flex items-center gap-2 min-w-0"><div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div><span id="ugc-preview-counter" class="text-[11px] text-stone-400 whitespace-nowrap"></span></div><div id="ugc-preview-contributor" class="text-xs text-stone-400 truncate mt-0.5"></div></div>
             <button id="ugc-preview-close" type="button" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl leading-none flex items-center justify-center" aria-label="Close preview">×</button>
         </div>
-        <div class="relative min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black">
-            <button id="ugc-preview-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous image">‹</button>
-            <img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg">
-            <button id="ugc-preview-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next image">›</button>
-        </div>
-        <div id="ugc-preview-mobile-nav" class="hidden sm:hidden items-center justify-between gap-3 px-4 py-3 border-t border-white/10 bg-stone-950">
-            <button id="ugc-preview-prev-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">← Previous</button>
-            <button id="ugc-preview-next-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">Next →</button>
-        </div>
+        <div class="relative min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black"><button id="ugc-preview-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous image">‹</button><img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg"><button id="ugc-preview-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next image">›</button></div>
+        <div id="ugc-preview-mobile-nav" class="hidden sm:hidden items-center justify-between gap-3 px-4 py-3 border-t border-white/10 bg-stone-950"><button id="ugc-preview-prev-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">← Previous</button><button id="ugc-preview-next-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">Next →</button></div>
     </div>
 </div>
 {% endblock %}
@@ -245,64 +235,14 @@
     let previousFocus = null;
     let currentTrigger = null;
 
-    function visiblePreviewTriggers() {
-        return Array.from(document.querySelectorAll('.ugc-card:not(.hidden) .ugc-preview-trigger'));
-    }
+    function visiblePreviewTriggers() { return Array.from(document.querySelectorAll('.ugc-card:not(.hidden) .ugc-preview-trigger')); }
+    function updateNavigationState() { const triggers = visiblePreviewTriggers(); const index = currentTrigger ? triggers.indexOf(currentTrigger) : -1; const hasMany = triggers.length > 1; if (previewCounter) previewCounter.textContent = index >= 0 ? `${index + 1} of ${triggers.length}` : ''; [prevButton, nextButton].forEach((button) => { if (button) button.classList.toggle('invisible', !hasMany); }); if (mobileNav) { mobileNav.classList.toggle('hidden', !hasMany); mobileNav.classList.toggle('flex', hasMany); } }
+    function renderPreview(trigger) { if (!trigger || !previewImage) return; currentTrigger = trigger; previewImage.src = trigger.dataset.previewSrc || ''; previewImage.alt = trigger.dataset.previewTitle || 'Community content preview'; previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview'; previewContributor.textContent = trigger.dataset.previewContributor || ''; updateNavigationState(); }
+    function stepPreview(direction) { const triggers = visiblePreviewTriggers(); if (triggers.length < 2) return; let index = triggers.indexOf(currentTrigger); if (index < 0) index = 0; const nextIndex = (index + direction + triggers.length) % triggers.length; renderPreview(triggers[nextIndex]); }
+    function closePreview() { if (!modal || modal.classList.contains('hidden')) return; modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; previewImage.src = ''; currentTrigger = null; if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus(); }
+    function openPreview(trigger) { if (!modal || !previewImage) return; previousFocus = trigger; renderPreview(trigger); modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden'; closeButton.focus(); }
 
-    function updateNavigationState() {
-        const triggers = visiblePreviewTriggers();
-        const index = currentTrigger ? triggers.indexOf(currentTrigger) : -1;
-        const hasMany = triggers.length > 1;
-        if (previewCounter) previewCounter.textContent = index >= 0 ? `${index + 1} of ${triggers.length}` : '';
-        [prevButton, nextButton].forEach((button) => { if (button) button.classList.toggle('invisible', !hasMany); });
-        if (mobileNav) {
-            mobileNav.classList.toggle('hidden', !hasMany);
-            mobileNav.classList.toggle('flex', hasMany);
-        }
-    }
-
-    function renderPreview(trigger) {
-        if (!trigger || !previewImage) return;
-        currentTrigger = trigger;
-        previewImage.src = trigger.dataset.previewSrc || '';
-        previewImage.alt = trigger.dataset.previewTitle || 'Community content preview';
-        previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview';
-        previewContributor.textContent = trigger.dataset.previewContributor || '';
-        updateNavigationState();
-    }
-
-    function stepPreview(direction) {
-        const triggers = visiblePreviewTriggers();
-        if (triggers.length < 2) return;
-        let index = triggers.indexOf(currentTrigger);
-        if (index < 0) index = 0;
-        const nextIndex = (index + direction + triggers.length) % triggers.length;
-        renderPreview(triggers[nextIndex]);
-    }
-
-    function closePreview() {
-        if (!modal || modal.classList.contains('hidden')) return;
-        modal.classList.add('hidden');
-        modal.classList.remove('flex');
-        document.body.style.overflow = '';
-        previewImage.src = '';
-        currentTrigger = null;
-        if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
-    }
-
-    function openPreview(trigger) {
-        if (!modal || !previewImage) return;
-        previousFocus = trigger;
-        renderPreview(trigger);
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-        document.body.style.overflow = 'hidden';
-        closeButton.focus();
-    }
-
-    document.querySelectorAll('.ugc-preview-trigger').forEach((trigger) => {
-        trigger.addEventListener('click', () => openPreview(trigger));
-    });
+    document.querySelectorAll('.ugc-preview-trigger').forEach((trigger) => { trigger.addEventListener('click', () => openPreview(trigger)); });
     if (closeButton) closeButton.addEventListener('click', closePreview);
     if (prevButton) prevButton.addEventListener('click', () => stepPreview(-1));
     if (nextButton) nextButton.addEventListener('click', () => stepPreview(1));
@@ -310,12 +250,7 @@
     if (nextMobile) nextMobile.addEventListener('click', () => stepPreview(1));
     if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closePreview(); });
     if (panel) panel.addEventListener('click', (event) => event.stopPropagation());
-    document.addEventListener('keydown', (event) => {
-        if (!modal || modal.classList.contains('hidden')) return;
-        if (event.key === 'Escape') closePreview();
-        if (event.key === 'ArrowLeft') { event.preventDefault(); stepPreview(-1); }
-        if (event.key === 'ArrowRight') { event.preventDefault(); stepPreview(1); }
-    });
+    document.addEventListener('keydown', (event) => { if (!modal || modal.classList.contains('hidden')) return; if (event.key === 'Escape') closePreview(); if (event.key === 'ArrowLeft') { event.preventDefault(); stepPreview(-1); } if (event.key === 'ArrowRight') { event.preventDefault(); stepPreview(1); } });
 })();
 </script>
 {% endblock %}
