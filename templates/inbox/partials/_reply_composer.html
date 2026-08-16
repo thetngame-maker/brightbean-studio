@@ -42,13 +42,11 @@
     <div x-show="mode === 'reply'" x-transition>
         {% if message.message_type == 'dm' %}
         <form hx-post="{% url 'inbox:conversation_send_reply' workspace_id=workspace.id message_id=message.id %}"
-              hx-target="#inbox-thread"
-              hx-swap="beforeend"
+              {% if message.social_account.platform == 'instagram_login' %}hx-target="#inbox-detail-panel" hx-swap="innerHTML"{% else %}hx-target="#inbox-thread" hx-swap="beforeend"{% endif %}
               @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) replyText = ''">
         {% else %}
         <form hx-post="{% url 'inbox:send_reply' workspace_id=workspace.id message_id=message.id %}"
-              hx-target="#inbox-thread"
-              hx-swap="beforeend"
+              {% if message.social_account.platform == 'instagram_login' %}hx-target="#inbox-detail-panel" hx-swap="innerHTML"{% else %}hx-target="#inbox-thread" hx-swap="beforeend"{% endif %}
               @htmx:after-request="if (!$event.detail.xhr.getResponseHeader('HX-Reply-Failed')) replyText = ''">
         {% endif %}
             {% csrf_token %}
