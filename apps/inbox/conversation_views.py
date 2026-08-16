@@ -7,6 +7,7 @@ without changing the storage model or the working provider send path.
 """
 
 from django.contrib.auth.decorators import login_required
+from django.db.models import Count
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
@@ -39,6 +40,65 @@ def _refresh_message(message):
     return InboxMessage.objects.select_related("social_account", "assigned_to").get(pk=message.pk)
 
 
+def _customer_identity(message):
+    return {
+        "name": message.sender_name or message.sender_handle or "Customer",
+        "handle": message.sender_handle or "",
+        "avatar_url": message.sender_avatar_url or "",
+    }
+
+
+def _customer_profile_context(message):
+    """Build a lightweight CRM profile from conversation metadata.
+
+    This deliberately lives in InboxMessage.extra so it can ship without a
+    migration and without changing the platform ingestion/reply path.
+    """
+    conversation = _conversation_queryset(message).order_by("received_at")
+    rows = list(conversation)
+    profile = {"email": "", "phone": "", "location": ""}
+    tags = []
+
+    # Prefer the newest stored profile so older rows can safely remain as a
+    # historical copy if a future integration changes how metadata is written.
+    for row in reversed(rows):
+        extra = dict(row.extra or {})
+        stored = extra.get("customer_profile") or {}
+        if stored:
+            profile.update(
+                {
+                    "email": str(stored.get("email") or ""),
+                    "phone": str(stored.get("phone") or ""),
+                    "location": str(stored.get("location") or ""),
+                }
+            )
+            tags = [str(tag) for tag in (extra.get("customer_tags") or []) if str(tag).strip()]
+            break
+
+    reply_count = conversation.aggregate(total=Count("replies"))["total"] or 0
+    first_seen = rows[0].received_at if rows else message.received_at
+    last_seen = rows[-1].received_at if rows else message.received_at
+
+    return {
+        "customer_identity": _customer_identity(message),
+        "customer_profile": profile,
+        "customer_tags": tags,
+        "conversation_stats": {
+            "inbound_count": len(rows) or 1,
+            "reply_count": reply_count,
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+        },
+    }
+
+
+def _detail_context(workspace, message):
+    context = views._detail_context(workspace, message)
+    if message.message_type == InboxMessage.MessageType.DM:
+        context.update(_customer_profile_context(message))
+    return context
+
+
 @login_required
 @require_permission("use_inbox")
 def conversation_detail(request, workspace_id, message_id):
@@ -61,10 +121,61 @@ def conversation_detail(request, workspace_id, message_id):
         conversation.update(status=InboxMessage.Status.OPEN)
         message = _refresh_message(message)
 
-    context = views._detail_context(workspace, message)
+    context = _detail_context(workspace, message)
     if request.htmx:
         return render(request, "inbox/partials/_message_panel.html", context)
     return render(request, "inbox/message_detail.html", context)
+
+
+@login_required
+@require_permission("reply_from_inbox")
+@require_POST
+def conversation_customer_profile(request, workspace_id, message_id):
+    """Save lightweight customer details and tags for a DM conversation."""
+    workspace = views._get_workspace(request, workspace_id)
+    message = get_object_or_404(
+        InboxMessage.objects.select_related("social_account", "assigned_to"),
+        id=message_id,
+        workspace=workspace,
+    )
+    if message.message_type != InboxMessage.MessageType.DM:
+        return HttpResponse("Customer profiles are available for conversations.", status=400)
+
+    profile = {
+        "email": request.POST.get("email", "").strip()[:254],
+        "phone": request.POST.get("phone", "").strip()[:80],
+        "location": request.POST.get("location", "").strip()[:160],
+    }
+    raw_tags = request.POST.get("tags", "")
+    tags = []
+    seen = set()
+    for raw_tag in raw_tags.split(","):
+        tag = raw_tag.strip()[:40]
+        key = tag.lower()
+        if tag and key not in seen:
+            tags.append(tag)
+            seen.add(key)
+        if len(tags) >= 10:
+            break
+
+    conversation = _conversation_queryset(message)
+    changed = False
+    for row in conversation:
+        extra = dict(row.extra or {})
+        if extra.get("customer_profile") != profile or extra.get("customer_tags") != tags:
+            changed = True
+        extra["customer_profile"] = profile
+        extra["customer_tags"] = tags
+        row.extra = extra
+        row.save(update_fields=["extra"])
+
+    if changed:
+        record_activity(message, request.user, "updated customer details.")
+
+    message = _refresh_message(message)
+    context = {"workspace": workspace, "message": message}
+    context.update(_customer_profile_context(message))
+    return render(request, "inbox/partials/_customer_sidebar.html", context)
 
 
 @login_required
@@ -88,7 +199,7 @@ def conversation_change_status(request, workspace_id, message_id):
         label = dict(InboxMessage.Status.choices).get(new_status, new_status)
         record_activity(message, request.user, f"changed the conversation status to {label}.")
 
-    context = views._detail_context(workspace, message)
+    context = _detail_context(workspace, message)
     return render(request, "inbox/partials/_message_panel.html", context)
 
 
@@ -144,7 +255,7 @@ def conversation_assign(request, workspace_id, message_id):
             },
         )
 
-    context = views._detail_context(workspace, message)
+    context = _detail_context(workspace, message)
     return render(request, "inbox/partials/_message_panel.html", context)
 
 
