@@ -6,7 +6,7 @@
 {% block extra_head %}
 <style>
     /* Inbox-specific layout: remove parent padding, fill height */
-    .inbox-shell { margin: -0.75rem; display: flex; flex-direction: column; height: calc(100% + 1.5rem); }
+    .inbox-shell { margin: -0.75rem; display: flex; flex-direction: column; height: calc(100% + 1.5rem); position: relative; }
     .inbox-shell { overflow: hidden; }
     :has(> .inbox-shell) { overflow: visible !important; }
     @media (min-width: 640px) {
@@ -119,6 +119,20 @@
         flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
         color: var(--text-ghost); gap: 12px;
     }
+
+    /* Live inbox toast */
+    .inbox-live-toast {
+        position: absolute; z-index: 50; top: 58px; right: 16px;
+        display: flex; align-items: flex-start; gap: 10px;
+        width: min(340px, calc(100% - 32px)); padding: 11px 13px;
+        background: rgba(28, 25, 23, 0.96); color: white;
+        border-radius: 12px; box-shadow: 0 12px 30px rgba(0,0,0,.16);
+        animation: inboxToastIn 180ms ease-out;
+    }
+    .inbox-live-toast-dot { width: 8px; height: 8px; margin-top: 5px; flex: 0 0 auto; border-radius: 999px; background: var(--primary); }
+    .inbox-live-toast-title { font-size: 12px; line-height: 1.35; font-weight: 700; }
+    .inbox-live-toast-body { margin-top: 2px; font-size: 11px; line-height: 1.4; color: rgba(255,255,255,.74); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    @keyframes inboxToastIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 {% endblock %}
 
@@ -151,6 +165,12 @@
             </div>
         </div>
         <div class="flex items-center gap-2">
+            <button type="button" @click="enableAlerts()"
+                    class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold text-stone-600 bg-white border border-stone-200 rounded-full hover:border-stone-300 hover:bg-stone-50 transition-all duration-150"
+                    :title="alertsEnabled ? 'Browser inbox alerts are enabled' : 'Enable browser inbox alerts'">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                <span x-text="alertsEnabled ? 'Alerts on' : 'Enable alerts'"></span>
+            </button>
             <a href="{% url 'inbox:saved_replies' workspace_id=workspace.id %}"
                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-[12px] font-semibold text-stone-600 bg-white border border-stone-200 rounded-full hover:border-stone-300 hover:bg-stone-50 transition-all duration-150"
                title="Saved Replies">
@@ -165,6 +185,14 @@
                 <span class="hidden sm:inline">SLA</span>
             </a>
             {% endif %}
+        </div>
+    </div>
+
+    <div x-show="toastVisible" x-cloak class="inbox-live-toast" @click="toastVisible = false">
+        <span class="inbox-live-toast-dot"></span>
+        <div class="min-w-0">
+            <div class="inbox-live-toast-title" x-text="toastTitle"></div>
+            <div class="inbox-live-toast-body" x-text="toastBody"></div>
         </div>
     </div>
 
@@ -225,13 +253,89 @@ function inboxController() {
         activeMessageId: null,
         activeMessageUrl: null,
         refreshTimer: null,
+        unreadSnapshot: new Set(),
+        baseTitle: document.title.replace(/^\(\d+\)\s*/, ''),
+        alertsEnabled: false,
+        toastVisible: false,
+        toastTitle: '',
+        toastBody: '',
+        toastTimer: null,
         get selectedCount() { return this.selected.size; },
 
         init() {
+            this.alertsEnabled = window.localStorage.getItem('tngInboxAlerts') === '1' &&
+                ('Notification' in window) && Notification.permission === 'granted';
+            this.unreadSnapshot = this.collectUnreadIds();
+            this.updateDocumentTitle();
             this.refreshTimer = window.setInterval(() => this.refreshInbox(), 12000);
             document.addEventListener('visibilitychange', () => {
                 if (!document.hidden) this.refreshInbox();
             });
+        },
+
+        collectUnreadIds() {
+            const ids = new Set();
+            document.querySelectorAll('#inbox-message-list .inbox-row.is-unread').forEach(row => {
+                const id = (row.id || '').replace(/^msg-/, '');
+                if (id && String(id) !== String(this.activeMessageId || '')) ids.add(id);
+            });
+            return ids;
+        },
+
+        updateDocumentTitle() {
+            const count = this.collectUnreadIds().size;
+            document.title = count > 0 ? `(${count}) ${this.baseTitle}` : this.baseTitle;
+        },
+
+        async enableAlerts() {
+            if (!('Notification' in window)) {
+                this.showToast('Browser alerts unavailable', 'This browser does not support desktop notifications.');
+                return;
+            }
+            let permission = Notification.permission;
+            if (permission === 'default') permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                window.localStorage.setItem('tngInboxAlerts', '1');
+                this.alertsEnabled = true;
+                this.showToast('Inbox alerts enabled', 'New messages can notify you while this tab is in the background.');
+            } else {
+                window.localStorage.removeItem('tngInboxAlerts');
+                this.alertsEnabled = false;
+                this.showToast('Alerts not enabled', 'You can allow notifications later in your browser settings.');
+            }
+        },
+
+        showToast(title, body) {
+            this.toastTitle = title;
+            this.toastBody = body || '';
+            this.toastVisible = true;
+            if (this.toastTimer) window.clearTimeout(this.toastTimer);
+            this.toastTimer = window.setTimeout(() => { this.toastVisible = false; }, 5000);
+        },
+
+        notifyNewMessages(rows) {
+            if (!rows.length) return;
+            const first = rows[0];
+            const sender = first.querySelector('.inbox-row-sender')?.textContent?.trim() || 'New message';
+            const preview = first.querySelector('.inbox-row-preview')?.textContent?.trim() || 'You have a new inbox message.';
+            const title = rows.length > 1 ? `${rows.length} new inbox messages` : `New message from ${sender}`;
+            this.showToast(title, preview);
+
+            if (this.alertsEnabled && document.hidden && Notification.permission === 'granted') {
+                try {
+                    const notification = new Notification(title, {
+                        body: preview,
+                        tag: 'tng-inbox-new-message',
+                        renotify: true,
+                    });
+                    notification.onclick = () => {
+                        window.focus();
+                        notification.close();
+                    };
+                } catch (e) {
+                    /* Notification support varies by browser; the in-app toast still works. */
+                }
+            }
         },
 
         toggleSelect(id) {
@@ -280,7 +384,9 @@ function inboxController() {
             this.activeMessageId = id;
             this.activeMessageUrl = url;
             /* Load detail panel via HTMX */
-            htmx.ajax('GET', url, { target: '#inbox-detail-panel', swap: 'innerHTML' });
+            htmx.ajax('GET', url, { target: '#inbox-detail-panel', swap: 'innerHTML' }).then(() => {
+                window.requestAnimationFrame(() => this.scrollDetailToBottom(true));
+            });
             /* Highlight active row */
             document.querySelectorAll('.inbox-row').forEach(el => el.classList.remove('is-active'));
             const row = document.getElementById('msg-' + id);
@@ -288,23 +394,61 @@ function inboxController() {
                 row.classList.add('is-active');
                 row.classList.remove('is-unread');
             }
+            this.unreadSnapshot = this.collectUnreadIds();
+            this.updateDocumentTitle();
             /* Switch to detail panel on mobile */
             if (window.innerWidth < 768) {
                 this.activePanel = 'detail';
             }
         },
 
+        getDetailScroller() {
+            const panel = document.getElementById('inbox-detail-panel');
+            if (!panel) return null;
+            const candidates = Array.from(panel.querySelectorAll('.overflow-y-auto, [style*="overflow-y"]'));
+            return candidates.find(el => el.scrollHeight > el.clientHeight + 20) || candidates[0] || null;
+        },
+
+        isDetailNearBottom() {
+            const scroller = this.getDetailScroller();
+            if (!scroller) return true;
+            return (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) < 120;
+        },
+
+        scrollDetailToBottom(force) {
+            const scroller = this.getDetailScroller();
+            if (!scroller) return;
+            if (force || this.isDetailNearBottom()) scroller.scrollTop = scroller.scrollHeight;
+        },
+
         refreshInbox() {
             if (document.hidden) return;
             const currentUrl = window.location.pathname + window.location.search;
+            const previousUnread = new Set(this.unreadSnapshot);
+
             htmx.ajax('GET', currentUrl, {
                 target: '#inbox-message-list',
                 swap: 'innerHTML',
             }).then(() => {
                 if (this.activeMessageId) {
                     const row = document.getElementById('msg-' + this.activeMessageId);
-                    if (row) row.classList.add('is-active');
+                    if (row) {
+                        row.classList.add('is-active');
+                        row.classList.remove('is-unread');
+                    }
                 }
+
+                const currentUnread = this.collectUnreadIds();
+                const newRows = [];
+                currentUnread.forEach(id => {
+                    if (!previousUnread.has(id)) {
+                        const row = document.getElementById('msg-' + id);
+                        if (row) newRows.push(row);
+                    }
+                });
+                this.unreadSnapshot = currentUnread;
+                this.updateDocumentTitle();
+                this.notifyNewMessages(newRows);
             });
 
             /* Refresh the open conversation only when the user is not composing a draft. */
@@ -313,9 +457,12 @@ function inboxController() {
                 const hasDraft = composer && composer.value.trim().length > 0;
                 const isTyping = composer && document.activeElement === composer;
                 if (!hasDraft && !isTyping) {
+                    const keepPinned = this.isDetailNearBottom();
                     htmx.ajax('GET', this.activeMessageUrl, {
                         target: '#inbox-detail-panel',
                         swap: 'innerHTML',
+                    }).then(() => {
+                        if (keepPinned) window.requestAnimationFrame(() => this.scrollDetailToBottom(true));
                     });
                 }
             }
