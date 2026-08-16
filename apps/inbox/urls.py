@@ -2,7 +2,7 @@
 
 from django.urls import path
 
-from . import collaboration_views, conversation_views, lead_dashboard, lead_views, team_views, views
+from . import collaboration_views, conversation_views, facebook_health, lead_dashboard, lead_views, team_views, views
 
 app_name = "inbox"
 
@@ -11,6 +11,7 @@ urlpatterns = [
     path("", views.inbox_feed, name="feed"),
     path("follow-up/", lead_views.followup_feed, name="followup_feed"),
     path("leads/", lead_dashboard.lead_dashboard, name="lead_dashboard"),
+    path("facebook-health/", facebook_health.facebook_health, name="facebook_health"),
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
     path("<uuid:message_id>/conversation/", conversation_views.conversation_detail, name="conversation_detail"),
