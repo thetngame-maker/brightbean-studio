@@ -9,6 +9,8 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.media_library.models import MediaAsset
+from apps.media_library.services import create_asset
+from apps.media_library.tasks import process_media_asset
 from apps.members.decorators import require_permission
 from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
@@ -45,6 +47,12 @@ def _return_to_queue(request, workspace):
     if return_to:
         return redirect(return_to)
     return redirect("ugc:moderation_queue", workspace_id=workspace.id)
+
+
+def _render_manual_errors(request, workspace, errors):
+    for error in errors:
+        messages.error(request, error)
+    return redirect("ugc:manual_submission_form", workspace_id=workspace.id)
 
 
 @login_required
@@ -118,9 +126,9 @@ def moderation_queue(request, workspace_id):
 def create_manual_submission_view(request, workspace_id):
     """Create one pending item from the moderation screen.
 
-    This is useful for end-to-end testing and for content a moderator receives
-    outside the normal TN Game API flow. It intentionally creates Pending UGC;
-    approval still has to go through the normal consent-gated service.
+    Manual moderators may upload a new image or select one already in the
+    workspace media library. New uploads use the same validated media service
+    as the REST API, so UGC never gets a second, weaker storage path.
     """
 
     workspace = _get_workspace(request, workspace_id)
@@ -130,6 +138,7 @@ def create_manual_submission_view(request, workspace_id):
     target_id = request.POST.get("target_id", "").strip()
     rating_raw = request.POST.get("rating", "").strip()
     media_asset_raw = request.POST.get("media_asset_id", "").strip()
+    uploaded_media = request.FILES.get("media_upload")
     consent_confirmed = request.POST.get("consent_confirmed") == "on"
     consent_version = request.POST.get("consent_version", "").strip()
 
@@ -155,18 +164,49 @@ def create_manual_submission_view(request, workspace_id):
     if consent_confirmed and not consent_version:
         errors.append("Consent version is required when consent is confirmed.")
 
+    # Validate the selected existing asset before creating a new upload. A new
+    # upload, when present, intentionally takes precedence over the selection.
     media_asset = None
-    if media_asset_raw:
-        media_asset = MediaAsset.objects.filter(id=media_asset_raw, workspace=workspace).first()
+    if media_asset_raw and not uploaded_media:
+        media_asset = MediaAsset.objects.filter(
+            id=media_asset_raw,
+            workspace=workspace,
+            media_type=MediaAsset.MediaType.IMAGE,
+        ).first()
         if media_asset is None:
-            errors.append("That media asset does not belong to this workspace.")
-    if kind == UGCSubmission.Kind.PHOTO and media_asset is None:
-        errors.append("Photo submissions require a Media Asset ID.")
+            errors.append("That image does not belong to this workspace.")
+
+    if kind == UGCSubmission.Kind.PHOTO and not uploaded_media and media_asset is None:
+        errors.append("Photo submissions require an uploaded or selected image.")
 
     if errors:
-        for error in errors:
-            messages.error(request, error)
-        return _return_to_queue(request, workspace)
+        return _render_manual_errors(request, workspace, errors)
+
+    if uploaded_media:
+        try:
+            media_asset = create_asset(
+                organization=workspace.organization,
+                workspace=workspace,
+                uploaded_file=uploaded_media,
+                uploaded_by=request.user,
+                alt_text=request.POST.get("title", "").strip()[:255],
+                title=request.POST.get("title", "").strip()[:255],
+                tags=["community-content", "ugc"],
+            )
+        except ValidationError as exc:
+            if hasattr(exc, "messages"):
+                upload_errors = exc.messages
+            else:
+                upload_errors = [str(exc)]
+            return _render_manual_errors(request, workspace, upload_errors)
+
+        if media_asset.media_type != MediaAsset.MediaType.IMAGE:
+            # create_asset has already validated/storage-accounted the file; do
+            # not attach a non-image to a Photo submission. Leave it in the
+            # library so the moderator can intentionally reuse/remove it there.
+            return _render_manual_errors(request, workspace, ["Community photo uploads must be an image."])
+
+        process_media_asset(str(media_asset.id))
 
     submission = UGCSubmission.objects.create(
         workspace=workspace,
@@ -194,7 +234,12 @@ def create_manual_submission_view(request, workspace_id):
         action="ugc.submitted",
         target=submission,
         target_label=str(submission),
-        metadata={"source": "manual", "kind": kind, "consent_confirmed": consent_confirmed},
+        metadata={
+            "source": "manual",
+            "kind": kind,
+            "consent_confirmed": consent_confirmed,
+            "media_asset_id": str(media_asset.id) if media_asset else "",
+        },
         request=request,
     )
     messages.success(request, "Community submission added to the Pending queue.")
