@@ -26,6 +26,26 @@ def json_attr(value):
     return mark_safe(escape(json.dumps(value, ensure_ascii=False, default=str)))
 
 
+@register.filter
+def ugc_usage_count(metadata):
+    """Number of Studio drafts/posts created from one UGC submission."""
+    if not isinstance(metadata, dict):
+        return 0
+    post_ids = metadata.get("studio_post_ids") or []
+    return len(post_ids) if isinstance(post_ids, list) else 0
+
+
+@register.filter
+def ugc_latest_post_id(metadata):
+    """Most recently created Studio post id recorded on a UGC submission."""
+    if not isinstance(metadata, dict):
+        return ""
+    post_ids = metadata.get("studio_post_ids") or []
+    if not isinstance(post_ids, list) or not post_ids:
+        return ""
+    return str(post_ids[-1])
+
+
 @register.inclusion_tag("components/ui_select.html")
 def ui_select(
     *,
