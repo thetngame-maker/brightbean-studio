@@ -12,6 +12,7 @@ urlpatterns = [
     # Message detail + thread
     path("<uuid:message_id>/", views.message_detail, name="message_detail"),
     path("<uuid:message_id>/conversation/", conversation_views.conversation_detail, name="conversation_detail"),
+    path("<uuid:message_id>/conversation/customer/", conversation_views.conversation_customer_profile, name="conversation_customer_profile"),
     # Reply to message
     path("<uuid:message_id>/reply/", views.send_reply, name="send_reply"),
     path("<uuid:message_id>/conversation/reply/", conversation_views.conversation_send_reply, name="conversation_send_reply"),
