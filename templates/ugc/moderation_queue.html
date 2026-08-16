@@ -50,7 +50,10 @@
             </form>
             <label for="ugc-sort" class="sr-only">Sort community content</label>
             <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
-                <option value="newest">Newest</option><option value="oldest">Oldest</option><option value="used">Most used</option><option value="reported">Most reported</option>
+                <option value="newest">Newest</option>
+                <option value="oldest">Oldest</option>
+                <option value="used">Most used</option>
+                <option value="reported">Most reported</option>
             </select>
             <span id="ugc-result-count" class="text-[11px] text-stone-400 whitespace-nowrap"></span>
         </div>
@@ -61,12 +64,23 @@
         {% for submission in submissions %}
         <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-submitted="{{ submission.submitted_at|date:'U' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
             {% if submission.media_asset %}
-            <div class="bg-stone-100 border-b border-stone-200 overflow-hidden" style="max-height: 220px;">
-                {% if submission.media_asset.is_image %}<img src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" class="w-full h-full object-cover" style="height: 220px;">
-                {% elif submission.media_asset.is_video %}<video controls preload="metadata" class="w-full bg-black" style="height: 220px;"><source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}"></video>
-                {% else %}<div class="p-6 text-xs text-stone-500 text-center">{{ submission.media_asset.filename }}</div>{% endif %}
+            <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
+                {% if submission.media_asset.is_image %}
+                <button type="button" class="ugc-preview-trigger block w-full relative cursor-zoom-in" data-preview-src="{{ submission.media_asset.file.url }}" data-preview-title="{{ submission.title|default:submission.target_label|default:'Community submission' }}" data-preview-contributor="{% if submission.attribution == 'anonymous' %}Anonymous contributor{% elif submission.attribution == 'handle' and submission.contributor_handle %}@{{ submission.contributor_handle }}{% elif submission.contributor_name %}{{ submission.contributor_name }}{% elif submission.contributor %}{{ submission.contributor.name|default:submission.contributor.email }}{% else %}Community contributor{% endif %}" aria-label="Preview {{ submission.title|default:submission.target_label|default:'community submission' }}">
+                    <img src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" class="w-full h-full object-cover" style="height: 220px;">
+                    <span class="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white backdrop-blur-sm">
+                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20L16.5 16.5M11 8V14M8 11H14"/></svg>
+                        Preview
+                    </span>
+                </button>
+                {% elif submission.media_asset.is_video %}
+                <video controls preload="metadata" class="w-full bg-black" style="height: 220px;"><source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}"></video>
+                {% else %}
+                <div class="p-6 text-xs text-stone-500 text-center">{{ submission.media_asset.filename }}</div>
+                {% endif %}
             </div>
             {% endif %}
+
             <div class="p-3.5 flex flex-col flex-1 min-w-0">
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
@@ -81,27 +95,65 @@
                     </div>
                     {% if submission.rating %}<div class="flex-shrink-0 text-xs font-semibold text-amber-600">★ {{ submission.rating }}/5</div>{% endif %}
                 </div>
+
                 {% if submission.body %}<p class="text-xs text-stone-700 leading-5 mt-3 whitespace-pre-line line-clamp-3">{{ submission.body }}</p>{% endif %}
+
                 <div class="grid grid-cols-2 gap-2 mt-3 text-[11px]">
                     <div class="rounded-lg bg-stone-50 p-2.5 min-w-0"><div class="text-stone-400 mb-0.5">Attached to</div><div class="font-medium text-stone-700 truncate">{{ submission.target_label|default:submission.target_type }}</div><div class="text-stone-400 mt-0.5 truncate">{{ submission.target_type }} · {{ submission.target_id }}</div></div>
                     <div class="rounded-lg {% if submission.consent_confirmed %}bg-emerald-50{% else %}bg-red-50{% endif %} p-2.5 min-w-0"><div class="{% if submission.consent_confirmed %}text-emerald-600{% else %}text-red-600{% endif %} mb-0.5">Contributor consent</div>{% if submission.consent_confirmed %}<div class="font-medium text-emerald-800 truncate">Confirmed{% if submission.consent_version %} · {{ submission.consent_version }}{% endif %}</div>{% if submission.consent_at %}<div class="text-emerald-600 mt-0.5 truncate">{{ submission.consent_at|date:"M j, Y g:i A" }}</div>{% endif %}{% else %}<div class="font-medium text-red-800">Not recorded</div><div class="text-red-600 mt-0.5">Approval blocked.</div>{% endif %}</div>
                 </div>
-                {% if submission.metadata|ugc_usage_count %}{% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}<div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-2.5 flex items-center justify-between gap-2 min-w-0"><div class="min-w-0"><div class="text-[11px] font-semibold text-blue-700">Studio usage</div><div class="text-xs text-blue-900 mt-0.5 truncate">Used in {{ usage_count }} post{{ usage_count|pluralize }}.</div></div>{% if latest_post_id %}<a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=latest_post_id %}" class="text-[11px] font-semibold text-blue-700 hover:text-blue-900 whitespace-nowrap">Open →</a>{% endif %}</div>{% endwith %}{% endif %}
-                {% if submission.active_reports %}<div class="mt-3 space-y-2"><div class="text-[11px] font-semibold uppercase tracking-wide text-red-600">Open reports</div>{% for report in submission.active_reports %}<div class="rounded-lg border border-red-100 bg-red-50/60 p-2.5"><div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-xs font-semibold text-red-800">{{ report.get_reason_display }}</div><div class="text-[11px] text-red-600 mt-0.5">{{ report.reporter_name|default:"Community member" }} · {{ report.created_at|naturaltime }}</div>{% if report.details %}<p class="text-xs text-stone-700 mt-2 line-clamp-3">{{ report.details }}</p>{% endif %}</div><div class="flex gap-1 flex-shrink-0"><form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">{% csrf_token %}<input type="hidden" name="status" value="dismissed"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2 py-1 text-[11px] font-medium rounded-md border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 cursor-pointer">Dismiss</button></form><form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">{% csrf_token %}<input type="hidden" name="status" value="resolved"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2 py-1 text-[11px] font-medium rounded-md bg-red-600 text-white hover:bg-red-700 cursor-pointer">Resolve</button></form></div></div></div>{% endfor %}</div>{% endif %}
+
+                {% if submission.metadata|ugc_usage_count %}
+                {% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}
+                <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-2.5 flex items-center justify-between gap-2 min-w-0"><div class="min-w-0"><div class="text-[11px] font-semibold text-blue-700">Studio usage</div><div class="text-xs text-blue-900 mt-0.5 truncate">Used in {{ usage_count }} post{{ usage_count|pluralize }}.</div></div>{% if latest_post_id %}<a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=latest_post_id %}" class="text-[11px] font-semibold text-blue-700 hover:text-blue-900 whitespace-nowrap">Open →</a>{% endif %}</div>
+                {% endwith %}
+                {% endif %}
+
+                {% if submission.active_reports %}
+                <div class="mt-3 space-y-2">
+                    <div class="text-[11px] font-semibold uppercase tracking-wide text-red-600">Open reports</div>
+                    {% for report in submission.active_reports %}
+                    <div class="rounded-lg border border-red-100 bg-red-50/60 p-2.5"><div class="flex items-start justify-between gap-2"><div class="min-w-0"><div class="text-xs font-semibold text-red-800">{{ report.get_reason_display }}</div><div class="text-[11px] text-red-600 mt-0.5">{{ report.reporter_name|default:"Community member" }} · {{ report.created_at|naturaltime }}</div>{% if report.details %}<p class="text-xs text-stone-700 mt-2 line-clamp-3">{{ report.details }}</p>{% endif %}</div><div class="flex gap-1 flex-shrink-0"><form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">{% csrf_token %}<input type="hidden" name="status" value="dismissed"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2 py-1 text-[11px] font-medium rounded-md border border-stone-200 bg-white text-stone-600 hover:bg-stone-50 cursor-pointer">Dismiss</button></form><form method="post" action="{% url 'ugc:resolve_report' workspace_id=workspace.id report_id=report.id %}">{% csrf_token %}<input type="hidden" name="status" value="resolved"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2 py-1 text-[11px] font-medium rounded-md bg-red-600 text-white hover:bg-red-700 cursor-pointer">Resolve</button></form></div></div></div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+
                 <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3 border-t border-stone-100 {% if not submission.body and not submission.metadata|ugc_usage_count %}mt-3{% else %}mt-4{% endif %}">
-                    {% if submission.status == 'pending' %}<form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Approve</button></form><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button></form>
-                    {% elif submission.status == 'approved' %}<form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer"><svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>{% if submission.metadata|ugc_usage_count %}Use again{% else %}Use in post{% endif %}</button></form><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Remove</button></form>
-                    {% elif submission.status == 'removed' %}<form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="restore"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Restore</button></form>{% endif %}
+                    {% if submission.status == 'pending' %}
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Approve</button></form>
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button></form>
+                    {% elif submission.status == 'approved' %}
+                    <form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer"><svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>{% if submission.metadata|ugc_usage_count %}Use again{% else %}Use in post{% endif %}</button></form>
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Remove</button></form>
+                    {% elif submission.status == 'removed' %}
+                    <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="restore"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Restore</button></form>
+                    {% endif %}
                     {% if submission.target_url %}<a href="{{ submission.target_url }}" target="_blank" rel="noopener noreferrer" class="ml-auto text-xs font-medium text-stone-500 hover:text-stone-800">Target ↗</a>{% endif %}
                 </div>
             </div>
         </article>
         {% endfor %}
     </div>
+
     <div id="ugc-filter-empty" class="hidden min-h-[280px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex-col items-center justify-center text-center px-6"><div class="w-10 h-10 rounded-xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="19" height="19" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21L16.65 16.65"/></svg></div><h2 class="text-sm font-semibold text-stone-800">No matching community content</h2><p class="text-xs text-stone-500 mt-1">Try a different title, contributor, caption, or location.</p><button id="ugc-empty-clear" type="button" class="mt-3 text-xs font-semibold text-orange-600 hover:text-orange-700">Clear search</button></div>
     {% else %}
     <div class="flex-1 min-h-[360px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6"><div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-stone-400 mb-3"><svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21V19A4 4 0 0016 15H8A4 4 0 004 19V21"/><circle cx="12" cy="7" r="4"/><path d="M19 8V14M16 11H22"/></svg></div><h2 class="text-base font-semibold text-stone-800">No {{ active_tab }} community content</h2><p class="text-sm text-stone-500 mt-1 max-w-md">When community submissions match this view, they’ll appear here for review.</p></div>
     {% endif %}
+</div>
+
+<div id="ugc-preview-modal" class="hidden fixed inset-0 z-[300] bg-black/80 backdrop-blur-sm p-4 sm:p-8 items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="ugc-preview-title">
+    <div id="ugc-preview-panel" class="relative w-full max-w-6xl max-h-full flex flex-col rounded-2xl bg-stone-950 border border-white/10 shadow-2xl overflow-hidden">
+        <div class="flex items-center justify-between gap-4 px-4 py-3 border-b border-white/10 text-white">
+            <div class="min-w-0">
+                <div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div>
+                <div id="ugc-preview-contributor" class="text-xs text-stone-400 truncate mt-0.5"></div>
+            </div>
+            <button id="ugc-preview-close" type="button" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl leading-none flex items-center justify-center" aria-label="Close preview">×</button>
+        </div>
+        <div class="min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black">
+            <img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg">
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -114,30 +166,70 @@
     const clearButton = document.getElementById('ugc-search-clear');
     const sort = document.getElementById('ugc-sort');
     const grid = document.getElementById('ugc-card-grid');
-    if (!search || !searchButton) return;
-    if (!grid) {
-        searchButton.addEventListener('click', (event) => event.preventDefault());
-        search.addEventListener('keydown', (event) => { if (event.key === 'Enter') event.preventDefault(); });
-        return;
+
+    if (search && searchButton) {
+        if (!grid) {
+            searchButton.addEventListener('click', (event) => event.preventDefault());
+            search.addEventListener('keydown', (event) => { if (event.key === 'Enter') event.preventDefault(); });
+        } else {
+            const emptyClear = document.getElementById('ugc-empty-clear');
+            const empty = document.getElementById('ugc-filter-empty');
+            const resultCount = document.getElementById('ugc-result-count');
+            const cards = Array.from(grid.querySelectorAll('.ugc-card'));
+            let activeQuery = '';
+            cards.forEach((card) => { card.dataset.searchText = (card.textContent || '').toLocaleLowerCase(); });
+            function num(card, key) { const value = Number(card.dataset[key] || 0); return Number.isFinite(value) ? value : 0; }
+            function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
+            function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; sorted.forEach((card) => { grid.appendChild(card); const matches = !activeQuery || card.dataset.searchText.includes(activeQuery); card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0; const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
+            function clearSearch() { search.value = ''; activeQuery = ''; refresh(); search.focus(); }
+            function applySearch() { activeQuery = (search.value || '').trim().toLocaleLowerCase(); refresh(); search.blur(); }
+            searchButton.addEventListener('click', applySearch);
+            search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } });
+            search.addEventListener('input', () => { const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); });
+            sort.addEventListener('change', refresh);
+            clearButton.addEventListener('click', clearSearch);
+            if (emptyClear) emptyClear.addEventListener('click', clearSearch);
+            refresh();
+        }
     }
-    const emptyClear = document.getElementById('ugc-empty-clear');
-    const empty = document.getElementById('ugc-filter-empty');
-    const resultCount = document.getElementById('ugc-result-count');
-    const cards = Array.from(grid.querySelectorAll('.ugc-card'));
-    let activeQuery = '';
-    cards.forEach((card) => { card.dataset.searchText = (card.textContent || '').toLocaleLowerCase(); });
-    function num(card, key) { const value = Number(card.dataset[key] || 0); return Number.isFinite(value) ? value : 0; }
-    function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
-    function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; sorted.forEach((card) => { grid.appendChild(card); const matches = !activeQuery || card.dataset.searchText.includes(activeQuery); card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0; const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
-    function clearSearch() { search.value = ''; activeQuery = ''; refresh(); search.focus(); }
-    function applySearch() { activeQuery = (search.value || '').trim().toLocaleLowerCase(); refresh(); search.blur(); }
-    searchButton.addEventListener('click', applySearch);
-    search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } });
-    search.addEventListener('input', () => { const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); });
-    sort.addEventListener('change', refresh);
-    clearButton.addEventListener('click', clearSearch);
-    if (emptyClear) emptyClear.addEventListener('click', clearSearch);
-    refresh();
+
+    const modal = document.getElementById('ugc-preview-modal');
+    const panel = document.getElementById('ugc-preview-panel');
+    const previewImage = document.getElementById('ugc-preview-image');
+    const previewTitle = document.getElementById('ugc-preview-title');
+    const previewContributor = document.getElementById('ugc-preview-contributor');
+    const closeButton = document.getElementById('ugc-preview-close');
+    let previousFocus = null;
+
+    function closePreview() {
+        if (!modal || modal.classList.contains('hidden')) return;
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+        document.body.style.overflow = '';
+        previewImage.src = '';
+        if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
+    }
+
+    function openPreview(trigger) {
+        if (!modal || !previewImage) return;
+        previousFocus = trigger;
+        previewImage.src = trigger.dataset.previewSrc || '';
+        previewImage.alt = trigger.dataset.previewTitle || 'Community content preview';
+        previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview';
+        previewContributor.textContent = trigger.dataset.previewContributor || '';
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        document.body.style.overflow = 'hidden';
+        closeButton.focus();
+    }
+
+    document.querySelectorAll('.ugc-preview-trigger').forEach((trigger) => {
+        trigger.addEventListener('click', () => openPreview(trigger));
+    });
+    if (closeButton) closeButton.addEventListener('click', closePreview);
+    if (modal) modal.addEventListener('click', (event) => { if (event.target === modal) closePreview(); });
+    if (panel) panel.addEventListener('click', (event) => event.stopPropagation());
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape') closePreview(); });
 })();
 </script>
 {% endblock %}
