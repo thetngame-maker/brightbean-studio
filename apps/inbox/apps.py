@@ -17,10 +17,19 @@ class InboxConfig(AppConfig):
     @staticmethod
     def _register_tasks(sender, **kwargs):
         from apps.common.background import register_recurring_task
+        from apps.inbox.instagram_deep_sync import (
+            INSTAGRAM_DEEP_SYNC_INTERVAL_SECONDS,
+            run_instagram_deep_sync_cycle,
+        )
         from apps.inbox.tasks import INBOX_SYNC_INTERVAL_SECONDS, run_inbox_sync_cycle
 
         register_recurring_task(
             run_inbox_sync_cycle,
             repeat=INBOX_SYNC_INTERVAL_SECONDS,
             verbose_name="run_inbox_sync_cycle",
+        )
+        register_recurring_task(
+            run_instagram_deep_sync_cycle,
+            repeat=INSTAGRAM_DEEP_SYNC_INTERVAL_SECONDS,
+            verbose_name="run_instagram_deep_sync_cycle",
         )
