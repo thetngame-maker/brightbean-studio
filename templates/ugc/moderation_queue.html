@@ -129,6 +129,29 @@
                 </div>
                 {% endwith %}
 
+                {% if active_tab == 'discovered' %}
+                {% with permission_status=submission.metadata|ugc_permission_status permission_label=submission.metadata|ugc_permission_label %}
+                <div class="mt-3 rounded-lg border {% if permission_status == 'requested' %}border-amber-200 bg-amber-50/70{% elif permission_status == 'declined' %}border-red-200 bg-red-50/70{% else %}border-stone-200 bg-stone-50{% endif %} p-2.5">
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="min-w-0">
+                            <div class="text-[11px] font-semibold {% if permission_status == 'requested' %}text-amber-700{% elif permission_status == 'declined' %}text-red-700{% else %}text-stone-600{% endif %}">Creator permission</div>
+                            <div class="text-xs font-medium mt-0.5 {% if permission_status == 'requested' %}text-amber-900{% elif permission_status == 'declined' %}text-red-900{% else %}text-stone-800{% endif %}">{{ permission_label }}</div>
+                        </div>
+                        {% if permission_status == 'requested' %}<span class="inline-flex w-2 h-2 mt-1.5 rounded-full bg-amber-400"></span>{% elif permission_status == 'declined' %}<span class="inline-flex w-2 h-2 mt-1.5 rounded-full bg-red-400"></span>{% else %}<span class="inline-flex w-2 h-2 mt-1.5 rounded-full bg-stone-300"></span>{% endif %}
+                    </div>
+                    <div class="flex flex-wrap gap-1.5 mt-2.5">
+                        {% if permission_status != 'requested' %}
+                        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-amber-200 bg-white text-amber-700 hover:bg-amber-50 cursor-pointer">Mark requested</button></form>
+                        {% endif %}
+                        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer">Permission granted</button></form>
+                        {% if permission_status != 'declined' %}
+                        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-red-200 bg-white text-red-700 hover:bg-red-50 cursor-pointer">Declined</button></form>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endwith %}
+                {% endif %}
+
                 {% if submission.metadata|ugc_usage_count %}
                 {% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}
                 <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-2.5 flex items-center justify-between gap-2 min-w-0"><div class="min-w-0"><div class="text-[11px] font-semibold text-blue-700">Studio usage</div><div class="text-xs text-blue-900 mt-0.5 truncate">Used in {{ usage_count }} post{{ usage_count|pluralize }}.</div></div>{% if latest_post_id %}<a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=latest_post_id %}" class="text-[11px] font-semibold text-blue-700 hover:text-blue-900 whitespace-nowrap">Open →</a>{% endif %}</div>
@@ -146,7 +169,7 @@
 
                 <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3 border-t border-stone-100 {% if not submission.body and not submission.metadata|ugc_usage_count %}mt-3{% else %}mt-4{% endif %}">
                     {% if active_tab == 'discovered' %}
-                    <span class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-50 text-violet-700 border border-violet-100">Permission workflow next</span>
+                    <span class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-50 text-violet-700 border border-violet-100">Awaiting permission</span>
                     {% elif submission.status == 'pending' %}
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Approve</button></form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button></form>
