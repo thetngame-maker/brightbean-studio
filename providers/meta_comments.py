@@ -376,6 +376,9 @@ def _to_message(
 
     seen.add(comment_id)
     media_id = str(media.get("id") or "")
+    media_type = str(media.get("media_type") or "")
+    media_url = str(media.get("media_url") or "")
+    thumbnail_url = str(media.get("thumbnail_url") or "")
     return InboxMessage(
         platform_message_id=comment_id,
         sender_id=author_id,
@@ -392,6 +395,10 @@ def _to_message(
             "stored_post_id": media_id,
             "parent_id": parent_id,
             "post_permalink_url": media.get("permalink", ""),
+            "post_caption": str(media.get("caption") or ""),
+            "post_media_type": media_type,
+            "post_media_url": media_url,
+            "post_thumbnail_url": thumbnail_url,
             # The platform user id, matching what the webhook path stores and
             # what FacebookProvider's poll emits. Re-polling a comment the
             # webhook already stored must not rewrite this column.
