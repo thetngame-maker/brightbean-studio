@@ -37,6 +37,22 @@ def sidebar_context(request):
 
     workspace = getattr(request, "workspace", None)
 
+    # The Inbox page already refreshes itself every 12 seconds. While that page
+    # is actively open, use those renders as a throttled safety net for
+    # Instagram ingestion. The worker remains the primary background path, but
+    # a missing/stalled recurring task can no longer force the user to press
+    # "Sync Instagram Now" just to see new comments.
+    resolver_match = getattr(request, "resolver_match", None)
+    if (
+        workspace
+        and resolver_match
+        and resolver_match.namespace == "inbox"
+        and resolver_match.url_name == "feed"
+    ):
+        from apps.inbox.live_sync import maybe_sync_instagram_workspace
+
+        maybe_sync_instagram_workspace(workspace)
+
     if workspace:
         from apps.inbox.models import InboxMessage
 
