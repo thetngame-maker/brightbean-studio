@@ -17,7 +17,7 @@ from apps.notifications.engine import notify
 from apps.notifications.models import EventType
 
 from . import views
-from .collaboration import record_activity, user_display_name
+from .collaboration import inbox_action_url, record_activity, user_display_name
 from .forms import AssignForm, StatusForm
 from .models import InboxMessage
 
@@ -140,6 +140,7 @@ def conversation_assign(request, workspace_id, message_id):
             data={
                 "message_id": str(message.id),
                 "workspace_id": str(workspace.id),
+                "action_url": inbox_action_url(message),
             },
         )
 
