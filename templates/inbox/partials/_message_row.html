@@ -9,6 +9,8 @@
 <div id="msg-{{ message.id }}"
      class="inbox-row {% if message.status == 'unread' %}is-unread{% endif %}"
      data-social-account-id="{{ message.social_account_id }}"
+     data-channel-name="{{ message.social_account.account_name|default:message.social_account.account_handle }}"
+     data-detail-url="{{ detail_url }}"
      @click="selectMessage('{{ message.id }}', '{{ detail_url }}')"
      role="button"
      tabindex="0">
