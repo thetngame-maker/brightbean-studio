@@ -222,7 +222,17 @@ function inboxController() {
     return {
         activePanel: 'list',
         selected: new Set(),
+        activeMessageId: null,
+        activeMessageUrl: null,
+        refreshTimer: null,
         get selectedCount() { return this.selected.size; },
+
+        init() {
+            this.refreshTimer = window.setInterval(() => this.refreshInbox(), 12000);
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) this.refreshInbox();
+            });
+        },
 
         toggleSelect(id) {
             if (this.selected.has(id)) {
@@ -267,6 +277,8 @@ function inboxController() {
         },
 
         selectMessage(id, url) {
+            this.activeMessageId = id;
+            this.activeMessageUrl = url;
             /* Load detail panel via HTMX */
             htmx.ajax('GET', url, { target: '#inbox-detail-panel', swap: 'innerHTML' });
             /* Highlight active row */
@@ -279,6 +291,33 @@ function inboxController() {
             /* Switch to detail panel on mobile */
             if (window.innerWidth < 768) {
                 this.activePanel = 'detail';
+            }
+        },
+
+        refreshInbox() {
+            if (document.hidden) return;
+            const currentUrl = window.location.pathname + window.location.search;
+            htmx.ajax('GET', currentUrl, {
+                target: '#inbox-message-list',
+                swap: 'innerHTML',
+            }).then(() => {
+                if (this.activeMessageId) {
+                    const row = document.getElementById('msg-' + this.activeMessageId);
+                    if (row) row.classList.add('is-active');
+                }
+            });
+
+            /* Refresh the open conversation only when the user is not composing a draft. */
+            if (this.activeMessageUrl) {
+                const composer = document.querySelector('#inbox-detail-panel textarea[name="body"]');
+                const hasDraft = composer && composer.value.trim().length > 0;
+                const isTyping = composer && document.activeElement === composer;
+                if (!hasDraft && !isTyping) {
+                    htmx.ajax('GET', this.activeMessageUrl, {
+                        target: '#inbox-detail-panel',
+                        swap: 'innerHTML',
+                    });
+                }
             }
         },
 
