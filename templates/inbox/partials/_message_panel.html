@@ -110,7 +110,7 @@
                     </div>
                     {% endif %}
                     <div class="p-3">
-                        <div class="flex items-center justify-between gap-3 mb-2">
+                        <div class="flex items-center justify-between gap-3 mb-3">
                             <div class="flex items-center gap-2 min-w-0">
                                 {% include "partials/_platform_icon.html" with platform=message.social_account.platform size="sm" %}
                                 <span class="text-[11px] font-semibold text-stone-700 truncate">{{ message.social_account.account_name|default:message.social_account.account_handle }}</span>
@@ -119,11 +119,14 @@
                             <span class="rounded-full bg-stone-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-stone-500">{{ post_context.media_type }}</span>
                             {% endif %}
                         </div>
-                        {% if post_context.caption %}
-                        <p class="text-[12px] text-stone-700 leading-relaxed line-clamp-5">{{ post_context.caption }}</p>
-                        {% else %}
-                        <p class="text-[12px] text-stone-500">Open the original Instagram post to view the full media and caption.</p>
-                        {% endif %}
+                        <div class="rounded-lg bg-stone-50 border border-stone-100 px-3 py-2.5">
+                            <div class="text-[9px] font-semibold uppercase tracking-[0.08em] text-stone-400 mb-1">Caption</div>
+                            {% if post_context.caption %}
+                            <p class="text-[12px] text-stone-700 leading-relaxed line-clamp-8 whitespace-pre-wrap">{{ post_context.caption }}</p>
+                            {% else %}
+                            <p class="text-[12px] text-stone-500">No caption available for this post.</p>
+                            {% endif %}
+                        </div>
                         <div class="mt-2 pt-2 border-t border-stone-100 flex items-center justify-between">
                             <span class="text-[10px] text-stone-400">Hover preview</span>
                             <span class="text-[10px] font-semibold text-orange-600">Click to open Instagram ↗</span>
