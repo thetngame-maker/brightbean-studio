@@ -79,7 +79,7 @@
 
             {% if message.assigned_to %}
             <span class="badge-pill" style="background: var(--accent-indigo-soft); color: var(--accent-indigo);">
-                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 8zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                 {% if message.assigned_to.id == request.user.id %}You{% else %}{{ message.assigned_to|inbox_display_name|truncatechars:10 }}{% endif %}
             </span>
             {% else %}
