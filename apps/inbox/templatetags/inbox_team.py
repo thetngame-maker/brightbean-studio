@@ -1,5 +1,6 @@
 from django import template
 
+from apps.inbox.collaboration import ACTIVITY_PREFIX, mention_key, user_display_name
 from apps.inbox.models import InboxMessage
 from apps.members.models import WorkspaceMembership
 
@@ -22,26 +23,30 @@ def _work_item_count(queryset):
 
 
 def _member_display_name(member):
-    """Return a useful display name without assuming Django's default User API."""
-    first_name = str(getattr(member, "first_name", "") or "").strip()
-    last_name = str(getattr(member, "last_name", "") or "").strip()
-    full_name = " ".join(part for part in (first_name, last_name) if part).strip()
-    if full_name:
-        return full_name
+    return user_display_name(member)
 
-    name = str(getattr(member, "name", "") or "").strip()
-    if name:
-        return name
 
-    email = str(getattr(member, "email", "") or "").strip()
-    if email:
-        return email
+@register.filter
+def inbox_display_name(user):
+    return user_display_name(user)
 
-    username = str(getattr(member, "username", "") or "").strip()
-    if username:
-        return username
 
-    return "Team member"
+@register.filter
+def inbox_mention_key(user):
+    return mention_key(user)
+
+
+@register.filter
+def is_activity_note(body):
+    return str(body or "").startswith(ACTIVITY_PREFIX)
+
+
+@register.filter
+def activity_note_text(body):
+    value = str(body or "")
+    if value.startswith(ACTIVITY_PREFIX):
+        return value[len(ACTIVITY_PREFIX):]
+    return value
 
 
 @register.simple_tag
