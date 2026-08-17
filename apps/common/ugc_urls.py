@@ -9,6 +9,7 @@ from . import (
     ugc_discovery_views,
     ugc_followup_views,
     ugc_intake_views,
+    ugc_location_views,
     ugc_views,
 )
 
@@ -22,6 +23,8 @@ urlpatterns = [
     path("discovered/searches/status/", ugc_discovery_run_views.discovery_run_status, name="discovery_run_status"),
     path("discovered/searches/save/", ugc_discovery_search_views.save_discovery_search, name="save_discovery_search"),
     path("discovered/searches/<uuid:search_id>/update/", ugc_discovery_search_views.update_discovery_search, name="update_discovery_search"),
+    path("discovered/searches/<uuid:search_id>/location/", ugc_location_views.location_candidates, name="location_candidates"),
+    path("discovered/searches/<uuid:search_id>/location/choose/", ugc_location_views.choose_location_candidate, name="choose_location_candidate"),
     path("discovered/searches/<uuid:search_id>/run-background-test/", ugc_discovery_run_views.queue_background_test_run, name="queue_background_test_run"),
     path("discovered/media/repair/", ugc_discovery_run_views.queue_discovered_media_repair, name="queue_discovered_media_repair"),
     path("discovered/new/", ugc_discovery_views.discovered_item_form, name="discovered_item_form"),
