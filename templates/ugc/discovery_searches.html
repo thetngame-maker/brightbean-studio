@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Discovery Searches · TN Social Studio{% endblock %}
+
+{% block page_header %}
+<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
+    <div>
+        <a href="{% url 'ugc:moderation_queue' workspace_id=workspace.id %}?tab=discovered" class="text-xs font-medium text-stone-400 hover:text-stone-700">← Community Content</a>
+        <div class="flex items-center gap-2 mt-2">
+            <h1 class="text-xl font-semibold text-stone-900">Discovery Searches</h1>
+            <span class="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">{{ enabled_count }} active</span>
+        </div>
+        <p class="text-sm text-stone-500 mt-1">Define the hashtags, places, accounts, and keywords Studio should watch for community content.</p>
+    </div>
+    <span class="inline-flex items-center rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-500">Discovery provider ready</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 xl:grid-cols-[380px_minmax(0,1fr)] gap-5 pb-8">
+    <section class="rounded-2xl border border-violet-200 bg-violet-50/40 p-4 h-fit">
+        <div class="flex items-start gap-3 mb-4">
+            <div class="w-9 h-9 rounded-xl bg-white border border-violet-200 flex items-center justify-center text-violet-600 flex-shrink-0">⌕</div>
+            <div>
+                <h2 class="text-sm font-semibold text-stone-900">Add discovery search</h2>
+                <p class="text-xs text-stone-500 mt-0.5">These settings are provider-agnostic and can later feed an automated discovery runner.</p>
+            </div>
+        </div>
+
+        <form method="post" action="{% url 'ugc:save_discovery_search' workspace_id=workspace.id %}" class="space-y-3">
+            {% csrf_token %}
+            <div>
+                <label class="block text-xs font-medium text-stone-600 mb-1">Name</label>
+                <input name="name" type="text" maxlength="100" placeholder="Tennessee Waterfalls" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block text-xs font-medium text-stone-600 mb-1">Platform</label>
+                    <select name="platform" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
+                        {% for value, label in platforms %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-stone-600 mb-1">Search type</label>
+                    <select name="search_type" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
+                        {% for value, label in search_types %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-stone-600 mb-1">Query <span class="text-red-500">*</span></label>
+                <input name="query" type="text" required maxlength="255" placeholder="#tennesseewaterfalls, Foster Falls, @creator…" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">
+            </div>
+
+            <div>
+                <label class="block text-xs font-medium text-stone-600 mb-1">Maximum results per run</label>
+                <input name="result_limit" type="number" min="1" max="100" value="25" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
+                <p class="text-[11px] text-stone-400 mt-1">Keeps each discovery run manageable before moderation.</p>
+            </div>
+
+            <button class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 cursor-pointer">+ Save discovery search</button>
+        </form>
+    </section>
+
+    <section class="min-w-0">
+        <div class="flex items-center justify-between gap-3 mb-3">
+            <div>
+                <h2 class="text-sm font-semibold text-stone-900">Saved searches</h2>
+                <p class="text-xs text-stone-500 mt-0.5">Enabled searches are ready to be picked up by a future discovery provider.</p>
+            </div>
+            <span class="text-xs text-stone-400">{{ searches|length }} total</span>
+        </div>
+
+        {% if searches %}
+        <div class="space-y-2.5">
+            {% for search in searches %}
+            <article class="rounded-xl border {% if search.enabled %}border-stone-200 bg-white{% else %}border-stone-200 bg-stone-50 opacity-70{% endif %} p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div class="w-10 h-10 rounded-xl {% if search.platform == 'instagram' %}bg-pink-50 text-pink-700{% elif search.platform == 'tiktok' %}bg-stone-900 text-white{% else %}bg-blue-50 text-blue-700{% endif %} flex items-center justify-center text-xs font-bold flex-shrink-0">
+                    {% if search.platform == 'instagram' %}IG{% elif search.platform == 'tiktok' %}TT{% else %}FB{% endif %}
+                </div>
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-1.5">
+                        <h3 class="text-sm font-semibold text-stone-900 truncate">{{ search.name }}</h3>
+                        {% if search.enabled %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Active</span>{% else %}<span class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Paused</span>{% endif %}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
+                        <span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span>
+                        <span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span>
+                        <span>· up to {{ search.result_limit }} results</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-1.5 flex-shrink-0">
+                    <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}">
+                        {% csrf_token %}<input type="hidden" name="action" value="toggle">
+                        <button class="px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-xs font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer">{% if search.enabled %}Pause{% else %}Enable{% endif %}</button>
+                    </form>
+                    <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}" onsubmit="return confirm('Delete this discovery search?');">
+                        {% csrf_token %}<input type="hidden" name="action" value="delete">
+                        <button class="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer">Delete</button>
+                    </form>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="min-h-[320px] rounded-2xl border border-dashed border-stone-200 bg-stone-50/50 flex flex-col items-center justify-center text-center px-6">
+            <div class="w-12 h-12 rounded-2xl bg-white border border-stone-200 flex items-center justify-center text-violet-500 mb-3">⌕</div>
+            <h3 class="text-sm font-semibold text-stone-800">No discovery searches yet</h3>
+            <p class="text-xs text-stone-500 mt-1 max-w-sm">Start with a Tennessee hashtag, attraction/location, or creator account you want Studio to watch.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
+{% endblock %}
