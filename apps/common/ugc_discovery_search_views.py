@@ -26,6 +26,14 @@ PLATFORMS = {
 }
 
 
+def _safe_int(value, default=0, minimum=0, maximum=100000):
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        result = default
+    return max(minimum, min(maximum, result))
+
+
 def _clean_searches(value):
     if not isinstance(value, list):
         return []
@@ -40,11 +48,43 @@ def _clean_searches(value):
                 "platform": str(item.get("platform") or "instagram").strip().lower(),
                 "search_type": str(item.get("search_type") or "hashtag").strip().lower(),
                 "query": str(item.get("query") or "").strip()[:255],
-                "result_limit": max(1, min(100, int(item.get("result_limit") or 25))),
+                "result_limit": _safe_int(item.get("result_limit"), default=25, minimum=1, maximum=100),
                 "enabled": bool(item.get("enabled", True)),
+                "last_run_at": str(item.get("last_run_at") or "").strip()[:100],
+                "last_run_status": str(item.get("last_run_status") or "").strip().lower()[:30],
+                "last_created_count": _safe_int(item.get("last_created_count")),
+                "last_duplicate_count": _safe_int(item.get("last_duplicate_count")),
+                "last_invalid_count": _safe_int(item.get("last_invalid_count")),
+                "last_received_count": _safe_int(item.get("last_received_count")),
             }
         )
     return cleaned
+
+
+def get_saved_search(workspace, search_id):
+    target = str(search_id or "")
+    return next((item for item in _clean_searches(workspace.discovery_searches) if item["id"] == target), None)
+
+
+def record_search_run(workspace, search_id, *, status, received=0, created=0, duplicates=0, invalid=0, run_at=""):
+    searches = _clean_searches(workspace.discovery_searches)
+    target = str(search_id or "")
+    found = False
+    for item in searches:
+        if item["id"] != target:
+            continue
+        item["last_run_at"] = str(run_at or "")[:100]
+        item["last_run_status"] = str(status or "")[:30]
+        item["last_received_count"] = _safe_int(received)
+        item["last_created_count"] = _safe_int(created)
+        item["last_duplicate_count"] = _safe_int(duplicates)
+        item["last_invalid_count"] = _safe_int(invalid)
+        found = True
+        break
+    if found:
+        workspace.discovery_searches = searches
+        workspace.save(update_fields=["discovery_searches", "updated_at"])
+    return found
 
 
 @login_required
@@ -76,11 +116,7 @@ def save_discovery_search(request, workspace_id):
     search_type = request.POST.get("search_type", "hashtag").strip().lower()
     query = request.POST.get("query", "").strip()
     name = request.POST.get("name", "").strip()
-    try:
-        result_limit = int(request.POST.get("result_limit", "25"))
-    except (TypeError, ValueError):
-        result_limit = 25
-    result_limit = max(1, min(100, result_limit))
+    result_limit = _safe_int(request.POST.get("result_limit", "25"), default=25, minimum=1, maximum=100)
 
     if platform not in PLATFORMS:
         messages.error(request, "Choose a valid platform.")
@@ -109,6 +145,12 @@ def save_discovery_search(request, workspace_id):
                     "query": query[:255],
                     "result_limit": result_limit,
                     "enabled": True,
+                    "last_run_at": "",
+                    "last_run_status": "",
+                    "last_created_count": 0,
+                    "last_duplicate_count": 0,
+                    "last_invalid_count": 0,
+                    "last_received_count": 0,
                 },
             )
             workspace.discovery_searches = searches[:100]
