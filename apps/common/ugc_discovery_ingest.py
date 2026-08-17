@@ -110,11 +110,15 @@ def _discovery_metadata(raw: dict, media_asset=None) -> dict:
     if media_type not in {"image", "video"}:
         media_type = "image"
     media_url = _text(raw.get("media_url") or raw.get("display_url"), 2000)
+    discovery_method = _text(raw.get("discovery_method"), 30).lower()
+    if discovery_method not in {"keyword", "hashtag", "location", "account"}:
+        discovery_method = ""
     return {
         "media_type": media_type,
         "media_url": media_url,
         "thumbnail_url": _text(raw.get("thumbnail_url"), 2000),
         "instagram_product_type": _text(raw.get("instagram_product_type"), 100),
+        "discovery_method": discovery_method,
         "media_capture_status": "queued" if media_url and media_asset is None else "",
         "like_count": _metric(raw.get("like_count") if raw.get("like_count") is not None else raw.get("likes")),
         "comment_count": _metric(raw.get("comment_count") if raw.get("comment_count") is not None else raw.get("comments")),
@@ -147,6 +151,7 @@ def _upgrade_duplicate_media(submission: UGCSubmission, raw: dict) -> bool:
         "location_name",
         "location_url",
         "instagram_product_type",
+        "discovery_method",
     ):
         if incoming.get(key) not in (None, ""):
             discovery[key] = incoming.get(key)
