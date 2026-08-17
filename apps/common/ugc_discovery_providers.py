@@ -20,19 +20,15 @@ class DiscoveryProviderError(RuntimeError):
 
 APIFY_API_BASE = "https://api.apify.com/v2"
 DEFAULT_APIFY_INSTAGRAM_ACTOR = "apify~instagram-hashtag-scraper"
+DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR = "apify~instagram-scraper"
+DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR = "apify~instagram-search-scraper"
 
 
 def configured_provider_name() -> str:
-    """Return the live provider selected for unattended scheduled runs.
-
-    An empty value intentionally means "not connected". We never fall back to
-    mock data for unattended production schedules.
-    """
     return os.getenv("UGC_DISCOVERY_PROVIDER", "").strip().lower()
 
 
 def provider_health() -> dict:
-    """Return a secret-safe provider status for UI/runtime gates."""
     provider = configured_provider_name()
     if not provider:
         return {
@@ -48,7 +44,7 @@ def provider_health() -> dict:
             "ready": token_present,
             "label": "Apify connected" if token_present else "Apify needs API token",
             "detail": (
-                "Instagram hashtag and keyword discovery can run live."
+                "Instagram hashtag, keyword, and resolved location discovery can run live."
                 if token_present
                 else "UGC_DISCOVERY_PROVIDER is set, but APIFY_API_TOKEN is missing."
             ),
@@ -66,7 +62,6 @@ def live_provider_ready() -> bool:
 
 
 def _mock_results(saved_search: dict) -> list[dict]:
-    """Deterministic test results used only by explicit background test runs."""
     seed = f"{saved_search.get('id')}|{saved_search.get('platform')}|{saved_search.get('query')}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:12].upper()
     platform = saved_search.get("platform") or "instagram"
@@ -117,68 +112,12 @@ def _first(*values):
     return None
 
 
-def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
-    if not isinstance(row, dict) or row.get("error"):
-        return None
-
-    shortcode = str(_first(row.get("shortCode"), row.get("shortcode")) or "").strip()
-    source_url = str(_first(row.get("url"), row.get("postUrl")) or "").strip()
-    if not source_url and shortcode:
-        source_url = f"https://www.instagram.com/p/{shortcode}/"
-
-    creator_handle = str(
-        _first(row.get("ownerUsername"), row.get("username"), row.get("owner", {}).get("username") if isinstance(row.get("owner"), dict) else None)
-        or ""
-    ).strip().lstrip("@")
-    if not creator_handle or not source_url:
-        return None
-
-    external_id = str(_first(row.get("id"), shortcode) or "").strip()
-    title = saved_search.get("target_label") or saved_search.get("name") or saved_search.get("query") or "Discovered Instagram post"
-    return {
-        "platform": "instagram",
-        "creator_handle": creator_handle,
-        "creator_name": str(_first(row.get("ownerFullName"), row.get("fullName")) or "").strip(),
-        "creator_external_id": str(_first(row.get("ownerId"), row.get("owner_id")) or "").strip(),
-        "source_url": source_url,
-        "external_id": external_id,
-        "title": title,
-        "caption": str(row.get("caption") or "").strip(),
-        "discovery_query": saved_search.get("query") or "",
-        "media_url": str(_first(row.get("displayUrl"), row.get("imageUrl"), row.get("videoUrl")) or "").strip(),
-        "like_count": _first(row.get("likesCount"), row.get("likes")),
-        "comment_count": _first(row.get("commentsCount"), row.get("comments")),
-        "view_count": _first(row.get("videoPlayCount"), row.get("videoViewCount"), row.get("igPlayCount"), row.get("views")),
-    }
-
-
-def _fetch_apify(saved_search: dict) -> list[dict]:
-    if (saved_search.get("platform") or "").lower() != "instagram":
-        raise DiscoveryProviderError("The Apify adapter currently supports Instagram discovery only.")
-
-    search_type = (saved_search.get("search_type") or "").lower()
-    if search_type not in {"hashtag", "keyword"}:
-        raise DiscoveryProviderError(
-            "The current Apify adapter supports Instagram hashtag and keyword searches."
-        )
-
+def _apify_sync(actor_id: str, actor_input: dict, *, max_items: int, timeout: int = 240) -> list[dict]:
     token = os.getenv("APIFY_API_TOKEN", "").strip()
     if not token:
         raise DiscoveryProviderError("APIFY_API_TOKEN is not configured on the worker.")
 
-    actor_id = os.getenv("APIFY_INSTAGRAM_HASHTAG_ACTOR", DEFAULT_APIFY_INSTAGRAM_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_ACTOR
-    limit = max(1, min(100, int(saved_search.get("result_limit") or 25)))
-    query = str(saved_search.get("query") or "").strip()
-    if not query:
-        raise DiscoveryProviderError("Discovery query is empty.")
-
-    actor_input = {
-        "hashtags": [query.lstrip("#") if search_type == "hashtag" else query],
-        "keywordSearch": search_type == "keyword",
-        "resultsType": "posts",
-        "resultsLimit": limit,
-    }
-    params = urlencode({"clean": "1", "format": "json", "maxItems": limit})
+    params = urlencode({"clean": "1", "format": "json", "maxItems": max_items})
     url = f"{APIFY_API_BASE}/acts/{quote(actor_id, safe='~')}/run-sync-get-dataset-items?{params}"
     request = Request(
         url,
@@ -191,9 +130,8 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
         },
         method="POST",
     )
-
     try:
-        with urlopen(request, timeout=240) as response:
+        with urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = ""
@@ -202,7 +140,7 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
             parsed = json.loads(body)
             detail = str((parsed.get("error") or {}).get("message") or parsed.get("message") or "").strip()
         except Exception:
-            detail = ""
+            pass
         suffix = f": {detail}" if detail else ""
         raise DiscoveryProviderError(f"Apify returned HTTP {exc.code}{suffix}") from exc
     except URLError as exc:
@@ -214,6 +152,115 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
 
     if not isinstance(payload, list):
         raise DiscoveryProviderError("Apify returned an unexpected dataset response.")
+    return payload
+
+
+def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[dict]:
+    """Resolve a human place name into Instagram location candidates."""
+    query = str(query or "").strip()
+    if not query:
+        raise DiscoveryProviderError("Location query is empty.")
+    actor_id = os.getenv("APIFY_INSTAGRAM_SEARCH_ACTOR", DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR
+    limit = max(1, min(20, int(limit or 8)))
+    rows = _apify_sync(
+        actor_id,
+        {"search": query, "searchType": "place", "searchLimit": limit, "liveSearch": True},
+        max_items=limit,
+        timeout=180,
+    )
+    candidates = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("error"):
+            continue
+        location_id = str(_first(row.get("location_id"), row.get("locationId"), row.get("id")) or "").strip()
+        url = str(_first(row.get("inputUrl"), row.get("url")) or "").strip()
+        slug = str(row.get("slug") or "").strip()
+        if not url and location_id:
+            url = f"https://www.instagram.com/explore/locations/{location_id}/{slug}/" if slug else f"https://www.instagram.com/explore/locations/{location_id}/"
+        name = str(_first(row.get("name"), row.get("shortName")) or "").strip()
+        if not name or not url:
+            continue
+        candidates.append(
+            {
+                "id": location_id,
+                "name": name,
+                "url": url,
+                "slug": slug,
+                "category": str(row.get("category") or "").strip(),
+                "address": str(_first(row.get("location_address"), row.get("address")) or "").strip(),
+                "city": str(_first(row.get("location_city"), row.get("city")) or "").strip(),
+                "lat": _first(row.get("lat"), row.get("latitude")),
+                "lng": _first(row.get("lng"), row.get("longitude")),
+                "media_count": _first(row.get("media_count"), row.get("mediaCount"), row.get("postsCount")),
+            }
+        )
+    return candidates
+
+
+def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
+    if not isinstance(row, dict) or row.get("error"):
+        return None
+    shortcode = str(_first(row.get("shortCode"), row.get("shortcode")) or "").strip()
+    source_url = str(_first(row.get("url"), row.get("postUrl")) or "").strip()
+    if not source_url and shortcode:
+        source_url = f"https://www.instagram.com/p/{shortcode}/"
+    creator_handle = str(
+        _first(row.get("ownerUsername"), row.get("username"), row.get("owner", {}).get("username") if isinstance(row.get("owner"), dict) else None)
+        or ""
+    ).strip().lstrip("@")
+    if not creator_handle or not source_url:
+        return None
+    external_id = str(_first(row.get("id"), shortcode) or "").strip()
+    title = saved_search.get("target_label") or saved_search.get("name") or saved_search.get("query") or "Discovered Instagram post"
+    resolved_location_name = saved_search.get("resolved_location_name") or ""
+    return {
+        "platform": "instagram",
+        "creator_handle": creator_handle,
+        "creator_name": str(_first(row.get("ownerFullName"), row.get("fullName")) or "").strip(),
+        "creator_external_id": str(_first(row.get("ownerId"), row.get("owner_id")) or "").strip(),
+        "source_url": source_url,
+        "external_id": external_id,
+        "title": title,
+        "caption": str(row.get("caption") or "").strip(),
+        "discovery_query": resolved_location_name or saved_search.get("query") or "",
+        "media_url": str(_first(row.get("displayUrl"), row.get("imageUrl"), row.get("videoUrl")) or "").strip(),
+        "like_count": _first(row.get("likesCount"), row.get("likes")),
+        "comment_count": _first(row.get("commentsCount"), row.get("comments")),
+        "view_count": _first(row.get("videoPlayCount"), row.get("videoViewCount"), row.get("igPlayCount"), row.get("views")),
+    }
+
+
+def _fetch_apify(saved_search: dict) -> list[dict]:
+    if (saved_search.get("platform") or "").lower() != "instagram":
+        raise DiscoveryProviderError("The Apify adapter currently supports Instagram discovery only.")
+
+    search_type = (saved_search.get("search_type") or "").lower()
+    limit = max(1, min(100, int(saved_search.get("result_limit") or 25)))
+    query = str(saved_search.get("query") or "").strip()
+    if not query:
+        raise DiscoveryProviderError("Discovery query is empty.")
+
+    if search_type == "location":
+        location_url = str(saved_search.get("resolved_location_url") or "").strip()
+        if not location_url:
+            raise DiscoveryProviderError("This location search needs an Instagram location match before it can run.")
+        actor_id = os.getenv("APIFY_INSTAGRAM_ACTOR", DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR
+        payload = _apify_sync(
+            actor_id,
+            {"directUrls": [location_url], "resultsType": "posts", "resultsLimit": limit, "addParentData": True},
+            max_items=limit,
+        )
+    elif search_type in {"hashtag", "keyword"}:
+        actor_id = os.getenv("APIFY_INSTAGRAM_HASHTAG_ACTOR", DEFAULT_APIFY_INSTAGRAM_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_ACTOR
+        actor_input = {
+            "hashtags": [query.lstrip("#") if search_type == "hashtag" else query],
+            "keywordSearch": search_type == "keyword",
+            "resultsType": "posts",
+            "resultsLimit": limit,
+        }
+        payload = _apify_sync(actor_id, actor_input, max_items=limit)
+    else:
+        raise DiscoveryProviderError("The current Apify adapter supports Instagram hashtag, keyword, and resolved location searches.")
 
     normalized = []
     for row in payload[:limit]:
@@ -224,7 +271,6 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
 
 
 def fetch_discovery_results(saved_search: dict, *, provider_name: str | None = None, allow_mock: bool = False) -> tuple[str, list[dict]]:
-    """Execute one provider search and return ``(provider_name, normalized rows)``."""
     provider = (provider_name or configured_provider_name()).strip().lower()
     if provider == "mock":
         if not allow_mock:
