@@ -20,7 +20,7 @@ from .ugc_discovery_providers import (
 )
 
 MAX_POPULAR_REELS = 64
-MAX_KEYWORD_SCAN = 100
+MAX_KEYWORD_SCAN = 500
 
 
 def _row_key(row: dict) -> str:
@@ -49,6 +49,11 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
     high-engagement keyword discovery experience. Not every keyword has a
     popular feed, so provider errors from that optional pass are swallowed and
     the Hashtag Scraper keyword mode remains the reliable fallback.
+
+    ``result_limit`` is a provider scan depth, not Studio's final create count.
+    The worker can therefore progressively increase it over repeated runs while
+    still stopping ingestion after the saved search has found enough unseen
+    posts.
     """
     query = str(saved_search.get("query") or "").strip()
     if not query:
@@ -92,12 +97,12 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
                 "hashtags": [query],
                 "keywordSearch": True,
                 "resultsType": "posts",
-                # Ask for the full scan depth because this actor may repeat
-                # some of the same popular results returned above.
+                # Ask for the full progressive scan depth because this actor may
+                # repeat some of the same popular results returned above.
                 "resultsLimit": scan_limit,
             },
             max_items=scan_limit,
-            timeout=240,
+            timeout=300,
         )
         fallback_rows = _normalize_rows(fallback_payload, saved_search, scan_limit)
 
