@@ -13,8 +13,14 @@ from apps.workspaces.models import Workspace
 
 from .audit import record_audit_event
 from .ugc_discovery_ingest import ingest_discovered_items, select_rows_for_new_target
-from .ugc_discovery_providers import DiscoveryProviderError, fetch_discovery_results, live_provider_ready
+from .ugc_discovery_providers import (
+    DiscoveryProviderError,
+    configured_provider_name,
+    fetch_discovery_results,
+    live_provider_ready,
+)
 from .ugc_discovery_search_views import _clean_searches, _schedule_state
+from .ugc_keyword_discovery import fetch_apify_keyword_results
 from .ugc_location_fallback import deep_location_fallback
 from .ugc_remote_media import repair_workspace_discovered_media
 
@@ -140,26 +146,34 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             provider=provider,
             test_mode=bool(test_mode),
         )
-        provider, rows = fetch_discovery_results(
-            provider_request,
-            provider_name=provider or None,
-            allow_mock=bool(test_mode),
-        )
+        search_type = str(claimed.get("search_type") or "").lower()
+
+        # Keyword discovery uses a richer source than the hashtag actor alone:
+        # popular keyword reels first, then the existing keyword/hashtag source.
+        # This gives the fill-to-target selector a substantially deeper pool.
+        if (
+            not test_mode
+            and search_type == "keyword"
+            and configured_provider_name() == "apify"
+        ):
+            provider = "apify"
+            rows = fetch_apify_keyword_results(provider_request)
+        else:
+            provider, rows = fetch_discovery_results(
+                provider_request,
+                provider_name=provider or None,
+                allow_mock=bool(test_mode),
+            )
 
         # A live provider name is only known after fetch. Apply fill mode for
         # Apify keyword/hashtag runs even when provider was configured implicitly.
-        search_type = str(claimed.get("search_type") or "").lower()
         if provider == "apify" and not test_mode and search_type in {"keyword", "hashtag"}:
             fill_mode = True
 
         # Location actors can expose post media in several documented output
         # shapes. Only invoke the deeper inspection when all normal Apify paths
         # returned zero usable rows, so hashtag/keyword performance is unchanged.
-        if (
-            not rows
-            and provider == "apify"
-            and search_type == "location"
-        ):
+        if not rows and provider == "apify" and search_type == "location":
             rows, diagnostics = deep_location_fallback(
                 claimed,
                 int(claimed.get("result_limit") or 25),
@@ -192,8 +206,6 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
 
         provider_label = _location_provider_label(provider, diagnostics)
         _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
-        # Also repair older provider imports from before durable media capture
-        # existed. The repair task de-duplicates its own queue work.
         repair_workspace_discovered_media(str(workspace.id))
         record_audit_event(
             workspace=workspace,
