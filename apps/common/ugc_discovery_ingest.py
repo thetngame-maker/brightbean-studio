@@ -18,7 +18,7 @@ from .ugc_provenance import build_provenance, normalize_platform, set_provenance
 from .ugc_remote_media import capture_discovered_media
 
 
-MAX_BATCH_ITEMS = 100
+MAX_BATCH_ITEMS = 500
 
 
 def _text(value: Any, limit: int) -> str:
