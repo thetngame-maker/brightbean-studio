@@ -8,6 +8,82 @@
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
     if (!cards.length) return;
 
+    function creatorHandleFor(card) {
+        const contributorLine = Array.from(card.querySelectorAll('p')).find((node) => (node.textContent || '').trim().startsWith('@'));
+        if (contributorLine) {
+            const match = (contributorLine.textContent || '').match(/@([A-Za-z0-9._]+)/);
+            if (match) return match[1];
+        }
+        const match = (card.textContent || '').match(/@([A-Za-z0-9._]+)/);
+        return match ? match[1] : '';
+    }
+
+    function titleFor(card) {
+        const heading = card.querySelector('h2');
+        return heading ? (heading.textContent || '').trim() : 'your post';
+    }
+
+    function permissionMessage(card) {
+        const handle = creatorHandleFor(card);
+        const title = titleFor(card);
+        const greeting = handle ? `Hi @${handle}!` : 'Hi!';
+        const credit = handle ? ` We’ll credit you as @${handle} and link back to your original post.` : ' We’ll credit you and link back to your original post.';
+        return `${greeting} We came across your ${title} post and would love to feature it on The TN Game’s social media and website.${credit} If you’re okay with us sharing it, please reply YES to this message. Thank you!`;
+    }
+
+    async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        if (!copied) throw new Error('Copy failed');
+    }
+
+    cards.forEach((card) => {
+        const permissionForm = card.querySelector('form[action*="/permission/"]');
+        if (!permissionForm) return;
+        const permissionPanel = permissionForm.closest('div.mt-3');
+        if (!permissionPanel || permissionPanel.querySelector('.ugc-copy-permission-request')) return;
+
+        const statusRow = permissionPanel.querySelector('.flex.items-start.justify-between');
+        if (!statusRow) return;
+
+        const copyButton = document.createElement('button');
+        copyButton.type = 'button';
+        copyButton.className = 'ugc-copy-permission-request ml-auto mr-2 inline-flex items-center gap-1 px-2 py-1 rounded-md border border-stone-200 bg-white text-[10px] font-semibold text-stone-600 hover:bg-stone-50 hover:text-stone-900';
+        copyButton.innerHTML = '<svg width="11" height="11" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg><span>Copy request</span>';
+        copyButton.title = permissionMessage(card);
+
+        const statusDot = statusRow.lastElementChild;
+        if (statusDot) statusRow.insertBefore(copyButton, statusDot);
+        else statusRow.appendChild(copyButton);
+
+        copyButton.addEventListener('click', async function () {
+            const label = copyButton.querySelector('span');
+            try {
+                await copyText(permissionMessage(card));
+                label.textContent = 'Copied';
+                copyButton.classList.add('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
+                window.setTimeout(() => {
+                    label.textContent = 'Copy request';
+                    copyButton.classList.remove('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
+                }, 1800);
+            } catch (error) {
+                label.textContent = 'Copy failed';
+                window.setTimeout(() => { label.textContent = 'Copy request'; }, 1800);
+            }
+        });
+    });
+
     const csrfInput = cards
         .map((card) => card.querySelector('form[action*="/permission/"] input[name="csrfmiddlewaretoken"]'))
         .find(Boolean);
