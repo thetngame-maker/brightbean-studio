@@ -76,7 +76,12 @@
                             {% if not search.target_ready %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Needs target</span>{% endif %}
                             {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
                         </div>
-                        <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500"><span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span><span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span><span>· up to {{ search.result_limit }} results</span></div>
+                        <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
+                            <span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span>
+                            <span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span>
+                            <span>· up to {{ search.result_limit }} results</span>
+                            {% if search.instagram_search_url %}<a href="{{ search.instagram_search_url }}" target="_blank" rel="noopener noreferrer" class="font-semibold text-pink-600 hover:text-pink-800 whitespace-nowrap">Open on Instagram ↗</a>{% endif %}
+                        </div>
                         {% if search.search_type == 'location' %}
                             {% if search.resolved_location_url %}
                             <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-stone-500">
