@@ -39,17 +39,13 @@ def _status_signature(searches):
 @require_permission("manage_workspace_settings")
 @require_GET
 def discovery_run_status(request, workspace_id):
-    """Return a lightweight fingerprint so the Discovery page can self-refresh.
-
-    The endpoint intentionally returns no provider credentials, queries, target
-    details, or UGC payloads. Its only job is to tell the page when worker-owned
-    run state has changed since the previous poll.
-    """
+    """Return lightweight worker state so Discovery Searches can self-refresh."""
     workspace = _get_workspace(request, workspace_id)
     searches = _clean_searches(workspace.discovery_searches)
     return JsonResponse(
         {
             "signature": _status_signature(searches),
+            "workspace_updated_at": workspace.updated_at.isoformat(),
             "running_count": sum(1 for item in searches if item.get("last_run_status") == "running"),
         }
     )
