@@ -113,10 +113,14 @@ def _previous_keyword_depth(claimed: dict) -> int:
     marker = "depth"
     if marker not in provider_label:
         return 0
-    tail = provider_label.rsplit(marker, 1)[-1].strip()
-    digits = "".join(ch for ch in tail if ch.isdigit())
+    tail = provider_label.rsplit(marker, 1)[-1].lstrip()
+    digits = []
+    for char in tail:
+        if not char.isdigit():
+            break
+        digits.append(char)
     try:
-        return min(MAX_PROVIDER_SCAN_ITEMS, int(digits or 0))
+        return min(MAX_PROVIDER_SCAN_ITEMS, int("".join(digits) or 0))
     except ValueError:
         return 0
 
@@ -159,6 +163,17 @@ def _tag_discovery_method(rows, search_type: str):
     return rows
 
 
+def _keyword_source_counts(rows) -> dict[str, int]:
+    counts = {"keyword_posts": 0, "popular_reels": 0, "keyword_fallback": 0}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        path = str(row.get("discovery_provider_path") or "")
+        if path in counts:
+            counts[path] += 1
+    return counts
+
+
 @background(schedule=0)
 def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
     """Execute one saved search on the shared Railway background worker."""
@@ -170,6 +185,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
     diagnostics = None
     fill_stats = {}
     progressive_depth = 0
+    keyword_sources = {"keyword_posts": 0, "popular_reels": 0, "keyword_fallback": 0}
     try:
         provider_request, target_new, fill_mode, progressive_depth = _provider_request_for_fill(
             claimed,
@@ -181,6 +197,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
         if not test_mode and search_type == "keyword" and configured_provider_name() == "apify":
             provider = "apify"
             rows = fetch_apify_keyword_results(provider_request)
+            keyword_sources = _keyword_source_counts(rows)
         else:
             provider, rows = fetch_discovery_results(
                 provider_request,
@@ -226,7 +243,10 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
 
         provider_label = _location_provider_label(provider, diagnostics)
         if search_type == "keyword" and provider == "apify" and not test_mode:
-            provider_label = f"apify · depth{progressive_depth}"[:50]
+            kw = keyword_sources["keyword_posts"]
+            pr = keyword_sources["popular_reels"]
+            fb = keyword_sources["keyword_fallback"]
+            provider_label = f"apify · depth{progressive_depth} · kw{kw}/pr{pr}/fb{fb}"[:50]
         _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
         repair_workspace_discovered_media(str(workspace.id))
         record_audit_event(
@@ -247,6 +267,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "invalid_count": summary["invalid_count"],
                 "provider_scanned_count": provider_scanned_count,
                 "progressive_scan_depth": progressive_depth if search_type == "keyword" else 0,
+                "keyword_source_counts": keyword_sources if search_type == "keyword" else {},
                 "fill_mode": bool(fill_mode),
                 "fill_target": int(summary.get("fill_target") or 0),
                 "fill_selected_new": int(summary.get("fill_selected_new") or 0),
