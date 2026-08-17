@@ -84,9 +84,16 @@ def _finish_search(workspace_id, search_id, *, status, provider="", summary=None
 
 
 @background(schedule=0)
-def run_saved_discovery_search(workspace_id, search_id, test_mode=False):
-    """Execute one saved search on the shared Railway background worker."""
-    claimed = _claim_search(workspace_id, search_id, force=bool(test_mode))
+def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
+    """Execute one saved search on the shared Railway background worker.
+
+    ``test_mode`` controls whether the mock provider is allowed. ``force_run``
+    independently controls whether cadence should be bypassed. Keeping those
+    concepts separate lets an explicit user-triggered live Apify run execute
+    immediately while unattended scheduled runs still respect Hourly/Daily/
+    Weekly due times.
+    """
+    claimed = _claim_search(workspace_id, search_id, force=bool(test_mode or force_run))
     if not claimed:
         return
 
@@ -118,6 +125,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False):
             metadata={
                 "provider": provider,
                 "test_mode": bool(test_mode),
+                "force_run": bool(force_run),
                 "query": claimed.get("query", ""),
                 "created_count": summary["created_count"],
                 "duplicate_count": summary["duplicate_count"],
@@ -150,4 +158,4 @@ def run_due_discovery_searches():
                 and item.get("target_id")
                 and state.get("due_now")
             ):
-                run_saved_discovery_search(str(workspace.id), item["id"], False)
+                run_saved_discovery_search(str(workspace.id), item["id"], False, False)
