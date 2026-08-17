@@ -2,6 +2,14 @@
     const grid = document.getElementById('ugc-card-grid');
     if (!grid) return;
 
+    if (!document.getElementById('ugc-discovered-media-filter-script')) {
+        const mediaFilterScript = document.createElement('script');
+        mediaFilterScript.id = 'ugc-discovered-media-filter-script';
+        mediaFilterScript.src = '/static/js/ugc_discovered_media_filter.js';
+        if (document.currentScript && document.currentScript.nonce) mediaFilterScript.nonce = document.currentScript.nonce;
+        document.head.appendChild(mediaFilterScript);
+    }
+
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
     const reelCards = cards.filter((card) => card.querySelector('video'));
     if (!reelCards.length) return;
