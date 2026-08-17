@@ -65,7 +65,8 @@
 
     function addRequestedTools(card, item) {
         if (item.permission_status !== 'requested') return;
-        const timestamp = Date.parse(item.permission_updated_at || '');
+        const requestIso = item.requested_at || item.permission_updated_at || '';
+        const timestamp = Date.parse(requestIso);
         card.dataset.permissionRequestedAt = Number.isFinite(timestamp) ? String(timestamp) : '0';
 
         const permissionForm = card.querySelector('form[action*="/permission/"]');
@@ -73,39 +74,67 @@
         if (!panel) return;
 
         const statusText = Array.from(panel.querySelectorAll('div')).find((node) => (node.textContent || '').trim() === 'Permission requested');
-        if (statusText && item.permission_updated_at && !panel.querySelector('.ugc-requested-age')) {
+        if (statusText && requestIso && !panel.querySelector('.ugc-requested-age')) {
             const age = document.createElement('div');
             age.className = 'ugc-requested-age text-[10px] text-amber-700 mt-1';
-            age.textContent = `Requested ${formatAge(item.permission_updated_at)}`;
-            age.title = new Date(item.permission_updated_at).toLocaleString();
+            age.textContent = `Requested ${formatAge(requestIso)}`;
+            age.title = new Date(requestIso).toLocaleString();
             statusText.insertAdjacentElement('afterend', age);
         }
 
-        const actions = panel.querySelector('.flex.flex-wrap.gap-1\.5');
-        if (!actions || panel.querySelector('.ugc-copy-followup')) return;
+        if (statusText && item.followup_count && !panel.querySelector('.ugc-followup-history')) {
+            const history = document.createElement('div');
+            history.className = 'ugc-followup-history text-[10px] text-violet-700 mt-1';
+            const noun = Number(item.followup_count) === 1 ? 'follow-up' : 'follow-ups';
+            const last = item.last_followup_at ? ` · last sent ${formatAge(item.last_followup_at)}` : '';
+            history.textContent = `${item.followup_count} ${noun}${last}`;
+            if (item.last_followup_at) history.title = new Date(item.last_followup_at).toLocaleString();
+            statusText.parentElement.appendChild(history);
+        }
 
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'ugc-copy-followup px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-violet-200 bg-white text-violet-700 hover:bg-violet-50 cursor-pointer';
-        button.textContent = 'Copy follow-up';
-        button.title = followupMessage(card);
-        actions.insertBefore(button, actions.firstChild);
+        const actions = panel.querySelector('.flex.flex-wrap.gap-1\\.5');
+        if (!actions) return;
 
-        button.addEventListener('click', async function () {
-            const original = button.textContent;
-            try {
-                await copyText(followupMessage(card));
-                button.textContent = 'Copied';
-                button.classList.add('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
-                window.setTimeout(() => {
-                    button.textContent = original;
-                    button.classList.remove('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
-                }, 1800);
-            } catch (error) {
-                button.textContent = 'Copy failed';
-                window.setTimeout(() => { button.textContent = original; }, 1800);
+        if (!panel.querySelector('.ugc-copy-followup')) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'ugc-copy-followup px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-violet-200 bg-white text-violet-700 hover:bg-violet-50 cursor-pointer';
+            button.textContent = 'Copy follow-up';
+            button.title = followupMessage(card);
+            actions.insertBefore(button, actions.firstChild);
+
+            button.addEventListener('click', async function () {
+                const original = button.textContent;
+                try {
+                    await copyText(followupMessage(card));
+                    button.textContent = 'Copied';
+                    button.classList.add('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
+                    window.setTimeout(() => {
+                        button.textContent = original;
+                        button.classList.remove('text-emerald-700', 'border-emerald-200', 'bg-emerald-50');
+                    }, 1800);
+                } catch (error) {
+                    button.textContent = 'Copy failed';
+                    window.setTimeout(() => { button.textContent = original; }, 1800);
+                }
+            });
+        }
+
+        if (!panel.querySelector('.ugc-log-followup')) {
+            const id = card.dataset.submissionId;
+            const csrf = permissionForm.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (id && csrf) {
+                const form = document.createElement('form');
+                form.method = 'post';
+                form.action = window.location.pathname.replace(/\/?$/, `/${id}/permission/followup/`);
+                form.className = 'inline-flex';
+                form.innerHTML = `<input type="hidden" name="csrfmiddlewaretoken" value="${csrf.value}"><input type="hidden" name="channel" value="${card.dataset.source || 'manual'}"><button type="submit" class="ugc-log-followup px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 cursor-pointer">Mark follow-up sent</button>`;
+                const copyButton = actions.querySelector('.ugc-copy-followup');
+                if (copyButton && copyButton.nextSibling) actions.insertBefore(form, copyButton.nextSibling);
+                else if (copyButton) actions.insertBefore(form, copyButton.nextSibling);
+                else actions.insertBefore(form, actions.firstChild);
             }
-        });
+        }
     }
 
     function sortOldestRequest() {
