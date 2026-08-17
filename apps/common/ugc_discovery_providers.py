@@ -186,12 +186,7 @@ def _location_candidate_from_row(row: dict) -> dict | None:
 
 
 def _search_instagram_places(query: str, limit: int = 8, *, live_search: bool = True) -> list[dict]:
-    """Search Instagram places.
-
-    Live search is best for interactive candidate matching. The standard search
-    response is richer and can include the location's recent ``posts`` array,
-    so background fallback enrichment deliberately uses ``live_search=False``.
-    """
+    """Search Instagram places."""
     actor_id = os.getenv("APIFY_INSTAGRAM_SEARCH_ACTOR", DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR
     rows = _apify_sync(
         actor_id,
@@ -213,19 +208,29 @@ def _search_instagram_places(query: str, limit: int = 8, *, live_search: bool = 
 
 
 def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[dict]:
-    """Resolve a human place name into Instagram location candidates."""
     query = str(query or "").strip()
     if not query:
         raise DiscoveryProviderError("Location query is empty.")
     return _search_instagram_places(query, max(1, min(20, int(limit or 8))), live_search=True)
 
 
-def _nested_media_url(row: dict) -> str:
+def _instagram_media_details(row: dict) -> tuple[str, str, str]:
+    """Return (media_type, primary_media_url, thumbnail_url)."""
     image = row.get("image") if isinstance(row.get("image"), dict) else {}
     video = row.get("video") if isinstance(row.get("video"), dict) else {}
     images = row.get("images") if isinstance(row.get("images"), list) else []
     first_image = images[0] if images and isinstance(images[0], dict) else {}
-    return str(
+
+    video_url = str(
+        _first(
+            row.get("videoUrl"),
+            row.get("video_url"),
+            row.get("videoPlayUrl"),
+            video.get("url"),
+        )
+        or ""
+    ).strip()
+    thumbnail_url = str(
         _first(
             row.get("displayUrl"),
             row.get("display_url"),
@@ -234,11 +239,29 @@ def _nested_media_url(row: dict) -> str:
             image.get("url"),
             first_image.get("url"),
             row.get("thumbnailUrl"),
-            row.get("videoUrl"),
-            video.get("url"),
         )
         or ""
     ).strip()
+
+    kind_tokens = " ".join(
+        str(value or "").lower()
+        for value in (
+            row.get("type"),
+            row.get("mediaType"),
+            row.get("media_type"),
+            row.get("productType"),
+            row.get("product_type"),
+        )
+    )
+    is_video = bool(
+        video_url
+        or row.get("isVideo") is True
+        or row.get("is_video") is True
+        or any(token in kind_tokens for token in ("video", "reel", "clip"))
+    )
+    if is_video and video_url:
+        return "video", video_url, thumbnail_url
+    return "image", thumbnail_url, thumbnail_url
 
 
 def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
@@ -254,13 +277,7 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         source_url = f"https://www.instagram.com/p/{shortcode}/"
 
     owner_id = str(
-        _first(
-            row.get("ownerId"),
-            row.get("owner_id"),
-            owner.get("id"),
-            row.get("userId"),
-        )
-        or ""
+        _first(row.get("ownerId"), row.get("owner_id"), owner.get("id"), row.get("userId")) or ""
     ).strip()
     creator_handle = str(
         _first(
@@ -273,10 +290,6 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         or ""
     ).strip().lstrip("@")
 
-    # Apify documents that posts from location feeds may expose only ownerId.
-    # Preserve those posts with an explicit provisional identity rather than
-    # silently dropping otherwise valid UGC. A later creator-enrichment pass
-    # can replace this with the public username when one is available.
     creator_identity_provisional = False
     if not creator_handle and owner_id:
         creator_handle = f"instagram-id-{owner_id}"
@@ -285,6 +298,7 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
     if not creator_handle or not source_url:
         return None
 
+    media_type, media_url, thumbnail_url = _instagram_media_details(row)
     external_id = str(_first(row.get("id"), shortcode) or "").strip()
     title = saved_search.get("target_label") or saved_search.get("name") or saved_search.get("query") or "Discovered Instagram post"
     resolved_location_name = saved_search.get("resolved_location_name") or ""
@@ -293,13 +307,7 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         "platform": "instagram",
         "creator_handle": creator_handle,
         "creator_name": str(
-            _first(
-                row.get("ownerFullName"),
-                row.get("fullName"),
-                owner.get("fullName"),
-                owner.get("name"),
-            )
-            or ""
+            _first(row.get("ownerFullName"), row.get("fullName"), owner.get("fullName"), owner.get("name")) or ""
         ).strip(),
         "creator_external_id": owner_id,
         "creator_identity_provisional": creator_identity_provisional,
@@ -308,7 +316,10 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         "title": title,
         "caption": str(row.get("caption") or row.get("text") or "").strip(),
         "discovery_query": resolved_location_name or saved_search.get("query") or "",
-        "media_url": _nested_media_url(row),
+        "media_type": media_type,
+        "media_url": media_url,
+        "thumbnail_url": thumbnail_url,
+        "instagram_product_type": str(_first(row.get("productType"), row.get("product_type"), row.get("type")) or "").strip(),
         "like_count": _first(row.get("likesCount"), row.get("likeCount"), row.get("likes")),
         "comment_count": _first(row.get("commentsCount"), row.get("commentCount"), row.get("comments")),
         "view_count": _first(row.get("videoPlayCount"), row.get("videoViewCount"), row.get("viewCount"), row.get("igPlayCount"), row.get("views")),
@@ -346,7 +357,6 @@ def _match_location_candidate(candidates: list[dict], saved_search: dict) -> dic
 
 
 def _location_fallback_posts(saved_search: dict, limit: int) -> list[dict]:
-    """Use recent posts embedded in the matched standard Instagram place result."""
     query = str(saved_search.get("resolved_location_name") or saved_search.get("query") or "").strip()
     if not query:
         return []
