@@ -4,25 +4,38 @@
 
 {% block page_header %}
 <div class="flex flex-col gap-3 mb-5">
+    {% if saved_search %}
+    <a href="{% url 'ugc:discovery_searches' workspace_id=workspace.id %}" class="text-xs text-stone-400 hover:text-stone-700">← Discovery searches</a>
+    {% else %}
     <a href="{% url 'ugc:moderation_queue' workspace_id=workspace.id %}?tab=discovered" class="text-xs text-stone-400 hover:text-stone-700">← Discovered content</a>
+    {% endif %}
     <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
-            <h1 class="text-xl font-semibold text-stone-900">Bulk discovery test import</h1>
-            <p class="text-sm text-stone-500 mt-1 max-w-2xl">Paste normalized discovery results to test the same batch ingestion path a future provider will use.</p>
+            <h1 class="text-xl font-semibold text-stone-900">{% if saved_search %}Test discovery run{% else %}Bulk discovery test import{% endif %}</h1>
+            <p class="text-sm text-stone-500 mt-1 max-w-2xl">{% if saved_search %}Simulate a provider run for <strong>{{ saved_search.name }}</strong> using the same normalized ingestion path the live provider will use.{% else %}Paste normalized discovery results to test the same batch ingestion path a future provider will use.{% endif %}</p>
         </div>
         <span class="inline-flex self-start rounded-full bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700">Up to {{ max_batch_items }} items</span>
     </div>
+    {% if saved_search %}
+    <div class="rounded-xl border border-violet-200 bg-violet-50/50 px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <span class="font-semibold text-violet-900">{{ saved_search.platform|title }}</span>
+        <span class="text-stone-400">{{ saved_search.search_type|title }}</span>
+        <span class="font-medium text-violet-700">{{ saved_search.query }}</span>
+        <span class="text-stone-400">Limit {{ saved_search.result_limit }}</span>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
 {% block content %}
 <form method="post" action="{% url 'ugc:bulk_discovery_import' workspace_id=workspace.id %}" class="max-w-6xl pb-10">
     {% csrf_token %}
+    {% if saved_search %}<input type="hidden" name="search_id" value="{{ saved_search.id }}">{% endif %}
     <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,.7fr)] gap-4">
         <section class="rounded-2xl border border-violet-200 bg-violet-50/30 p-5">
             <div class="mb-3">
                 <h2 class="text-sm font-semibold text-stone-900">Discovery results JSON</h2>
-                <p class="text-xs text-stone-500 mt-1">The sample below is ready to edit or import. Each object can include platform, creator_handle, source_url, external_id, title, caption, discovery_query and engagement counts.</p>
+                <p class="text-xs text-stone-500 mt-1">{% if saved_search %}These sample results already use this saved search’s platform and query. Edit them if you want to test other provider output shapes.{% else %}The sample below is ready to edit or import. Each object can include platform, creator_handle, source_url, external_id, title, caption, discovery_query and engagement counts.{% endif %}</p>
             </div>
             <textarea id="ugc-bulk-json" name="items_json" rows="25" spellcheck="false" required class="w-full rounded-xl border border-violet-200 bg-white px-4 py-3 font-mono text-xs leading-5 text-stone-700 outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">{{ sample_json }}</textarea>
             <p class="text-[11px] text-stone-400 mt-2">Duplicates are skipped using platform + external ID, or platform + source URL when no external ID is supplied.</p>
@@ -59,7 +72,7 @@
                 <span class="font-semibold">Test behavior:</span> imported items start as <strong>Not contacted</strong> with no consent and land in Discovered. They cannot be approved until the permission workflow is completed.
             </div>
 
-            <button type="submit" class="w-full h-11 rounded-xl bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-200">Import discovery batch</button>
+            <button type="submit" class="w-full h-11 rounded-xl bg-orange-500 text-white text-sm font-semibold hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-200">{% if saved_search %}Run saved search test{% else %}Import discovery batch{% endif %}</button>
         </div>
     </div>
 </form>
