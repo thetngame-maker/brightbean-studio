@@ -164,4 +164,12 @@
         if (document.currentScript && document.currentScript.nonce) performanceScript.nonce = document.currentScript.nonce;
         document.head.appendChild(performanceScript);
     }
+
+    if (!document.querySelector('script[data-ugc-top-selection]')) {
+        const topSelectionScript = document.createElement('script');
+        topSelectionScript.src = '/static/js/ugc_discovered_top_selection.js';
+        topSelectionScript.dataset.ugcTopSelection = '1';
+        if (document.currentScript && document.currentScript.nonce) topSelectionScript.nonce = document.currentScript.nonce;
+        document.head.appendChild(topSelectionScript);
+    }
 })();
