@@ -27,6 +27,7 @@ class Workspace(models.Model):
     secondary_color = models.CharField(max_length=7, blank=True, default="", validators=[validate_hex_color])
     default_hashtags = models.JSONField(default=list, blank=True)
     default_first_comment = models.TextField(blank=True, default="")
+    discovery_searches = models.JSONField(default=list, blank=True)
     approval_workflow_mode = models.CharField(
         max_length=40,
         choices=ApprovalWorkflowMode.choices,
