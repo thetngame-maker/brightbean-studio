@@ -68,7 +68,7 @@
         <div class="flex items-center justify-between gap-3 mb-3">
             <div>
                 <h2 class="text-sm font-semibold text-stone-900">Saved searches</h2>
-                <p class="text-xs text-stone-500 mt-0.5">Enabled searches are ready to be picked up by a future discovery provider.</p>
+                <p class="text-xs text-stone-500 mt-0.5">Run a search through the test importer now; later the same definition can feed the live discovery provider.</p>
             </div>
             <span class="text-xs text-stone-400">{{ searches|length }} total</span>
         </div>
@@ -76,7 +76,7 @@
         {% if searches %}
         <div class="space-y-2.5">
             {% for search in searches %}
-            <article class="rounded-xl border {% if search.enabled %}border-stone-200 bg-white{% else %}border-stone-200 bg-stone-50 opacity-70{% endif %} p-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
+            <article class="rounded-xl border {% if search.enabled %}border-stone-200 bg-white{% else %}border-stone-200 bg-stone-50 opacity-70{% endif %} p-3.5 flex flex-col lg:flex-row lg:items-center gap-3">
                 <div class="w-10 h-10 rounded-xl {% if search.platform == 'instagram' %}bg-pink-50 text-pink-700{% elif search.platform == 'tiktok' %}bg-stone-900 text-white{% else %}bg-blue-50 text-blue-700{% endif %} flex items-center justify-center text-xs font-bold flex-shrink-0">
                     {% if search.platform == 'instagram' %}IG{% elif search.platform == 'tiktok' %}TT{% else %}FB{% endif %}
                 </div>
@@ -84,14 +84,24 @@
                     <div class="flex flex-wrap items-center gap-1.5">
                         <h3 class="text-sm font-semibold text-stone-900 truncate">{{ search.name }}</h3>
                         {% if search.enabled %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Active</span>{% else %}<span class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Paused</span>{% endif %}
+                        {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
                     </div>
                     <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
                         <span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span>
                         <span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span>
                         <span>· up to {{ search.result_limit }} results</span>
                     </div>
+                    {% if search.last_run_at %}
+                    <div class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-stone-500">
+                        <span class="font-medium text-stone-600">Last run {{ search.last_run_at|slice:":16"|default:"recently" }}</span>
+                        <span>{{ search.last_created_count }} created</span>
+                        <span>{{ search.last_duplicate_count }} duplicates</span>
+                        <span>{{ search.last_invalid_count }} invalid</span>
+                    </div>
+                    {% endif %}
                 </div>
-                <div class="flex items-center gap-1.5 flex-shrink-0">
+                <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+                    <a href="{% url 'ugc:bulk_discovery_form' workspace_id=workspace.id %}?search_id={{ search.id }}" class="px-3 py-1.5 rounded-lg bg-violet-600 text-xs font-semibold text-white hover:bg-violet-700">Run test</a>
                     <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}">
                         {% csrf_token %}<input type="hidden" name="action" value="toggle">
                         <button class="px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-xs font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer">{% if search.enabled %}Pause{% else %}Enable{% endif %}</button>
