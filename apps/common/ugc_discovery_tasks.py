@@ -90,8 +90,10 @@ def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
         return provider
     path = str(diagnostics.get("path") or "none")
     details = int(diagnostics.get("details_nested_posts") or 0)
+    details_normalized = int(diagnostics.get("details_normalized_posts") or 0)
     search = int(diagnostics.get("search_nested_posts") or 0)
-    return f"{provider} · {path} d{details}/s{search}"[:50]
+    search_normalized = int(diagnostics.get("search_normalized_posts") or 0)
+    return f"{provider} · {path} d{details}>{details_normalized}/s{search}>{search_normalized}"[:50]
 
 
 @background(schedule=0)
