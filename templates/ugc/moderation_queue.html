@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize common_extras %}
+{% load humanize common_extras static %}
 
 {% block title %}Community Content · TN Social Studio{% endblock %}
 
@@ -283,4 +283,7 @@
     document.addEventListener('keydown', (event) => { if (!modal || modal.classList.contains('hidden')) return; if (event.key === 'Escape') closePreview(); if (event.key === 'ArrowLeft') { event.preventDefault(); stepPreview(-1); } if (event.key === 'ArrowRight') { event.preventDefault(); stepPreview(1); } });
 })();
 </script>
+{% if active_tab == 'discovered' and submissions %}
+<script nonce="{{ request.csp_nonce }}" src="{% static 'js/ugc_discovered_bulk_permissions.js' %}"></script>
+{% endif %}
 {% endblock %}
