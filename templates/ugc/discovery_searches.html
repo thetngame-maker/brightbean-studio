@@ -77,6 +77,20 @@
                             {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
                         </div>
                         <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500"><span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span><span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span><span>· up to {{ search.result_limit }} results</span></div>
+                        {% if search.search_type == 'location' %}
+                            {% if search.resolved_location_url %}
+                            <div class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-stone-500">
+                                <span class="font-semibold text-emerald-700">Instagram place:</span>
+                                <span class="font-medium text-stone-700">{{ search.resolved_location_name|default:search.query }}</span>
+                                {% if search.resolved_location_city %}<span>· {{ search.resolved_location_city }}</span>{% endif %}
+                                {% if search.resolved_location_id %}<span class="text-stone-400">· ID {{ search.resolved_location_id }}</span>{% endif %}
+                                <a href="{{ search.resolved_location_url }}" target="_blank" rel="noopener noreferrer" class="font-semibold text-violet-700 hover:text-violet-900">View place ↗</a>
+                                <a href="{% url 'ugc:location_candidates' workspace_id=workspace.id search_id=search.id %}" class="font-semibold text-stone-500 hover:text-stone-800">Change match</a>
+                            </div>
+                            {% else %}
+                            <div class="mt-1.5 text-[10px] font-semibold text-amber-700">Instagram place needs matching before scheduled runs.</div>
+                            {% endif %}
+                        {% endif %}
                         <div class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-stone-500"><span class="font-semibold text-stone-600">{{ search.cadence_label }}</span>{% if search.running %}<span class="font-semibold text-violet-700">Processing on worker</span>{% elif search.due_now %}<span class="font-semibold text-amber-700">Ready to run</span>{% elif search.next_run_at %}<span>Next {{ search.next_run_at|naturaltime }}</span>{% elif not search.enabled %}<span>Scheduling paused</span>{% else %}<span>Runs manually</span>{% endif %}</div>
                         {% if search.target_ready %}<div class="mt-2 text-[10px] text-stone-500"><span class="font-semibold text-emerald-700">Target ready:</span> {{ search.target_label|default:search.target_id }} <span class="text-stone-400">· {{ search.target_type }} · {{ search.target_id }}</span></div>{% endif %}
                         {% if search.last_run_at %}<div class="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-stone-500"><span class="font-medium text-stone-600">Last run {{ search.last_run_at|slice:":16" }}</span>{% if search.last_provider %}<span>{{ search.last_provider }}</span>{% endif %}<span>{{ search.last_created_count }} created</span><span>{{ search.last_duplicate_count }} duplicates</span><span>{{ search.last_invalid_count }} invalid</span></div>{% endif %}
