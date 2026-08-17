@@ -25,11 +25,7 @@ def _metric(value):
 @login_required
 @require_permission("manage_workspace_settings")
 def discovery_intelligence(request, workspace_id):
-    """Return engagement, query, and permission timing for discovered UGC.
-
-    Kept separate from the moderation HTML so future discovery providers can
-    enrich metadata without making the queue template provider-specific.
-    """
+    """Return engagement, query, permission timing, and outreach history."""
     workspace = _get_workspace(request, workspace_id)
     submissions = (
         UGCSubmission.objects.for_workspace(workspace.id)
@@ -41,14 +37,14 @@ def discovery_intelligence(request, workspace_id):
     for submission in submissions:
         metadata = submission.metadata or {}
         discovery = metadata.get("discovery_import") or {}
+        outreach = metadata.get("outreach") if isinstance(metadata.get("outreach"), dict) else {}
         provenance = get_provenance(metadata)
         permission = get_permission(metadata)
         likes = _metric(discovery.get("like_count"))
         comments = _metric(discovery.get("comment_count"))
         views = _metric(discovery.get("view_count"))
-        # Comments generally represent stronger intent than a passive like;
-        # views are useful context but intentionally weighted lightly.
         engagement_score = likes + (comments * 3) + int(views * 0.02)
+        requested_at = str(outreach.get("requested_at") or permission.get("updated_at") or "")
         items.append(
             {
                 "id": str(submission.id),
@@ -61,6 +57,10 @@ def discovery_intelligence(request, workspace_id):
                 "permission_status": permission.get("status", "not_contacted"),
                 "permission_updated_at": permission.get("updated_at", ""),
                 "permission_channel": permission.get("channel", ""),
+                "requested_at": requested_at,
+                "last_followup_at": str(outreach.get("last_followup_at") or ""),
+                "followup_count": _metric(outreach.get("followup_count")),
+                "last_followup_channel": str(outreach.get("last_followup_channel") or ""),
             }
         )
 
