@@ -92,7 +92,6 @@ def _finish_search(workspace_id, search_id, *, status, provider="", summary=None
         item["last_scanned_count"] = int(summary.get("provider_scanned_count") or summary.get("total_received") or 0)
         item["last_fill_target"] = int(summary.get("fill_target") or 0)
         item["last_fill_selected_new"] = int(summary.get("fill_selected_new") or 0)
-        item["progressive_scan_depth"] = int(summary.get("progressive_scan_depth") or item.get("progressive_scan_depth") or 0)
         workspace.discovery_searches = searches
         workspace.save(update_fields=["discovery_searches", "updated_at"])
 
@@ -108,8 +107,22 @@ def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
     return f"{provider} · {path} d{details}>{details_normalized}/s{search}>{search_normalized}"[:50]
 
 
+def _previous_keyword_depth(claimed: dict) -> int:
+    """Recover durable depth from the provider label preserved by saved searches."""
+    provider_label = str(claimed.get("last_provider") or "")
+    marker = "depth"
+    if marker not in provider_label:
+        return 0
+    tail = provider_label.rsplit(marker, 1)[-1].strip()
+    digits = "".join(ch for ch in tail if ch.isdigit())
+    try:
+        return min(MAX_PROVIDER_SCAN_ITEMS, int(digits or 0))
+    except ValueError:
+        return 0
+
+
 def _next_keyword_depth(claimed: dict) -> int:
-    previous = int(claimed.get("progressive_scan_depth") or 0)
+    previous = _previous_keyword_depth(claimed)
     if previous < KEYWORD_DEPTH_STEP:
         return KEYWORD_DEPTH_STEP
     return min(MAX_PROVIDER_SCAN_ITEMS, previous + KEYWORD_DEPTH_STEP)
@@ -207,7 +220,6 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             default_target_url=claimed.get("target_url", ""),
         )
         summary["provider_scanned_count"] = provider_scanned_count
-        summary["progressive_scan_depth"] = progressive_depth if search_type == "keyword" and provider == "apify" and not test_mode else 0
         if fill_mode:
             summary["fill_target"] = target_new
             summary["fill_selected_new"] = int(fill_stats.get("selected_new_count") or 0)
@@ -234,7 +246,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
                 "provider_scanned_count": provider_scanned_count,
-                "progressive_scan_depth": int(summary.get("progressive_scan_depth") or 0),
+                "progressive_scan_depth": progressive_depth if search_type == "keyword" else 0,
                 "fill_mode": bool(fill_mode),
                 "fill_target": int(summary.get("fill_target") or 0),
                 "fill_selected_new": int(summary.get("fill_selected_new") or 0),
