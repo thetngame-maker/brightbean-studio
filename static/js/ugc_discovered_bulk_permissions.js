@@ -55,7 +55,18 @@
         return match ? match[1] : '';
     }
 
+    function permissionStatusFor(card) {
+        const form = card.querySelector('form[action*="/permission/"]');
+        const panel = form ? form.closest('div.mt-3') : null;
+        const text = (panel ? panel.textContent : card.textContent || '').toLocaleLowerCase();
+        if (text.includes('permission requested')) return 'requested';
+        if (text.includes('permission declined')) return 'declined';
+        if (text.includes('permission granted')) return 'granted';
+        return 'not_contacted';
+    }
+
     cards.forEach((card) => {
+        card.dataset.permissionStatus = permissionStatusFor(card);
         const permissionForm = card.querySelector('form[action*="/permission/"]');
         if (!permissionForm) return;
         const permissionPanel = permissionForm.closest('div.mt-3');
@@ -139,11 +150,58 @@
 
     const itemCheckboxes = Array.from(document.querySelectorAll('.ugc-select-item'));
 
+    const sortSelect = document.getElementById('ugc-sort');
+    const sourceSelect = document.getElementById('ugc-source');
+    const resultCount = document.getElementById('ugc-result-count');
+    let permissionSelect = document.getElementById('ugc-permission-filter');
+
+    if (!permissionSelect && sortSelect && sortSelect.parentNode) {
+        permissionSelect = document.createElement('select');
+        permissionSelect.id = 'ugc-permission-filter';
+        permissionSelect.className = 'h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-violet-400';
+        permissionSelect.setAttribute('aria-label', 'Creator permission status');
+        permissionSelect.innerHTML = `
+            <option value="">All permissions</option>
+            <option value="not_contacted">Not contacted</option>
+            <option value="requested">Permission requested</option>
+            <option value="declined">Declined</option>
+        `;
+        sortSelect.parentNode.insertBefore(permissionSelect, sortSelect);
+    }
+
+    function cardIsVisible(card) {
+        return !card.classList.contains('hidden') && card.style.display !== 'none';
+    }
+
     function visibleCheckboxes() {
         return itemCheckboxes.filter((checkbox) => {
             const card = checkbox.closest('.ugc-card');
-            return card && !card.classList.contains('hidden');
+            return card && cardIsVisible(card);
         });
+    }
+
+    function updateResultCount() {
+        if (!resultCount) return;
+        const visible = cards.filter(cardIsVisible).length;
+        const permissionFiltering = Boolean(permissionSelect && permissionSelect.value);
+        const sourceFiltering = Boolean(sourceSelect && sourceSelect.value);
+        const search = document.getElementById('ugc-search');
+        const searchFiltering = Boolean(search && (search.value || '').trim());
+        if (permissionFiltering || sourceFiltering || searchFiltering) {
+            resultCount.textContent = `${visible} of ${cards.length}`;
+        } else {
+            resultCount.textContent = `${cards.length} item${cards.length === 1 ? '' : 's'}`;
+        }
+    }
+
+    function applyPermissionFilter() {
+        const status = permissionSelect ? permissionSelect.value : '';
+        cards.forEach((card) => {
+            const matches = !status || card.dataset.permissionStatus === status;
+            card.style.display = matches ? '' : 'none';
+        });
+        updateResultCount();
+        sync();
     }
 
     function sync() {
@@ -171,8 +229,6 @@
         visibleCheckboxes().forEach((checkbox) => { checkbox.checked = selectVisible.checked; });
         sync();
     });
-
-    const sortSelect = document.getElementById('ugc-sort');
 
     function formatMetric(value) {
         const number = Number(value || 0);
@@ -226,25 +282,33 @@
         .then((payload) => {
             (payload.items || []).forEach(addDiscoveryIntelligence);
             sortByEngagementIfNeeded();
+            applyPermissionFilter();
         })
-        .catch(() => {});
+        .catch(() => { applyPermissionFilter(); });
 
-    ['ugc-search-submit', 'ugc-search-clear', 'ugc-empty-clear'].forEach((id) => {
+    ['ugc-search-submit', 'ugc-search-clear'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('click', () => window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0));
+        if (el) el.addEventListener('click', () => window.setTimeout(() => { sortByEngagementIfNeeded(); applyPermissionFilter(); }, 0));
+    });
+    const emptyClear = document.getElementById('ugc-empty-clear');
+    if (emptyClear) emptyClear.addEventListener('click', () => {
+        if (permissionSelect) permissionSelect.value = '';
+        window.setTimeout(() => { sortByEngagementIfNeeded(); applyPermissionFilter(); }, 0);
     });
     ['ugc-source', 'ugc-sort'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('change', () => window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0));
+        if (el) el.addEventListener('change', () => window.setTimeout(() => { sortByEngagementIfNeeded(); applyPermissionFilter(); }, 0));
     });
+    if (permissionSelect) permissionSelect.addEventListener('change', applyPermissionFilter);
+
     const search = document.getElementById('ugc-search');
     if (search) search.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0);
+        if (event.key === 'Enter') window.setTimeout(() => { sortByEngagementIfNeeded(); applyPermissionFilter(); }, 0);
     });
 
     toolbar.addEventListener('submit', function (event) {
         if (!itemCheckboxes.some((checkbox) => checkbox.checked)) event.preventDefault();
     });
 
-    sync();
+    applyPermissionFilter();
 })();
