@@ -149,6 +149,10 @@ def ingest_discovered_items(
                 if raw.get("video_view_count") is not None
                 else raw.get("views")
             ),
+            "creator_identity_provisional": bool(raw.get("creator_identity_provisional")),
+            "location_id": _text(raw.get("location_id"), 255),
+            "location_name": _text(raw.get("location_name"), 255),
+            "location_url": _text(raw.get("location_url"), 2000),
         }
 
         with transaction.atomic():
