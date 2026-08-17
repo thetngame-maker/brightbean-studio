@@ -2,6 +2,7 @@
 from __future__ import annotations
 import uuid
 from datetime import timedelta
+from urllib.parse import quote
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect, render
@@ -25,6 +26,17 @@ def _safe_int(value,default=0,minimum=0,maximum=100000):
     return max(minimum,min(maximum,result))
 
 def _text(value,limit): return str(value or "").strip()[:limit]
+
+def _instagram_search_url(item):
+    if str(item.get("platform") or "").lower() != "instagram": return ""
+    search_type=str(item.get("search_type") or "").lower(); query=str(item.get("query") or "").strip()
+    if search_type=="location": return str(item.get("resolved_location_url") or "").strip()
+    if search_type=="hashtag":
+        tag=query.lstrip("#").strip(); return f"https://www.instagram.com/explore/tags/{quote(tag,safe='')}/" if tag else ""
+    if search_type=="account":
+        handle=query.lstrip("@").strip(); return f"https://www.instagram.com/{quote(handle,safe='._')}/" if handle else ""
+    if search_type=="keyword": return f"https://www.instagram.com/explore/search/keyword/?q={quote(query,safe='')}" if query else ""
+    return ""
 
 def _clean_searches(value):
     if not isinstance(value,list): return []
@@ -92,7 +104,8 @@ def record_search_run(workspace,search_id,*,status,received=0,created=0,duplicat
 @require_permission("manage_workspace_settings")
 def discovery_searches(request,workspace_id):
     workspace=_get_workspace(request,workspace_id); searches=_clean_searches(workspace.discovery_searches); now=timezone.now()
-    for item in searches: item.update(_schedule_state(item,now=now))
+    for item in searches:
+        item.update(_schedule_state(item,now=now)); item["instagram_search_url"]=_instagram_search_url(item)
     searches.sort(key=lambda i:(0 if i.get("running") else 1,0 if i.get("due_now") else 1,0 if i.get("enabled") else 1,i.get("name","").lower()))
     return render(request,"ugc/discovery_searches.html",{"workspace":workspace,"searches":searches,"search_types":SEARCH_TYPES.items(),"platforms":PLATFORMS.items(),"cadences":CADENCES.items(),"target_choices":TARGET_CHOICES,"enabled_count":sum(1 for i in searches if i["enabled"]),"due_count":sum(1 for i in searches if i.get("due_now")),"needs_target_count":sum(1 for i in searches if i["enabled"] and not i.get("target_ready")),"live_provider_ready":live_provider_ready()})
 
