@@ -15,6 +15,7 @@ from .audit import record_audit_event
 from .ugc_discovery_ingest import ingest_discovered_items
 from .ugc_discovery_providers import DiscoveryProviderError, fetch_discovery_results, live_provider_ready
 from .ugc_discovery_search_views import _clean_searches, _schedule_state
+from .ugc_location_fallback import deep_location_fallback
 from .ugc_remote_media import repair_workspace_discovered_media
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,15 @@ def _finish_search(workspace_id, search_id, *, status, provider="", summary=None
         workspace.save(update_fields=["discovery_searches", "updated_at"])
 
 
+def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
+    if not diagnostics:
+        return provider
+    path = str(diagnostics.get("path") or "none")
+    details = int(diagnostics.get("details_nested_posts") or 0)
+    search = int(diagnostics.get("search_nested_posts") or 0)
+    return f"{provider} · {path} d{details}/s{search}"[:50]
+
+
 @background(schedule=0)
 def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
     """Execute one saved search on the shared Railway background worker.
@@ -99,12 +109,27 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
         return
 
     provider = "mock" if test_mode else ""
+    diagnostics = None
     try:
         provider, rows = fetch_discovery_results(
             claimed,
             provider_name=provider or None,
             allow_mock=bool(test_mode),
         )
+
+        # Location actors can expose post media in several documented output
+        # shapes. Only invoke the deeper inspection when all normal Apify paths
+        # returned zero usable rows, so hashtag/keyword performance is unchanged.
+        if (
+            not rows
+            and provider == "apify"
+            and str(claimed.get("search_type") or "").lower() == "location"
+        ):
+            rows, diagnostics = deep_location_fallback(
+                claimed,
+                int(claimed.get("result_limit") or 25),
+            )
+
         workspace = Workspace.objects.get(id=workspace_id)
         summary = ingest_discovered_items(
             workspace=workspace,
@@ -115,7 +140,8 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             default_target_label=claimed.get("target_label", ""),
             default_target_url=claimed.get("target_url", ""),
         )
-        _finish_search(workspace_id, search_id, status="success", provider=provider, summary=summary)
+        provider_label = _location_provider_label(provider, diagnostics)
+        _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
         # Also repair older provider imports from before durable media capture
         # existed. The repair task de-duplicates its own queue work.
         repair_workspace_discovered_media(str(workspace.id))
@@ -134,6 +160,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "created_count": summary["created_count"],
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
+                "location_diagnostics": diagnostics or {},
             },
         )
     except DiscoveryProviderError as exc:
