@@ -5,6 +5,7 @@ from . import (
     ugc_discovery_bulk_views,
     ugc_discovery_intelligence_views,
     ugc_discovery_views,
+    ugc_followup_views,
     ugc_intake_views,
     ugc_views,
 )
@@ -22,6 +23,7 @@ urlpatterns = [
     path("discovered/bulk/permission/", ugc_bulk_permission_views.bulk_permission_update, name="bulk_permission_update"),
     path("discovered/intelligence/", ugc_discovery_intelligence_views.discovery_intelligence, name="discovery_intelligence"),
     path("<uuid:submission_id>/permission/", ugc_views.update_permission_view, name="update_permission"),
+    path("<uuid:submission_id>/permission/followup/", ugc_followup_views.log_followup, name="log_followup"),
     path("<uuid:submission_id>/use-in-post/", ugc_views.use_in_post_view, name="use_in_post"),
     path("<uuid:submission_id>/moderate/", ugc_views.moderate_submission_view, name="moderate"),
     path("reports/<uuid:report_id>/resolve/", ugc_views.resolve_report_view, name="resolve_report"),
