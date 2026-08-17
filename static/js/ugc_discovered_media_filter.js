@@ -93,8 +93,6 @@
             else card.style.removeProperty('display');
         });
 
-        // Permission/source/search filtering also changes visibility. Reapply
-        // this library layer on the next frame so all filters compose.
         window.requestAnimationFrame(() => {
             cards.forEach((card) => {
                 if (!combinedMatches(card)) card.style.setProperty('display', 'none', 'important');
@@ -158,4 +156,12 @@
         .catch(() => applyLibraryFilters());
 
     applyLibraryFilters();
+
+    if (!document.querySelector('script[data-ugc-discovery-performance]')) {
+        const performanceScript = document.createElement('script');
+        performanceScript.src = '/static/js/ugc_discovered_performance.js';
+        performanceScript.dataset.ugcDiscoveryPerformance = '1';
+        if (document.currentScript && document.currentScript.nonce) performanceScript.nonce = document.currentScript.nonce;
+        document.head.appendChild(performanceScript);
+    }
 })();
