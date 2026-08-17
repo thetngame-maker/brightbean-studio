@@ -38,19 +38,102 @@ def _metric(value: Any):
     return None
 
 
-def _duplicate_exists(*, workspace_id, platform: str, external_id: str, source_url: str) -> bool:
-    base = UGCSubmission.objects.for_workspace(workspace_id)
+def _find_duplicate(*, workspace_id, platform: str, external_id: str, source_url: str):
+    base = UGCSubmission.objects.for_workspace(workspace_id).select_related("media_asset")
     if external_id:
         return base.filter(
             metadata__provenance__platform=platform,
             metadata__provenance__external_id=external_id,
-        ).exists()
+        ).first()
     if source_url:
         return base.filter(
             metadata__provenance__platform=platform,
             metadata__provenance__source_url=source_url,
-        ).exists()
-    return False
+        ).first()
+    return None
+
+
+def _discovery_metadata(raw: dict, media_asset=None) -> dict:
+    media_type = _text(raw.get("media_type") or "image", 20).lower()
+    if media_type not in {"image", "video"}:
+        media_type = "image"
+    media_url = _text(raw.get("media_url") or raw.get("display_url"), 2000)
+    return {
+        "media_type": media_type,
+        "media_url": media_url,
+        "thumbnail_url": _text(raw.get("thumbnail_url"), 2000),
+        "instagram_product_type": _text(raw.get("instagram_product_type"), 100),
+        "media_capture_status": "queued" if media_url and media_asset is None else "",
+        "like_count": _metric(raw.get("like_count") if raw.get("like_count") is not None else raw.get("likes")),
+        "comment_count": _metric(raw.get("comment_count") if raw.get("comment_count") is not None else raw.get("comments")),
+        "view_count": _metric(
+            raw.get("view_count")
+            if raw.get("view_count") is not None
+            else raw.get("video_view_count")
+            if raw.get("video_view_count") is not None
+            else raw.get("views")
+        ),
+        "creator_identity_provisional": bool(raw.get("creator_identity_provisional")),
+        "location_id": _text(raw.get("location_id"), 255),
+        "location_name": _text(raw.get("location_name"), 255),
+        "location_url": _text(raw.get("location_url"), 2000),
+    }
+
+
+def _upgrade_duplicate_media(submission: UGCSubmission, raw: dict) -> bool:
+    """Enrich an existing discovered row and upgrade a still image to Reel video."""
+    incoming = _discovery_metadata(raw, media_asset=submission.media_asset)
+    metadata = dict(submission.metadata or {})
+    discovery = dict(metadata.get("discovery_import") or {})
+
+    for key in (
+        "like_count",
+        "comment_count",
+        "view_count",
+        "creator_identity_provisional",
+        "location_id",
+        "location_name",
+        "location_url",
+        "instagram_product_type",
+    ):
+        if incoming.get(key) not in (None, ""):
+            discovery[key] = incoming.get(key)
+
+    incoming_type = incoming.get("media_type") or "image"
+    incoming_url = incoming.get("media_url") or ""
+    incoming_thumb = incoming.get("thumbnail_url") or ""
+    needs_capture = False
+
+    if incoming_type == "video" and incoming_url:
+        discovery["media_type"] = "video"
+        discovery["media_url"] = incoming_url
+        discovery["thumbnail_url"] = incoming_thumb
+        discovery["media_capture_status"] = "queued"
+        submission.kind = UGCSubmission.Kind.COMMUNITY_POST
+
+        if submission.media_asset_id and submission.media_asset and not submission.media_asset.is_video:
+            discovery["thumbnail_asset_id"] = str(submission.media_asset_id)
+            submission.media_asset = None
+            needs_capture = True
+        elif not submission.media_asset_id:
+            needs_capture = True
+        elif submission.media_asset and submission.media_asset.is_video:
+            discovery["media_capture_status"] = "captured"
+    elif not discovery.get("media_url") and incoming_url:
+        discovery["media_type"] = incoming_type
+        discovery["media_url"] = incoming_url
+        discovery["thumbnail_url"] = incoming_thumb
+        if not submission.media_asset_id:
+            discovery["media_capture_status"] = "queued"
+            needs_capture = True
+
+    metadata["discovery_import"] = discovery
+    submission.metadata = metadata
+    submission.save(update_fields=["kind", "media_asset", "metadata", "updated_at"])
+
+    if needs_capture:
+        capture_discovered_media(str(submission.id))
+    return needs_capture
 
 
 def ingest_discovered_items(
@@ -64,22 +147,12 @@ def ingest_discovered_items(
     default_target_url: str = "",
     media_asset=None,
 ) -> dict[str, Any]:
-    """Create discovered UGC records and return a structured batch summary.
-
-    Normalized item keys:
-      platform, creator_handle, creator_name, creator_external_id,
-      source_url, external_id, title, caption, discovery_query,
-      media_url, like_count, comment_count, view_count,
-      target_type, target_id, target_label, target_url.
-
-    Dedupe uses platform + external_id when an external id exists, otherwise
-    platform + source_url. Invalid and duplicate rows are skipped, never fatal
-    to the rest of a batch.
-    """
+    """Create discovered UGC records and return a structured batch summary."""
 
     created = []
     duplicates = []
     invalid = []
+    upgraded_count = 0
 
     rows = list(items)[:MAX_BATCH_ITEMS]
     for index, raw in enumerate(rows, start=1):
@@ -110,12 +183,15 @@ def ingest_discovered_items(
             invalid.append({"index": index, "reason": "A target type and target ID are required."})
             continue
 
-        if _duplicate_exists(
+        duplicate = _find_duplicate(
             workspace_id=workspace.id,
             platform=platform,
             external_id=external_id,
             source_url=source_url,
-        ):
+        )
+        if duplicate:
+            if _upgrade_duplicate_media(duplicate, raw):
+                upgraded_count += 1
             duplicates.append(
                 {
                     "index": index,
@@ -136,29 +212,15 @@ def ingest_discovered_items(
         )
         metadata = set_provenance({}, provenance)
         metadata = set_permission(metadata, status=NOT_CONTACTED)
-        media_url = _text(raw.get("media_url") or raw.get("display_url"), 2000)
-        metadata["discovery_import"] = {
-            "media_url": media_url,
-            "media_capture_status": "queued" if media_url and media_asset is None else "",
-            "like_count": _metric(raw.get("like_count") if raw.get("like_count") is not None else raw.get("likes")),
-            "comment_count": _metric(raw.get("comment_count") if raw.get("comment_count") is not None else raw.get("comments")),
-            "view_count": _metric(
-                raw.get("view_count")
-                if raw.get("view_count") is not None
-                else raw.get("video_view_count")
-                if raw.get("video_view_count") is not None
-                else raw.get("views")
-            ),
-            "creator_identity_provisional": bool(raw.get("creator_identity_provisional")),
-            "location_id": _text(raw.get("location_id"), 255),
-            "location_name": _text(raw.get("location_name"), 255),
-            "location_url": _text(raw.get("location_url"), 2000),
-        }
+        discovery = _discovery_metadata(raw, media_asset=media_asset)
+        metadata["discovery_import"] = discovery
+        media_url = discovery.get("media_url") or ""
+        is_video = discovery.get("media_type") == "video"
 
         with transaction.atomic():
             submission = UGCSubmission.objects.create(
                 workspace=workspace,
-                kind=UGCSubmission.Kind.PHOTO,
+                kind=UGCSubmission.Kind.COMMUNITY_POST if is_video else UGCSubmission.Kind.PHOTO,
                 status=UGCSubmission.Status.PENDING,
                 source=UGCSubmission.Source.IMPORT,
                 contributor_handle=creator_handle,
@@ -184,6 +246,7 @@ def ingest_discovered_items(
         "created_count": len(created),
         "duplicate_count": len(duplicates),
         "invalid_count": len(invalid),
+        "upgraded_count": upgraded_count,
         "duplicates": duplicates,
         "invalid": invalid,
         "total_received": len(rows),
