@@ -15,6 +15,7 @@ from django.db import transaction
 from .models import UGCSubmission
 from .ugc_permissions import NOT_CONTACTED, set_permission
 from .ugc_provenance import build_provenance, normalize_platform, set_provenance
+from .ugc_remote_media import capture_discovered_media
 
 
 MAX_BATCH_ITEMS = 100
@@ -135,8 +136,10 @@ def ingest_discovered_items(
         )
         metadata = set_provenance({}, provenance)
         metadata = set_permission(metadata, status=NOT_CONTACTED)
+        media_url = _text(raw.get("media_url") or raw.get("display_url"), 2000)
         metadata["discovery_import"] = {
-            "media_url": _text(raw.get("media_url") or raw.get("display_url"), 2000),
+            "media_url": media_url,
+            "media_capture_status": "queued" if media_url and media_asset is None else "",
             "like_count": _metric(raw.get("like_count") if raw.get("like_count") is not None else raw.get("likes")),
             "comment_count": _metric(raw.get("comment_count") if raw.get("comment_count") is not None else raw.get("comments")),
             "view_count": _metric(
@@ -169,6 +172,8 @@ def ingest_discovered_items(
                 metadata=metadata,
             )
         created.append(submission)
+        if media_url and media_asset is None:
+            capture_discovered_media(str(submission.id))
 
     return {
         "created": created,
