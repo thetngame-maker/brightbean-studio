@@ -10,6 +10,7 @@
         <p class="text-sm text-stone-500 mt-1">Simulate content found by a future Instagram or social discovery importer.</p>
     </div>
     <div class="flex items-center gap-2">
+        <a href="{% url 'ugc:discovery_searches' workspace_id=workspace.id %}" class="inline-flex items-center rounded-lg px-3 py-2 text-xs font-semibold bg-white text-violet-700 border border-violet-200 hover:bg-violet-50">Discovery searches</a>
         <a href="{% url 'ugc:bulk_discovery_form' workspace_id=workspace.id %}" class="inline-flex items-center rounded-lg px-3 py-2 text-xs font-semibold bg-white text-violet-700 border border-violet-200 hover:bg-violet-50">Bulk test import</a>
         <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-100">Single test item</span>
     </div>
