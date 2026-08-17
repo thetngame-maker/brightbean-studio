@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 DISCOVERY_SCAN_INTERVAL_SECONDS = 5 * 60
 RUNNING_STALE_AFTER = timedelta(minutes=30)
-MAX_PROVIDER_SCAN_ITEMS = 100
+MAX_PROVIDER_SCAN_ITEMS = 500
+KEYWORD_DEPTH_STEP = 100
 
 
 def _find_search(searches, search_id):
@@ -91,6 +92,7 @@ def _finish_search(workspace_id, search_id, *, status, provider="", summary=None
         item["last_scanned_count"] = int(summary.get("provider_scanned_count") or summary.get("total_received") or 0)
         item["last_fill_target"] = int(summary.get("fill_target") or 0)
         item["last_fill_selected_new"] = int(summary.get("fill_selected_new") or 0)
+        item["progressive_scan_depth"] = int(summary.get("progressive_scan_depth") or item.get("progressive_scan_depth") or 0)
         workspace.discovery_searches = searches
         workspace.save(update_fields=["discovery_searches", "updated_at"])
 
@@ -106,18 +108,29 @@ def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
     return f"{provider} · {path} d{details}>{details_normalized}/s{search}>{search_normalized}"[:50]
 
 
-def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool) -> tuple[dict, int, bool]:
-    """Return provider request, target-new count, and whether fill mode applies."""
-    target = max(1, min(MAX_PROVIDER_SCAN_ITEMS, int(claimed.get("result_limit") or 25)))
+def _next_keyword_depth(claimed: dict) -> int:
+    previous = int(claimed.get("progressive_scan_depth") or 0)
+    if previous < KEYWORD_DEPTH_STEP:
+        return KEYWORD_DEPTH_STEP
+    return min(MAX_PROVIDER_SCAN_ITEMS, previous + KEYWORD_DEPTH_STEP)
+
+
+def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool) -> tuple[dict, int, bool, int]:
+    """Return provider request, target-new count, fill mode, and scan depth."""
+    target = max(1, min(100, int(claimed.get("result_limit") or 25)))
     search_type = str(claimed.get("search_type") or "").lower()
     fill_mode = provider != "mock" and not test_mode and search_type in {"keyword", "hashtag"}
     if not fill_mode:
-        return dict(claimed), target, False
+        return dict(claimed), target, False, target
 
-    scan_limit = min(MAX_PROVIDER_SCAN_ITEMS, max(target * 4, target + 25))
+    if search_type == "keyword":
+        scan_limit = _next_keyword_depth(claimed)
+    else:
+        scan_limit = min(MAX_PROVIDER_SCAN_ITEMS, max(target * 4, target + 25))
+
     request_search = dict(claimed)
     request_search["result_limit"] = scan_limit
-    return request_search, target, True
+    return request_search, target, True, scan_limit
 
 
 def _tag_discovery_method(rows, search_type: str):
@@ -143,8 +156,9 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
     provider = "mock" if test_mode else ""
     diagnostics = None
     fill_stats = {}
+    progressive_depth = 0
     try:
-        provider_request, target_new, fill_mode = _provider_request_for_fill(
+        provider_request, target_new, fill_mode, progressive_depth = _provider_request_for_fill(
             claimed,
             provider=provider,
             test_mode=bool(test_mode),
@@ -193,11 +207,14 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             default_target_url=claimed.get("target_url", ""),
         )
         summary["provider_scanned_count"] = provider_scanned_count
+        summary["progressive_scan_depth"] = progressive_depth if search_type == "keyword" and provider == "apify" and not test_mode else 0
         if fill_mode:
             summary["fill_target"] = target_new
             summary["fill_selected_new"] = int(fill_stats.get("selected_new_count") or 0)
 
         provider_label = _location_provider_label(provider, diagnostics)
+        if search_type == "keyword" and provider == "apify" and not test_mode:
+            provider_label = f"apify · depth{progressive_depth}"[:50]
         _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
         repair_workspace_discovered_media(str(workspace.id))
         record_audit_event(
@@ -217,6 +234,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
                 "provider_scanned_count": provider_scanned_count,
+                "progressive_scan_depth": int(summary.get("progressive_scan_depth") or 0),
                 "fill_mode": bool(fill_mode),
                 "fill_target": int(summary.get("fill_target") or 0),
                 "fill_selected_new": int(summary.get("fill_selected_new") or 0),
