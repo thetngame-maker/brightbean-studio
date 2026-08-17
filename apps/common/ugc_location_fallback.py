@@ -27,18 +27,63 @@ POST_CONTAINER_KEYS = {
     "recent_posts",
     "top_posts",
 }
+POST_WRAPPER_KEYS = ("node", "post", "media", "item")
+LIST_WRAPPER_KEYS = ("edges", "items", "nodes", "data", "results")
+
+
+def _looks_like_post(value: dict) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return bool(
+        value.get("shortCode")
+        or value.get("shortcode")
+        or value.get("code")
+        or value.get("postUrl")
+        or (value.get("url") and "/p/" in str(value.get("url")))
+        or value.get("ownerUsername")
+        or value.get("ownerId")
+        or isinstance(value.get("owner"), dict)
+    )
+
+
+def _unwrap_post_values(value, *, depth=0):
+    """Yield actual post dictionaries from list/GraphQL wrapper shapes."""
+    if depth > 5:
+        return
+    if isinstance(value, list):
+        for item in value:
+            yield from _unwrap_post_values(item, depth=depth + 1)
+        return
+    if not isinstance(value, dict):
+        return
+
+    # Common GraphQL/provider wrapper: {"node": {actual post...}}.
+    for key in POST_WRAPPER_KEYS:
+        child = value.get(key)
+        if isinstance(child, dict):
+            yield from _unwrap_post_values(child, depth=depth + 1)
+            return
+
+    # Containers frequently wrap a list as {"edges": [...]}, {"items": [...]},
+    # etc. Recurse into those before treating the wrapper itself as a post.
+    for key in LIST_WRAPPER_KEYS:
+        child = value.get(key)
+        if isinstance(child, (list, dict)):
+            yield from _unwrap_post_values(child, depth=depth + 1)
+            return
+
+    if _looks_like_post(value):
+        yield value
 
 
 def _walk_post_containers(value, *, depth=0):
-    """Yield dictionaries from known nested post collections only."""
-    if depth > 6:
+    """Yield actual post dictionaries from known nested post collections."""
+    if depth > 7:
         return
     if isinstance(value, dict):
         for key, child in value.items():
-            if key in POST_CONTAINER_KEYS and isinstance(child, list):
-                for item in child:
-                    if isinstance(item, dict):
-                        yield item
+            if key in POST_CONTAINER_KEYS and isinstance(child, (list, dict)):
+                yield from _unwrap_post_values(child)
             elif isinstance(child, (dict, list)):
                 yield from _walk_post_containers(child, depth=depth + 1)
     elif isinstance(value, list):
@@ -71,8 +116,10 @@ def deep_location_fallback(saved_search: dict, limit: int) -> tuple[list[dict], 
     diagnostics = {
         "details_rows": 0,
         "details_nested_posts": 0,
+        "details_normalized_posts": 0,
         "search_rows": 0,
         "search_nested_posts": 0,
+        "search_normalized_posts": 0,
         "normalized_posts": 0,
         "path": "none",
     }
@@ -89,6 +136,7 @@ def deep_location_fallback(saved_search: dict, limit: int) -> tuple[list[dict], 
         nested = list(_walk_post_containers(details))
         diagnostics["details_nested_posts"] = len(nested)
         normalized = _normalize_rows(nested, saved_search, limit)
+        diagnostics["details_normalized_posts"] = len(normalized)
         if normalized:
             diagnostics["normalized_posts"] = len(normalized)
             diagnostics["path"] = "location_details"
@@ -110,6 +158,7 @@ def deep_location_fallback(saved_search: dict, limit: int) -> tuple[list[dict], 
         nested = list(_walk_post_containers(matched or {}))
         diagnostics["search_nested_posts"] = len(nested)
         normalized = _normalize_rows(nested, saved_search, limit)
+        diagnostics["search_normalized_posts"] = len(normalized)
         if normalized:
             diagnostics["normalized_posts"] = len(normalized)
             diagnostics["path"] = "place_search_nested"
