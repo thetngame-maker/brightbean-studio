@@ -27,6 +27,13 @@ def _safe_int(value,default=0,minimum=0,maximum=100000):
 
 def _text(value,limit): return str(value or "").strip()[:limit]
 
+def _effective_result_limit(platform, search_type, result_limit):
+    """Keyword discovery is most useful when we keep the full first 100 rows."""
+    limit=_safe_int(result_limit,25,1,100)
+    if str(platform or "").lower()=="instagram" and str(search_type or "").lower()=="keyword":
+        return 100
+    return limit
+
 def _instagram_search_url(item):
     if str(item.get("platform") or "").lower() != "instagram": return ""
     search_type=str(item.get("search_type") or "").lower(); query=str(item.get("query") or "").strip()
@@ -45,10 +52,11 @@ def _clean_searches(value):
         if not isinstance(item,dict): continue
         cadence=_text(item.get("cadence") or "daily",20).lower()
         if cadence not in CADENCES: cadence="daily"
+        platform=_text(item.get("platform") or "instagram",30).lower(); search_type=_text(item.get("search_type") or "hashtag",30).lower()
         cleaned.append({
             "id":str(item.get("id") or uuid.uuid4()),"name":_text(item.get("name"),100),
-            "platform":_text(item.get("platform") or "instagram",30).lower(),"search_type":_text(item.get("search_type") or "hashtag",30).lower(),
-            "query":_text(item.get("query"),255),"result_limit":_safe_int(item.get("result_limit"),25,1,100),"enabled":bool(item.get("enabled",True)),"cadence":cadence,
+            "platform":platform,"search_type":search_type,
+            "query":_text(item.get("query"),255),"result_limit":_effective_result_limit(platform,search_type,item.get("result_limit")),"enabled":bool(item.get("enabled",True)),"cadence":cadence,
             "target_type":_text(item.get("target_type"),100),"target_id":_text(item.get("target_id"),255),"target_label":_text(item.get("target_label"),255),"target_url":_text(item.get("target_url"),2000),
             "resolved_location_id":_text(item.get("resolved_location_id"),255),"resolved_location_name":_text(item.get("resolved_location_name"),255),
             "resolved_location_url":_text(item.get("resolved_location_url"),2000),"resolved_location_slug":_text(item.get("resolved_location_slug"),255),
@@ -57,6 +65,7 @@ def _clean_searches(value):
             "last_run_at":_text(item.get("last_run_at"),100),"last_run_status":_text(item.get("last_run_status"),30).lower(),"last_started_at":_text(item.get("last_started_at"),100),
             "last_run_error":_text(item.get("last_run_error"),500),"last_provider":_text(item.get("last_provider"),50),
             "last_created_count":_safe_int(item.get("last_created_count")),"last_duplicate_count":_safe_int(item.get("last_duplicate_count")),"last_invalid_count":_safe_int(item.get("last_invalid_count")),"last_received_count":_safe_int(item.get("last_received_count")),
+            "last_scanned_count":_safe_int(item.get("last_scanned_count")),"last_fill_target":_safe_int(item.get("last_fill_target")),"last_fill_selected_new":_safe_int(item.get("last_fill_selected_new")),
         })
     return cleaned
 
@@ -115,7 +124,7 @@ def discovery_searches(request,workspace_id):
 def save_discovery_search(request,workspace_id):
     workspace=_get_workspace(request,workspace_id); searches=_clean_searches(workspace.discovery_searches)
     platform=request.POST.get("platform","instagram").strip().lower(); search_type=request.POST.get("search_type","hashtag").strip().lower(); query=request.POST.get("query","").strip(); name=request.POST.get("name","").strip(); cadence=request.POST.get("cadence","daily").strip().lower()
-    result_limit=_safe_int(request.POST.get("result_limit","25"),25,1,100); target_type=_text(request.POST.get("target_type"),100); target_id=_text(request.POST.get("target_id"),255); target_label=_text(request.POST.get("target_label"),255); target_url=_text(request.POST.get("target_url"),2000)
+    result_limit=_effective_result_limit(platform,search_type,request.POST.get("result_limit","25")); target_type=_text(request.POST.get("target_type"),100); target_id=_text(request.POST.get("target_id"),255); target_label=_text(request.POST.get("target_label"),255); target_url=_text(request.POST.get("target_url"),2000)
     if platform not in PLATFORMS: messages.error(request,"Choose a valid platform.")
     elif search_type not in SEARCH_TYPES: messages.error(request,"Choose a valid discovery type.")
     elif cadence not in CADENCES: messages.error(request,"Choose a valid discovery cadence.")
@@ -126,7 +135,7 @@ def save_discovery_search(request,workspace_id):
         normalized=query.lower().lstrip("#@").strip(); duplicate=any(i["platform"]==platform and i["search_type"]==search_type and i["query"].lower().lstrip("#@").strip()==normalized for i in searches)
         if duplicate: messages.warning(request,"That discovery search already exists.")
         else:
-            searches.insert(0,{"id":str(uuid.uuid4()),"name":name[:100] or query[:100],"platform":platform,"search_type":search_type,"query":query[:255],"result_limit":result_limit,"enabled":True,"cadence":cadence,"target_type":target_type,"target_id":target_id,"target_label":target_label,"target_url":target_url,"resolved_location_id":"","resolved_location_name":"","resolved_location_url":"","resolved_location_slug":"","resolved_location_city":"","resolved_location_address":"","resolved_location_lat":None,"resolved_location_lng":None,"last_run_at":"","last_run_status":"","last_started_at":"","last_run_error":"","last_provider":"","last_created_count":0,"last_duplicate_count":0,"last_invalid_count":0,"last_received_count":0})
+            searches.insert(0,{"id":str(uuid.uuid4()),"name":name[:100] or query[:100],"platform":platform,"search_type":search_type,"query":query[:255],"result_limit":result_limit,"enabled":True,"cadence":cadence,"target_type":target_type,"target_id":target_id,"target_label":target_label,"target_url":target_url,"resolved_location_id":"","resolved_location_name":"","resolved_location_url":"","resolved_location_slug":"","resolved_location_city":"","resolved_location_address":"","resolved_location_lat":None,"resolved_location_lng":None,"last_run_at":"","last_run_status":"","last_started_at":"","last_run_error":"","last_provider":"","last_created_count":0,"last_duplicate_count":0,"last_invalid_count":0,"last_received_count":0,"last_scanned_count":0,"last_fill_target":0,"last_fill_selected_new":0})
             workspace.discovery_searches=searches[:100]; workspace.save(update_fields=["discovery_searches","updated_at"])
             if search_type=="location": messages.success(request,"Location search saved. Click Run in background to choose the matching Instagram place.")
             elif target_type and target_id: messages.success(request,"Discovery search saved and ready for background runs.")
