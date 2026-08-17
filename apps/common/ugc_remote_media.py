@@ -40,6 +40,12 @@ def _remote_media_url(submission: UGCSubmission) -> str:
     return str(discovery.get("media_url") or "").strip()
 
 
+def _original_post_url(submission: UGCSubmission) -> str:
+    metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
+    provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
+    return str(provenance.get("source_url") or "").strip()[:200]
+
+
 def _capture_status(submission: UGCSubmission) -> str:
     metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
     discovery = metadata.get("discovery_import") if isinstance(metadata.get("discovery_import"), dict) else {}
@@ -132,7 +138,7 @@ def capture_submission_image(submission: UGCSubmission) -> tuple[bool, str]:
         alt_text=submission.title or submission.target_label or "Discovered community content",
         title=submission.title or submission.target_label or "Discovered community content",
         source="ugc_discovery",
-        source_url=source_url,
+        source_url=_original_post_url(submission),
         attribution=attribution or "",
         tags=["ugc", "discovered", str(submission.target_id or "")],
     )
