@@ -12,7 +12,7 @@ from django.utils import timezone
 from apps.workspaces.models import Workspace
 
 from .audit import record_audit_event
-from .ugc_discovery_ingest import ingest_discovered_items
+from .ugc_discovery_ingest import ingest_discovered_items, select_rows_for_new_target
 from .ugc_discovery_providers import DiscoveryProviderError, fetch_discovery_results, live_provider_ready
 from .ugc_discovery_search_views import _clean_searches, _schedule_state
 from .ugc_location_fallback import deep_location_fallback
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 DISCOVERY_SCAN_INTERVAL_SECONDS = 5 * 60
 RUNNING_STALE_AFTER = timedelta(minutes=30)
+MAX_PROVIDER_SCAN_ITEMS = 100
 
 
 def _find_search(searches, search_id):
@@ -81,6 +82,9 @@ def _finish_search(workspace_id, search_id, *, status, provider="", summary=None
         item["last_created_count"] = int(summary.get("created_count") or 0)
         item["last_duplicate_count"] = int(summary.get("duplicate_count") or 0)
         item["last_invalid_count"] = int(summary.get("invalid_count") or 0)
+        item["last_scanned_count"] = int(summary.get("provider_scanned_count") or summary.get("total_received") or 0)
+        item["last_fill_target"] = int(summary.get("fill_target") or 0)
+        item["last_fill_selected_new"] = int(summary.get("fill_selected_new") or 0)
         workspace.discovery_searches = searches
         workspace.save(update_fields=["discovery_searches", "updated_at"])
 
@@ -94,6 +98,23 @@ def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
     search = int(diagnostics.get("search_nested_posts") or 0)
     search_normalized = int(diagnostics.get("search_normalized_posts") or 0)
     return f"{provider} · {path} d{details}>{details_normalized}/s{search}>{search_normalized}"[:50]
+
+
+def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool) -> tuple[dict, int, bool]:
+    """Return provider request, target-new count, and whether fill mode applies."""
+    target = max(1, min(MAX_PROVIDER_SCAN_ITEMS, int(claimed.get("result_limit") or 25)))
+    search_type = str(claimed.get("search_type") or "").lower()
+    fill_mode = provider != "mock" and not test_mode and search_type in {"keyword", "hashtag"}
+    if not fill_mode:
+        return dict(claimed), target, False
+
+    # Provider limits count raw Instagram rows, while Studio's useful target is
+    # unseen rows after dedupe. Scan deeper (bounded for cost) and stop locally
+    # once enough genuinely new posts have been selected.
+    scan_limit = min(MAX_PROVIDER_SCAN_ITEMS, max(target * 4, target + 25))
+    request_search = dict(claimed)
+    request_search["result_limit"] = scan_limit
+    return request_search, target, True
 
 
 @background(schedule=0)
@@ -112,12 +133,24 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
 
     provider = "mock" if test_mode else ""
     diagnostics = None
+    fill_stats = {}
     try:
-        provider, rows = fetch_discovery_results(
+        provider_request, target_new, fill_mode = _provider_request_for_fill(
             claimed,
+            provider=provider,
+            test_mode=bool(test_mode),
+        )
+        provider, rows = fetch_discovery_results(
+            provider_request,
             provider_name=provider or None,
             allow_mock=bool(test_mode),
         )
+
+        # A live provider name is only known after fetch. Apply fill mode for
+        # Apify keyword/hashtag runs even when provider was configured implicitly.
+        search_type = str(claimed.get("search_type") or "").lower()
+        if provider == "apify" and not test_mode and search_type in {"keyword", "hashtag"}:
+            fill_mode = True
 
         # Location actors can expose post media in several documented output
         # shapes. Only invoke the deeper inspection when all normal Apify paths
@@ -125,7 +158,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
         if (
             not rows
             and provider == "apify"
-            and str(claimed.get("search_type") or "").lower() == "location"
+            and search_type == "location"
         ):
             rows, diagnostics = deep_location_fallback(
                 claimed,
@@ -133,15 +166,30 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             )
 
         workspace = Workspace.objects.get(id=workspace_id)
+        provider_scanned_count = len(rows)
+        if fill_mode:
+            selected_rows, fill_stats = select_rows_for_new_target(
+                workspace_id=workspace.id,
+                rows=rows,
+                target_new=target_new,
+            )
+        else:
+            selected_rows = rows[: claimed.get("result_limit", 25)]
+
         summary = ingest_discovered_items(
             workspace=workspace,
-            items=rows[: claimed.get("result_limit", 25)],
+            items=selected_rows,
             discovery_source=f"{provider}_scheduled" if not test_mode else "mock_background_test",
             default_target_type=claimed["target_type"],
             default_target_id=claimed["target_id"],
             default_target_label=claimed.get("target_label", ""),
             default_target_url=claimed.get("target_url", ""),
         )
+        summary["provider_scanned_count"] = provider_scanned_count
+        if fill_mode:
+            summary["fill_target"] = target_new
+            summary["fill_selected_new"] = int(fill_stats.get("selected_new_count") or 0)
+
         provider_label = _location_provider_label(provider, diagnostics)
         _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
         # Also repair older provider imports from before durable media capture
@@ -162,6 +210,10 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "created_count": summary["created_count"],
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
+                "provider_scanned_count": provider_scanned_count,
+                "fill_mode": bool(fill_mode),
+                "fill_target": int(summary.get("fill_target") or 0),
+                "fill_selected_new": int(summary.get("fill_selected_new") or 0),
                 "location_diagnostics": diagnostics or {},
             },
         )
