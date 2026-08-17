@@ -48,6 +48,13 @@
         if (!copied) throw new Error('Copy failed');
     }
 
+    function extractSubmissionId(card) {
+        const form = card.querySelector('form[action*="/permission/"]');
+        if (!form) return '';
+        const match = form.getAttribute('action').match(/\/([0-9a-fA-F-]{36})\/permission\/?$/);
+        return match ? match[1] : '';
+    }
+
     cards.forEach((card) => {
         const permissionForm = card.querySelector('form[action*="/permission/"]');
         if (!permissionForm) return;
@@ -118,16 +125,10 @@
     const hiddenInputs = document.getElementById('ugc-bulk-hidden-inputs');
     const actionButtons = Array.from(toolbar.querySelectorAll('.ugc-bulk-action'));
 
-    function extractSubmissionId(card) {
-        const form = card.querySelector('form[action*="/permission/"]');
-        if (!form) return '';
-        const match = form.getAttribute('action').match(/\/([0-9a-fA-F-]{36})\/permission\/?$/);
-        return match ? match[1] : '';
-    }
-
     cards.forEach((card) => {
         const id = extractSubmissionId(card);
         if (!id) return;
+        card.dataset.submissionId = id;
         const label = document.createElement('label');
         label.className = 'ugc-card-select absolute top-2 left-2 z-20 inline-flex items-center justify-center w-8 h-8 rounded-lg bg-white/95 border border-stone-200 shadow-sm cursor-pointer';
         label.title = 'Select discovered item';
@@ -171,17 +172,74 @@
         sync();
     });
 
+    const sortSelect = document.getElementById('ugc-sort');
+
+    function formatMetric(value) {
+        const number = Number(value || 0);
+        if (number >= 1000000) return `${(number / 1000000).toFixed(number >= 10000000 ? 0 : 1)}M`;
+        if (number >= 1000) return `${(number / 1000).toFixed(number >= 10000 ? 0 : 1)}K`;
+        return String(number);
+    }
+
+    function sortByEngagementIfNeeded() {
+        if (!sortSelect || sortSelect.value !== 'engaged') return;
+        cards.slice().sort((a, b) => {
+            const scoreDiff = Number(b.dataset.engagement || 0) - Number(a.dataset.engagement || 0);
+            if (scoreDiff) return scoreDiff;
+            return Number(b.dataset.submitted || 0) - Number(a.dataset.submitted || 0);
+        }).forEach((card) => grid.appendChild(card));
+    }
+
+    function addDiscoveryIntelligence(item) {
+        const card = cards.find((candidate) => candidate.dataset.submissionId === item.id);
+        if (!card) return;
+        card.dataset.engagement = String(item.engagement_score || 0);
+
+        const title = card.querySelector('h2');
+        const contributor = title ? title.nextElementSibling : null;
+        if (contributor && !card.querySelector('.ugc-discovery-intelligence')) {
+            const row = document.createElement('div');
+            row.className = 'ugc-discovery-intelligence mt-2 flex flex-wrap items-center gap-1.5 text-[10px] text-stone-500';
+            const metrics = [];
+            if (item.like_count) metrics.push(`<span class="inline-flex items-center gap-1 rounded-md bg-rose-50 px-1.5 py-0.5 text-rose-700">♥ ${formatMetric(item.like_count)}</span>`);
+            if (item.comment_count) metrics.push(`<span class="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-sky-700">💬 ${formatMetric(item.comment_count)}</span>`);
+            if (item.view_count) metrics.push(`<span class="inline-flex items-center gap-1 rounded-md bg-stone-100 px-1.5 py-0.5 text-stone-600">◉ ${formatMetric(item.view_count)}</span>`);
+            if (item.discovery_query) metrics.push(`<span class="max-w-[170px] truncate rounded-md bg-violet-50 px-1.5 py-0.5 text-violet-700" title="Found via ${item.discovery_query.replace(/"/g, '&quot;')}">Found via ${item.discovery_query}</span>`);
+            if (metrics.length) {
+                row.innerHTML = metrics.join('');
+                contributor.insertAdjacentElement('afterend', row);
+                card.dataset.searchText = `${card.dataset.searchText || (card.textContent || '').toLocaleLowerCase()} ${(item.discovery_query || '').toLocaleLowerCase()}`;
+            }
+        }
+    }
+
+    if (sortSelect && !sortSelect.querySelector('option[value="engaged"]')) {
+        const option = document.createElement('option');
+        option.value = 'engaged';
+        option.textContent = 'Most engaged';
+        sortSelect.appendChild(option);
+    }
+
+    const intelligenceUrl = window.location.pathname.replace(/\/?$/, '/discovered/intelligence/');
+    fetch(intelligenceUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+        .then((response) => response.ok ? response.json() : Promise.reject(new Error('Discovery intelligence unavailable')))
+        .then((payload) => {
+            (payload.items || []).forEach(addDiscoveryIntelligence);
+            sortByEngagementIfNeeded();
+        })
+        .catch(() => {});
+
     ['ugc-search-submit', 'ugc-search-clear', 'ugc-empty-clear'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('click', () => window.setTimeout(sync, 0));
+        if (el) el.addEventListener('click', () => window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0));
     });
     ['ugc-source', 'ugc-sort'].forEach((id) => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('change', () => window.setTimeout(sync, 0));
+        if (el) el.addEventListener('change', () => window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0));
     });
     const search = document.getElementById('ugc-search');
     if (search) search.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') window.setTimeout(sync, 0);
+        if (event.key === 'Enter') window.setTimeout(() => { sync(); sortByEngagementIfNeeded(); }, 0);
     });
 
     toolbar.addEventListener('submit', function (event) {
