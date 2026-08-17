@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load humanize %}
 
 {% block title %}Discovery Searches · TN Social Studio{% endblock %}
 
@@ -6,13 +7,14 @@
 <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
     <div>
         <a href="{% url 'ugc:moderation_queue' workspace_id=workspace.id %}?tab=discovered" class="text-xs font-medium text-stone-400 hover:text-stone-700">← Community Content</a>
-        <div class="flex items-center gap-2 mt-2">
+        <div class="flex flex-wrap items-center gap-2 mt-2">
             <h1 class="text-xl font-semibold text-stone-900">Discovery Searches</h1>
             <span class="inline-flex items-center rounded-full bg-violet-100 px-2 py-0.5 text-xs font-semibold text-violet-700">{{ enabled_count }} active</span>
+            {% if due_count %}<span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">{{ due_count }} due now</span>{% endif %}
         </div>
         <p class="text-sm text-stone-500 mt-1">Define the hashtags, places, accounts, and keywords Studio should watch for community content.</p>
     </div>
-    <span class="inline-flex items-center rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-500">Discovery provider ready</span>
+    <span class="inline-flex items-center rounded-full bg-stone-100 px-3 py-1.5 text-xs font-medium text-stone-500">Discovery scheduler ready</span>
 </div>
 {% endblock %}
 
@@ -54,11 +56,19 @@
                 <input name="query" type="text" required maxlength="255" placeholder="#tennesseewaterfalls, Foster Falls, @creator…" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400 focus:ring-2 focus:ring-violet-100">
             </div>
 
-            <div>
-                <label class="block text-xs font-medium text-stone-600 mb-1">Maximum results per run</label>
-                <input name="result_limit" type="number" min="1" max="100" value="25" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
-                <p class="text-[11px] text-stone-400 mt-1">Keeps each discovery run manageable before moderation.</p>
+            <div class="grid grid-cols-2 gap-2">
+                <div>
+                    <label class="block text-xs font-medium text-stone-600 mb-1">Run cadence</label>
+                    <select name="cadence" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
+                        {% for value, label in cadences %}<option value="{{ value }}" {% if value == 'daily' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-stone-600 mb-1">Max results</label>
+                    <input name="result_limit" type="number" min="1" max="100" value="25" class="w-full rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm outline-none focus:border-violet-400">
+                </div>
             </div>
+            <p class="text-[11px] text-stone-400">Cadence defines when a future worker should run this search. Nothing runs automatically until the provider runner is connected.</p>
 
             <button class="w-full inline-flex items-center justify-center gap-1.5 rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 cursor-pointer">+ Save discovery search</button>
         </form>
@@ -68,7 +78,7 @@
         <div class="flex items-center justify-between gap-3 mb-3">
             <div>
                 <h2 class="text-sm font-semibold text-stone-900">Saved searches</h2>
-                <p class="text-xs text-stone-500 mt-0.5">Run a search through the test importer now; later the same definition can feed the live discovery provider.</p>
+                <p class="text-xs text-stone-500 mt-0.5">Scheduled searches that are due appear first. Run them through the test importer now; later the worker can execute them automatically.</p>
             </div>
             <span class="text-xs text-stone-400">{{ searches|length }} total</span>
         </div>
@@ -76,7 +86,7 @@
         {% if searches %}
         <div class="space-y-2.5">
             {% for search in searches %}
-            <article class="rounded-xl border {% if search.enabled %}border-stone-200 bg-white{% else %}border-stone-200 bg-stone-50 opacity-70{% endif %} p-3.5 flex flex-col lg:flex-row lg:items-center gap-3">
+            <article class="rounded-xl border {% if search.due_now %}border-amber-200 bg-amber-50/30{% elif search.enabled %}border-stone-200 bg-white{% else %}border-stone-200 bg-stone-50 opacity-70{% endif %} p-3.5 flex flex-col lg:flex-row lg:items-center gap-3">
                 <div class="w-10 h-10 rounded-xl {% if search.platform == 'instagram' %}bg-pink-50 text-pink-700{% elif search.platform == 'tiktok' %}bg-stone-900 text-white{% else %}bg-blue-50 text-blue-700{% endif %} flex items-center justify-center text-xs font-bold flex-shrink-0">
                     {% if search.platform == 'instagram' %}IG{% elif search.platform == 'tiktok' %}TT{% else %}FB{% endif %}
                 </div>
@@ -84,6 +94,7 @@
                     <div class="flex flex-wrap items-center gap-1.5">
                         <h3 class="text-sm font-semibold text-stone-900 truncate">{{ search.name }}</h3>
                         {% if search.enabled %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Active</span>{% else %}<span class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Paused</span>{% endif %}
+                        {% if search.due_now %}<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Due now</span>{% elif search.enabled and search.cadence == 'manual' %}<span class="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Manual</span>{% endif %}
                         {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
                     </div>
                     <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
@@ -91,8 +102,12 @@
                         <span class="font-medium text-violet-700 truncate max-w-[320px]">{{ search.query }}</span>
                         <span>· up to {{ search.result_limit }} results</span>
                     </div>
-                    {% if search.last_run_at %}
                     <div class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-stone-500">
+                        <span class="font-semibold text-stone-600">{{ search.cadence_label }}</span>
+                        {% if search.due_now %}<span class="font-semibold text-amber-700">Ready to run</span>{% elif search.next_run_at %}<span>Next {{ search.next_run_at|naturaltime }}</span>{% elif not search.enabled %}<span>Scheduling paused</span>{% else %}<span>Runs manually</span>{% endif %}
+                    </div>
+                    {% if search.last_run_at %}
+                    <div class="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-stone-500">
                         <span class="font-medium text-stone-600">Last run {{ search.last_run_at|slice:":16"|default:"recently" }}</span>
                         <span>{{ search.last_created_count }} created</span>
                         <span>{{ search.last_duplicate_count }} duplicates</span>
@@ -101,6 +116,12 @@
                     {% endif %}
                 </div>
                 <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
+                    <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}" class="flex items-center gap-1">
+                        {% csrf_token %}<input type="hidden" name="action" value="set_cadence">
+                        <select name="cadence" onchange="this.form.submit()" aria-label="Run cadence" class="h-8 rounded-lg border border-stone-200 bg-white px-2 text-[11px] font-medium text-stone-600 outline-none focus:border-violet-400">
+                            {% for value, label in cadences %}<option value="{{ value }}" {% if search.cadence == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                        </select>
+                    </form>
                     <a href="{% url 'ugc:bulk_discovery_form' workspace_id=workspace.id %}?search_id={{ search.id }}" class="px-3 py-1.5 rounded-lg bg-violet-600 text-xs font-semibold text-white hover:bg-violet-700">Run test</a>
                     <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}">
                         {% csrf_token %}<input type="hidden" name="action" value="toggle">
