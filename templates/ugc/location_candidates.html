@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Choose Instagram Location · TN Social Studio{% endblock %}
+
+{% block page_header %}
+<div class="mb-5">
+  <a href="{% url 'ugc:discovery_searches' workspace_id=workspace.id %}" class="text-xs font-medium text-stone-400 hover:text-stone-700">← Discovery Searches</a>
+  <div class="flex flex-wrap items-center gap-2 mt-2">
+    <h1 class="text-xl font-semibold text-stone-900">Choose Instagram location</h1>
+    <span class="inline-flex items-center rounded-full bg-pink-50 px-2 py-0.5 text-xs font-semibold text-pink-700">Instagram</span>
+  </div>
+  <p class="text-sm text-stone-500 mt-1">Match <span class="font-medium text-stone-700">{{ search.query }}</span> to the exact Instagram place Studio should monitor.</p>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl pb-8 space-y-4">
+  {% if resolution_error %}
+  <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{{ resolution_error }}</div>
+  {% endif %}
+
+  {% if candidates %}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    {% for candidate in candidates %}
+    <article class="rounded-xl border border-stone-200 bg-white p-4 shadow-sm">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-stone-900 truncate">{{ candidate.name }}</div>
+          <div class="flex flex-wrap gap-1.5 mt-1.5 text-[11px] text-stone-500">
+            {% if candidate.category %}<span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ candidate.category }}</span>{% endif %}
+            {% if candidate.city %}<span>{{ candidate.city }}</span>{% endif %}
+            {% if candidate.media_count %}<span>· {{ candidate.media_count }} posts</span>{% endif %}
+          </div>
+          {% if candidate.address %}<div class="text-xs text-stone-500 mt-2">{{ candidate.address }}</div>{% endif %}
+          {% if candidate.lat and candidate.lng %}<div class="text-[10px] text-stone-400 mt-1">{{ candidate.lat }}, {{ candidate.lng }}</div>{% endif %}
+          <div class="text-[10px] text-violet-500 mt-2 truncate" title="{{ candidate.url }}">{{ candidate.url }}</div>
+        </div>
+        <form method="post" action="{% url 'ugc:choose_location_candidate' workspace_id=workspace.id search_id=search.id %}" class="flex-shrink-0">
+          {% csrf_token %}
+          <input type="hidden" name="location_id" value="{{ candidate.id }}">
+          <input type="hidden" name="name" value="{{ candidate.name }}">
+          <input type="hidden" name="url" value="{{ candidate.url }}">
+          <input type="hidden" name="slug" value="{{ candidate.slug }}">
+          <input type="hidden" name="city" value="{{ candidate.city }}">
+          <input type="hidden" name="address" value="{{ candidate.address }}">
+          <input type="hidden" name="lat" value="{{ candidate.lat|default:'' }}">
+          <input type="hidden" name="lng" value="{{ candidate.lng|default:'' }}">
+          <button class="px-3 py-2 rounded-lg bg-violet-600 text-xs font-semibold text-white hover:bg-violet-700 cursor-pointer">Use this place</button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="rounded-xl border border-dashed border-stone-200 bg-stone-50/60 p-8 text-center">
+    <h2 class="text-sm font-semibold text-stone-800">No automatic matches found</h2>
+    <p class="text-xs text-stone-500 mt-1">Try a more specific query later, or paste the exact Instagram location URL below.</p>
+  </div>
+  {% endif %}
+
+  <section class="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
+    <h2 class="text-sm font-semibold text-stone-900">Use an exact Instagram location URL</h2>
+    <p class="text-xs text-stone-500 mt-1">Useful when you already know the correct place or automatic matching is ambiguous.</p>
+    <form method="post" action="{% url 'ugc:choose_location_candidate' workspace_id=workspace.id search_id=search.id %}" class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mt-3">
+      {% csrf_token %}
+      <input type="hidden" name="name" value="{{ search.query }}">
+      <input name="url" type="url" required placeholder="https://www.instagram.com/explore/locations/123456789/greeter-falls/" class="h-10 rounded-lg border border-violet-200 bg-white px-3 text-sm outline-none focus:border-violet-400">
+      <button class="h-10 px-4 rounded-lg bg-stone-900 text-xs font-semibold text-white hover:bg-stone-800 cursor-pointer">Save exact location</button>
+    </form>
+  </section>
+</div>
+{% endblock %}
