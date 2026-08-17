@@ -316,4 +316,9 @@
     followupScript.src = '/static/js/ugc_discovered_followups.js';
     if (document.currentScript && document.currentScript.nonce) followupScript.nonce = document.currentScript.nonce;
     document.head.appendChild(followupScript);
+
+    const reelScript = document.createElement('script');
+    reelScript.src = '/static/js/ugc_discovered_reels.js';
+    if (document.currentScript && document.currentScript.nonce) reelScript.nonce = document.currentScript.nonce;
+    document.head.appendChild(reelScript);
 })();
