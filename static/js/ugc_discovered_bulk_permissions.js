@@ -311,4 +311,9 @@
     });
 
     applyPermissionFilter();
+
+    const followupScript = document.createElement('script');
+    followupScript.src = '/static/js/ugc_discovered_followups.js';
+    if (document.currentScript && document.currentScript.nonce) followupScript.nonce = document.currentScript.nonce;
+    document.head.appendChild(followupScript);
 })();
