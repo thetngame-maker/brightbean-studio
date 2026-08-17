@@ -114,25 +114,28 @@ def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool)
     if not fill_mode:
         return dict(claimed), target, False
 
-    # Provider limits count raw Instagram rows, while Studio's useful target is
-    # unseen rows after dedupe. Scan deeper (bounded for cost) and stop locally
-    # once enough genuinely new posts have been selected.
     scan_limit = min(MAX_PROVIDER_SCAN_ITEMS, max(target * 4, target + 25))
     request_search = dict(claimed)
     request_search["result_limit"] = scan_limit
     return request_search, target, True
 
 
+def _tag_discovery_method(rows, search_type: str):
+    """Persist how a provider row was discovered independent of provider actor."""
+    method = str(search_type or "").strip().lower()
+    if method not in {"keyword", "hashtag", "location", "account"}:
+        method = ""
+    if not method:
+        return rows
+    for row in rows or []:
+        if isinstance(row, dict):
+            row.setdefault("discovery_method", method)
+    return rows
+
+
 @background(schedule=0)
 def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
-    """Execute one saved search on the shared Railway background worker.
-
-    ``test_mode`` controls whether the mock provider is allowed. ``force_run``
-    independently controls whether cadence should be bypassed. Keeping those
-    concepts separate lets an explicit user-triggered live Apify run execute
-    immediately while unattended scheduled runs still respect Hourly/Daily/
-    Weekly due times.
-    """
+    """Execute one saved search on the shared Railway background worker."""
     claimed = _claim_search(workspace_id, search_id, force=bool(test_mode or force_run))
     if not claimed:
         return
@@ -148,14 +151,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
         )
         search_type = str(claimed.get("search_type") or "").lower()
 
-        # Keyword discovery uses a richer source than the hashtag actor alone:
-        # popular keyword reels first, then the existing keyword/hashtag source.
-        # This gives the fill-to-target selector a substantially deeper pool.
-        if (
-            not test_mode
-            and search_type == "keyword"
-            and configured_provider_name() == "apify"
-        ):
+        if not test_mode and search_type == "keyword" and configured_provider_name() == "apify":
             provider = "apify"
             rows = fetch_apify_keyword_results(provider_request)
         else:
@@ -165,19 +161,16 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 allow_mock=bool(test_mode),
             )
 
-        # A live provider name is only known after fetch. Apply fill mode for
-        # Apify keyword/hashtag runs even when provider was configured implicitly.
         if provider == "apify" and not test_mode and search_type in {"keyword", "hashtag"}:
             fill_mode = True
 
-        # Location actors can expose post media in several documented output
-        # shapes. Only invoke the deeper inspection when all normal Apify paths
-        # returned zero usable rows, so hashtag/keyword performance is unchanged.
         if not rows and provider == "apify" and search_type == "location":
             rows, diagnostics = deep_location_fallback(
                 claimed,
                 int(claimed.get("result_limit") or 25),
             )
+
+        rows = _tag_discovery_method(rows, search_type)
 
         workspace = Workspace.objects.get(id=workspace_id)
         provider_scanned_count = len(rows)
@@ -219,6 +212,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "test_mode": bool(test_mode),
                 "force_run": bool(force_run),
                 "query": claimed.get("query", ""),
+                "search_type": search_type,
                 "created_count": summary["created_count"],
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
