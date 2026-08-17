@@ -25,7 +25,7 @@ def _metric(value):
 @login_required
 @require_permission("manage_workspace_settings")
 def discovery_intelligence(request, workspace_id):
-    """Return engagement, query, permission timing, and outreach history."""
+    """Return engagement, query, discovery method, permission timing, and outreach history."""
     workspace = _get_workspace(request, workspace_id)
     submissions = (
         UGCSubmission.objects.for_workspace(workspace.id)
@@ -45,6 +45,7 @@ def discovery_intelligence(request, workspace_id):
         views = _metric(discovery.get("view_count"))
         engagement_score = likes + (comments * 3) + int(views * 0.02)
         requested_at = str(outreach.get("requested_at") or permission.get("updated_at") or "")
+        method = str(discovery.get("discovery_method") or "").strip().lower()
         items.append(
             {
                 "id": str(submission.id),
@@ -54,6 +55,7 @@ def discovery_intelligence(request, workspace_id):
                 "engagement_score": engagement_score,
                 "discovery_query": provenance.get("discovery_query", ""),
                 "discovery_source": provenance.get("discovery_source", ""),
+                "discovery_method": method if method in {"keyword", "hashtag", "location", "account"} else "",
                 "permission_status": permission.get("status", "not_contacted"),
                 "permission_updated_at": permission.get("updated_at", ""),
                 "permission_channel": permission.get("channel", ""),
