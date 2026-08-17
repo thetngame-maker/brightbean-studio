@@ -61,8 +61,8 @@ def queue_background_test_run(request, workspace_id, search_id):
 
     The queued state is persisted before the background task is created so the
     UI can distinguish a job waiting for the worker from a job the worker has
-    already claimed. The worker replaces this state with ``running`` when it
-    actually begins execution.
+    already claimed. Explicit button-triggered runs always bypass cadence; only
+    unattended scheduler runs obey Hourly/Daily/Weekly due times.
     """
     workspace = _get_workspace(request, workspace_id)
     saved_search = get_saved_search(workspace, search_id)
@@ -81,7 +81,7 @@ def queue_background_test_run(request, workspace_id, search_id):
             started_at=queued_at,
             provider=provider,
         )
-        run_saved_discovery_search(str(workspace.id), str(search_id), not live)
+        run_saved_discovery_search(str(workspace.id), str(search_id), not live, True)
         if live:
             messages.success(
                 request,
