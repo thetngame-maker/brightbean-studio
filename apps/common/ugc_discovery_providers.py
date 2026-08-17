@@ -220,27 +220,71 @@ def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[di
     return _search_instagram_places(query, max(1, min(20, int(limit or 8))), live_search=True)
 
 
+def _nested_media_url(row: dict) -> str:
+    image = row.get("image") if isinstance(row.get("image"), dict) else {}
+    video = row.get("video") if isinstance(row.get("video"), dict) else {}
+    images = row.get("images") if isinstance(row.get("images"), list) else []
+    first_image = images[0] if images and isinstance(images[0], dict) else {}
+    return str(
+        _first(
+            row.get("displayUrl"),
+            row.get("display_url"),
+            row.get("imageUrl"),
+            row.get("image_url"),
+            image.get("url"),
+            first_image.get("url"),
+            row.get("thumbnailUrl"),
+            row.get("videoUrl"),
+            video.get("url"),
+        )
+        or ""
+    ).strip()
+
+
 def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
     if not isinstance(row, dict) or row.get("error"):
         return None
+
+    owner = row.get("owner") if isinstance(row.get("owner"), dict) else {}
     shortcode = str(_first(row.get("shortCode"), row.get("shortcode"), row.get("code")) or "").strip()
     source_url = str(_first(row.get("url"), row.get("postUrl"), row.get("inputUrl")) or "").strip()
     if source_url and "/explore/locations/" in source_url and shortcode:
-        # Nested place posts sometimes inherit the place input URL. Prefer the
-        # canonical post permalink whenever a shortcode is available.
         source_url = f"https://www.instagram.com/p/{shortcode}/"
     if not source_url and shortcode:
         source_url = f"https://www.instagram.com/p/{shortcode}/"
+
+    owner_id = str(
+        _first(
+            row.get("ownerId"),
+            row.get("owner_id"),
+            owner.get("id"),
+            row.get("userId"),
+        )
+        or ""
+    ).strip()
     creator_handle = str(
         _first(
             row.get("ownerUsername"),
             row.get("username"),
-            row.get("owner", {}).get("username") if isinstance(row.get("owner"), dict) else None,
+            row.get("authorUsername"),
+            owner.get("username"),
+            owner.get("userName"),
         )
         or ""
     ).strip().lstrip("@")
+
+    # Apify documents that posts from location feeds may expose only ownerId.
+    # Preserve those posts with an explicit provisional identity rather than
+    # silently dropping otherwise valid UGC. A later creator-enrichment pass
+    # can replace this with the public username when one is available.
+    creator_identity_provisional = False
+    if not creator_handle and owner_id:
+        creator_handle = f"instagram-id-{owner_id}"
+        creator_identity_provisional = True
+
     if not creator_handle or not source_url:
         return None
+
     external_id = str(_first(row.get("id"), shortcode) or "").strip()
     title = saved_search.get("target_label") or saved_search.get("name") or saved_search.get("query") or "Discovered Instagram post"
     resolved_location_name = saved_search.get("resolved_location_name") or ""
@@ -248,19 +292,28 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
     return {
         "platform": "instagram",
         "creator_handle": creator_handle,
-        "creator_name": str(_first(row.get("ownerFullName"), row.get("fullName")) or "").strip(),
-        "creator_external_id": str(_first(row.get("ownerId"), row.get("owner_id")) or "").strip(),
+        "creator_name": str(
+            _first(
+                row.get("ownerFullName"),
+                row.get("fullName"),
+                owner.get("fullName"),
+                owner.get("name"),
+            )
+            or ""
+        ).strip(),
+        "creator_external_id": owner_id,
+        "creator_identity_provisional": creator_identity_provisional,
         "source_url": source_url,
         "external_id": external_id,
         "title": title,
         "caption": str(row.get("caption") or row.get("text") or "").strip(),
         "discovery_query": resolved_location_name or saved_search.get("query") or "",
-        "media_url": str(_first(row.get("displayUrl"), row.get("display_url"), row.get("imageUrl"), row.get("image_url"), row.get("videoUrl")) or "").strip(),
+        "media_url": _nested_media_url(row),
         "like_count": _first(row.get("likesCount"), row.get("likeCount"), row.get("likes")),
         "comment_count": _first(row.get("commentsCount"), row.get("commentCount"), row.get("comments")),
         "view_count": _first(row.get("videoPlayCount"), row.get("videoViewCount"), row.get("viewCount"), row.get("igPlayCount"), row.get("views")),
-        "location_id": str(_first(row_location.get("id"), saved_search.get("resolved_location_id")) or ""),
-        "location_name": str(_first(row_location.get("name"), resolved_location_name) or ""),
+        "location_id": str(_first(row_location.get("id"), row.get("locationId"), saved_search.get("resolved_location_id")) or ""),
+        "location_name": str(_first(row_location.get("name"), row.get("locationName"), resolved_location_name) or ""),
         "location_url": str(saved_search.get("resolved_location_url") or ""),
     }
 
@@ -298,13 +351,9 @@ def _location_fallback_posts(saved_search: dict, limit: int) -> list[dict]:
     if not query:
         return []
 
-    # Standard (non-live) place search is intentionally used here because Apify
-    # documents its richer place dataset with recent ``posts``. Candidate
-    # resolution remains live-search based for interactive matching.
     candidates = _search_instagram_places(query, 25, live_search=False)
     matched = _match_location_candidate(candidates, saved_search)
     if matched is None:
-        # Some place names are indexed better by the original search phrase.
         original_query = str(saved_search.get("query") or "").strip()
         if original_query and original_query.lower() != query.lower():
             candidates = _search_instagram_places(original_query, 25, live_search=False)
