@@ -53,6 +53,58 @@ def _find_duplicate(*, workspace_id, platform: str, external_id: str, source_url
     return None
 
 
+def discovery_item_exists(*, workspace_id, raw: dict[str, Any]) -> bool:
+    """Return whether a normalized discovery row already exists in Studio."""
+    if not isinstance(raw, dict):
+        return False
+    platform = normalize_platform(raw.get("platform") or "instagram")
+    external_id = _text(raw.get("external_id") or raw.get("shortcode") or raw.get("id"), 255)
+    source_url = _text(raw.get("source_url") or raw.get("url"), 2000)
+    return bool(
+        _find_duplicate(
+            workspace_id=workspace_id,
+            platform=platform,
+            external_id=external_id,
+            source_url=source_url,
+        )
+    )
+
+
+def select_rows_for_new_target(*, workspace_id, rows: Iterable[dict[str, Any]], target_new: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Select enough scanned rows to aim for ``target_new`` unseen items.
+
+    Duplicate rows encountered before the target is reached are intentionally
+    retained so ingestion can still enrich engagement metadata and upgrade old
+    photo-only records into Reel/video assets.
+    """
+    target = max(1, min(MAX_BATCH_ITEMS, int(target_new or 1)))
+    selected: list[dict[str, Any]] = []
+    new_count = 0
+    duplicate_count = 0
+    scanned_count = 0
+
+    for raw in list(rows)[:MAX_BATCH_ITEMS]:
+        scanned_count += 1
+        if not isinstance(raw, dict):
+            selected.append(raw)
+            continue
+        duplicate = discovery_item_exists(workspace_id=workspace_id, raw=raw)
+        selected.append(raw)
+        if duplicate:
+            duplicate_count += 1
+        else:
+            new_count += 1
+            if new_count >= target:
+                break
+
+    return selected, {
+        "scanned_count": scanned_count,
+        "selected_new_count": new_count,
+        "selected_duplicate_count": duplicate_count,
+        "target_new_count": target,
+    }
+
+
 def _discovery_metadata(raw: dict, media_asset=None) -> dict:
     media_type = _text(raw.get("media_type") or "image", 20).lower()
     if media_type not in {"image", "video"}:
