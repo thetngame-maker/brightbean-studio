@@ -12,6 +12,7 @@ from apps.members.decorators import require_permission
 from .ugc_discovery_providers import live_provider_ready, provider_health
 from .ugc_discovery_search_views import _clean_searches, get_saved_search, record_search_run
 from .ugc_discovery_tasks import run_saved_discovery_search
+from .ugc_remote_media import repair_workspace_discovered_media
 from .ugc_views import _get_workspace
 
 
@@ -93,3 +94,17 @@ def queue_background_test_run(request, workspace_id, search_id):
                 "Background discovery test queued. Waiting for the worker to claim it.",
             )
     return redirect("ugc:discovery_searches", workspace_id=workspace.id)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def queue_discovered_media_repair(request, workspace_id):
+    """Backfill durable MediaAssets for previously discovered remote images."""
+    workspace = _get_workspace(request, workspace_id)
+    repair_workspace_discovered_media(str(workspace.id))
+    messages.success(
+        request,
+        "Missing discovery images queued for capture. Thumbnails will appear as the worker saves them to the Media Library.",
+    )
+    return redirect(f"/w/{workspace.id}/community-content/?tab=discovered")
