@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from apps.members.decorators import require_permission
 
 from .models import UGCSubmission
+from .ugc_permissions import get_permission
 from .ugc_provenance import get_provenance
 from .ugc_views import _get_workspace, _discovered_q
 
@@ -24,7 +25,7 @@ def _metric(value):
 @login_required
 @require_permission("manage_workspace_settings")
 def discovery_intelligence(request, workspace_id):
-    """Return engagement/query metadata for currently discovered UGC.
+    """Return engagement, query, and permission timing for discovered UGC.
 
     Kept separate from the moderation HTML so future discovery providers can
     enrich metadata without making the queue template provider-specific.
@@ -41,6 +42,7 @@ def discovery_intelligence(request, workspace_id):
         metadata = submission.metadata or {}
         discovery = metadata.get("discovery_import") or {}
         provenance = get_provenance(metadata)
+        permission = get_permission(metadata)
         likes = _metric(discovery.get("like_count"))
         comments = _metric(discovery.get("comment_count"))
         views = _metric(discovery.get("view_count"))
@@ -56,6 +58,9 @@ def discovery_intelligence(request, workspace_id):
                 "engagement_score": engagement_score,
                 "discovery_query": provenance.get("discovery_query", ""),
                 "discovery_source": provenance.get("discovery_source", ""),
+                "permission_status": permission.get("status", "not_contacted"),
+                "permission_updated_at": permission.get("updated_at", ""),
+                "permission_channel": permission.get("channel", ""),
             }
         )
 
