@@ -104,3 +104,44 @@
     </section>
 </div>
 {% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script nonce="{{ request.csp_nonce }}">
+(function () {
+    const statusUrl = "{% url 'ugc:discovery_run_status' workspace_id=workspace.id %}";
+    const renderedWorkspaceUpdatedAt = "{{ workspace.updated_at|date:'c'|escapejs }}";
+    let stopped = false;
+
+    async function checkDiscoveryWorker() {
+        if (stopped || document.hidden) return;
+        try {
+            const response = await fetch(statusUrl, {
+                credentials: 'same-origin',
+                headers: {'X-Requested-With': 'XMLHttpRequest'},
+                cache: 'no-store'
+            });
+            if (!response.ok) return;
+            const payload = await response.json();
+            if (payload.workspace_updated_at && payload.workspace_updated_at !== renderedWorkspaceUpdatedAt) {
+                stopped = true;
+                window.location.reload();
+            }
+        } catch (error) {
+            // Polling is progressive enhancement; a transient network failure
+            // should never interrupt the rest of the Discovery Searches page.
+        }
+    }
+
+    const timer = window.setInterval(checkDiscoveryWorker, 2500);
+    window.setTimeout(() => {
+        stopped = true;
+        window.clearInterval(timer);
+    }, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) checkDiscoveryWorker();
+    });
+    window.setTimeout(checkDiscoveryWorker, 900);
+})();
+</script>
+{% endblock %}
