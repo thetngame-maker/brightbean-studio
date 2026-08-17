@@ -40,15 +40,29 @@ def _remote_media_url(submission: UGCSubmission) -> str:
     return str(discovery.get("media_url") or "").strip()
 
 
+def _capture_status(submission: UGCSubmission) -> str:
+    metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
+    discovery = metadata.get("discovery_import") if isinstance(metadata.get("discovery_import"), dict) else {}
+    return str(discovery.get("media_capture_status") or "").strip()
+
+
+def _set_capture_status(submission: UGCSubmission, status: str) -> None:
+    metadata = dict(submission.metadata or {})
+    discovery = dict(metadata.get("discovery_import") or {})
+    discovery["media_capture_status"] = str(status or "")[:200]
+    metadata["discovery_import"] = discovery
+    submission.metadata = metadata
+    submission.save(update_fields=["metadata", "updated_at"])
+
+
 def _safe_filename(submission: UGCSubmission, content_type: str, source_url: str) -> str:
     extension = ALLOWED_IMAGE_TYPES.get(content_type)
     if not extension:
         extension = mimetypes.guess_extension(content_type) or Path(urlparse(source_url).path).suffix or ".jpg"
-    external = ""
     metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
     provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
     external = str(provenance.get("external_id") or submission.id).strip()
-    safe_external = "".join(ch for ch in external if ch.isalnum() or ch in "-_" )[:80] or str(submission.id)
+    safe_external = "".join(ch for ch in external if ch.isalnum() or ch in "-_")[:80] or str(submission.id)
     return f"ugc-{safe_external}{extension.lower()}"
 
 
@@ -143,22 +157,21 @@ def capture_discovered_media(submission_id):
 
     ok, status = capture_submission_image(submission)
     if not ok:
-        metadata = dict(submission.metadata or {})
-        discovery = dict(metadata.get("discovery_import") or {})
-        discovery["media_capture_status"] = status[:200]
-        metadata["discovery_import"] = discovery
-        submission.metadata = metadata
-        submission.save(update_fields=["metadata", "updated_at"])
+        _set_capture_status(submission, status)
 
 
 @background(schedule=0)
 def repair_workspace_discovered_media(workspace_id):
-    """Backfill thumbnails for previously imported discovered submissions."""
-    submissions = (
+    """Backfill thumbnails for old discovered rows without duplicate queue jobs."""
+    submissions = list(
         UGCSubmission.objects.for_workspace(workspace_id)
         .filter(media_asset__isnull=True, metadata__provenance__discovery_source__isnull=False)
         .order_by("submitted_at")[:100]
     )
     for submission in submissions:
-        if _remote_media_url(submission):
-            capture_discovered_media(str(submission.id))
+        if not _remote_media_url(submission):
+            continue
+        if _capture_status(submission) in {"queued", "captured"}:
+            continue
+        _set_capture_status(submission, "queued")
+        capture_discovered_media(str(submission.id))
