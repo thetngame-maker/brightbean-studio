@@ -15,6 +15,7 @@ from .audit import record_audit_event
 from .ugc_discovery_ingest import ingest_discovered_items
 from .ugc_discovery_providers import DiscoveryProviderError, fetch_discovery_results, live_provider_ready
 from .ugc_discovery_search_views import _clean_searches, _schedule_state
+from .ugc_remote_media import repair_workspace_discovered_media
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,9 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             default_target_url=claimed.get("target_url", ""),
         )
         _finish_search(workspace_id, search_id, status="success", provider=provider, summary=summary)
+        # Also repair older provider imports from before durable media capture
+        # existed. The repair task de-duplicates its own queue work.
+        repair_workspace_discovered_media(str(workspace.id))
         record_audit_event(
             workspace=workspace,
             action="ugc.discovery_background_run",
@@ -142,13 +146,14 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
 
 @background(schedule=0)
 def run_due_discovery_searches():
-    """Queue due searches when a live provider has actually been configured."""
+    """Queue due searches and repair discovered thumbnails on active workspaces."""
     if not live_provider_ready():
         return
 
     now = timezone.now()
     workspaces = Workspace.objects.filter(is_archived=False).exclude(discovery_searches=[]).only("id", "discovery_searches")
     for workspace in workspaces.iterator():
+        repair_workspace_discovered_media(str(workspace.id))
         for item in _clean_searches(workspace.discovery_searches):
             state = _schedule_state(item, now=now)
             if (
