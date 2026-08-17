@@ -155,13 +155,38 @@ def _apify_sync(actor_id: str, actor_input: dict, *, max_items: int, timeout: in
     return payload
 
 
-def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[dict]:
-    """Resolve a human place name into Instagram location candidates."""
-    query = str(query or "").strip()
-    if not query:
-        raise DiscoveryProviderError("Location query is empty.")
+def _location_candidate_from_row(row: dict) -> dict | None:
+    if not isinstance(row, dict) or row.get("error"):
+        return None
+    location_id = str(_first(row.get("location_id"), row.get("locationId"), row.get("id")) or "").strip()
+    url = str(_first(row.get("inputUrl"), row.get("url")) or "").strip()
+    slug = str(row.get("slug") or "").strip()
+    if not url and location_id:
+        url = (
+            f"https://www.instagram.com/explore/locations/{location_id}/{slug}/"
+            if slug
+            else f"https://www.instagram.com/explore/locations/{location_id}/"
+        )
+    name = str(_first(row.get("name"), row.get("shortName")) or "").strip()
+    if not name or not url:
+        return None
+    return {
+        "id": location_id,
+        "name": name,
+        "url": url,
+        "slug": slug,
+        "category": str(row.get("category") or "").strip(),
+        "address": str(_first(row.get("location_address"), row.get("address")) or "").strip(),
+        "city": str(_first(row.get("location_city"), row.get("city")) or "").strip(),
+        "lat": _first(row.get("lat"), row.get("latitude")),
+        "lng": _first(row.get("lng"), row.get("longitude")),
+        "media_count": _first(row.get("media_count"), row.get("mediaCount"), row.get("postsCount")),
+        "posts": row.get("posts") if isinstance(row.get("posts"), list) else [],
+    }
+
+
+def _search_instagram_places(query: str, limit: int = 8) -> list[dict]:
     actor_id = os.getenv("APIFY_INSTAGRAM_SEARCH_ACTOR", DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_SEARCH_ACTOR
-    limit = max(1, min(20, int(limit or 8)))
     rows = _apify_sync(
         actor_id,
         {"search": query, "searchType": "place", "searchLimit": limit, "liveSearch": True},
@@ -170,31 +195,18 @@ def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[di
     )
     candidates = []
     for row in rows:
-        if not isinstance(row, dict) or row.get("error"):
-            continue
-        location_id = str(_first(row.get("location_id"), row.get("locationId"), row.get("id")) or "").strip()
-        url = str(_first(row.get("inputUrl"), row.get("url")) or "").strip()
-        slug = str(row.get("slug") or "").strip()
-        if not url and location_id:
-            url = f"https://www.instagram.com/explore/locations/{location_id}/{slug}/" if slug else f"https://www.instagram.com/explore/locations/{location_id}/"
-        name = str(_first(row.get("name"), row.get("shortName")) or "").strip()
-        if not name or not url:
-            continue
-        candidates.append(
-            {
-                "id": location_id,
-                "name": name,
-                "url": url,
-                "slug": slug,
-                "category": str(row.get("category") or "").strip(),
-                "address": str(_first(row.get("location_address"), row.get("address")) or "").strip(),
-                "city": str(_first(row.get("location_city"), row.get("city")) or "").strip(),
-                "lat": _first(row.get("lat"), row.get("latitude")),
-                "lng": _first(row.get("lng"), row.get("longitude")),
-                "media_count": _first(row.get("media_count"), row.get("mediaCount"), row.get("postsCount")),
-            }
-        )
+        candidate = _location_candidate_from_row(row)
+        if candidate:
+            candidates.append(candidate)
     return candidates
+
+
+def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[dict]:
+    """Resolve a human place name into Instagram location candidates."""
+    query = str(query or "").strip()
+    if not query:
+        raise DiscoveryProviderError("Location query is empty.")
+    return _search_instagram_places(query, max(1, min(20, int(limit or 8))))
 
 
 def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
@@ -205,7 +217,11 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
     if not source_url and shortcode:
         source_url = f"https://www.instagram.com/p/{shortcode}/"
     creator_handle = str(
-        _first(row.get("ownerUsername"), row.get("username"), row.get("owner", {}).get("username") if isinstance(row.get("owner"), dict) else None)
+        _first(
+            row.get("ownerUsername"),
+            row.get("username"),
+            row.get("owner", {}).get("username") if isinstance(row.get("owner"), dict) else None,
+        )
         or ""
     ).strip().lstrip("@")
     if not creator_handle or not source_url:
@@ -227,7 +243,56 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         "like_count": _first(row.get("likesCount"), row.get("likes")),
         "comment_count": _first(row.get("commentsCount"), row.get("comments")),
         "view_count": _first(row.get("videoPlayCount"), row.get("videoViewCount"), row.get("igPlayCount"), row.get("views")),
+        "location_id": str(saved_search.get("resolved_location_id") or ""),
+        "location_name": resolved_location_name,
+        "location_url": str(saved_search.get("resolved_location_url") or ""),
     }
+
+
+def _normalize_rows(payload: list[dict], saved_search: dict, limit: int) -> list[dict]:
+    normalized = []
+    for row in payload:
+        item = _normalize_apify_instagram_row(row, saved_search)
+        if item:
+            normalized.append(item)
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def _location_fallback_posts(saved_search: dict, limit: int) -> list[dict]:
+    """Use recent posts embedded in Instagram place search when exact feed is empty.
+
+    Apify's search actor includes recent posts on place results. This is a useful
+    fallback for smaller Instagram places whose /explore/locations feed may
+    resolve successfully but return no rows through the general scraper.
+    """
+    query = str(saved_search.get("query") or saved_search.get("resolved_location_name") or "").strip()
+    if not query:
+        return []
+    candidates = _search_instagram_places(query, 12)
+    wanted_id = str(saved_search.get("resolved_location_id") or "").strip()
+    wanted_url = str(saved_search.get("resolved_location_url") or "").rstrip("/")
+    wanted_name = str(saved_search.get("resolved_location_name") or query).strip().lower()
+
+    matched = None
+    for candidate in candidates:
+        candidate_url = str(candidate.get("url") or "").rstrip("/")
+        if wanted_id and str(candidate.get("id") or "") == wanted_id:
+            matched = candidate
+            break
+        if wanted_url and candidate_url == wanted_url:
+            matched = candidate
+            break
+    if matched is None:
+        matched = next(
+            (candidate for candidate in candidates if str(candidate.get("name") or "").strip().lower() == wanted_name),
+            None,
+        )
+    if matched is None:
+        return []
+
+    return _normalize_rows(matched.get("posts") or [], saved_search, limit)
 
 
 def _fetch_apify(saved_search: dict) -> list[dict]:
@@ -247,10 +312,20 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
         actor_id = os.getenv("APIFY_INSTAGRAM_ACTOR", DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR
         payload = _apify_sync(
             actor_id,
-            {"directUrls": [location_url], "resultsType": "posts", "resultsLimit": limit, "addParentData": True},
+            {
+                "directUrls": [location_url],
+                "resultsType": "posts",
+                "resultsLimit": limit,
+                "addParentData": True,
+            },
             max_items=limit,
         )
-    elif search_type in {"hashtag", "keyword"}:
+        normalized = _normalize_rows(payload, saved_search, limit)
+        if not normalized:
+            normalized = _location_fallback_posts(saved_search, limit)
+        return normalized
+
+    if search_type in {"hashtag", "keyword"}:
         actor_id = os.getenv("APIFY_INSTAGRAM_HASHTAG_ACTOR", DEFAULT_APIFY_INSTAGRAM_ACTOR).strip() or DEFAULT_APIFY_INSTAGRAM_ACTOR
         actor_input = {
             "hashtags": [query.lstrip("#") if search_type == "hashtag" else query],
@@ -259,15 +334,11 @@ def _fetch_apify(saved_search: dict) -> list[dict]:
             "resultsLimit": limit,
         }
         payload = _apify_sync(actor_id, actor_input, max_items=limit)
-    else:
-        raise DiscoveryProviderError("The current Apify adapter supports Instagram hashtag, keyword, and resolved location searches.")
+        return _normalize_rows(payload, saved_search, limit)
 
-    normalized = []
-    for row in payload[:limit]:
-        item = _normalize_apify_instagram_row(row, saved_search)
-        if item:
-            normalized.append(item)
-    return normalized
+    raise DiscoveryProviderError(
+        "The current Apify adapter supports Instagram hashtag, keyword, and resolved location searches."
+    )
 
 
 def fetch_discovery_results(saved_search: dict, *, provider_name: str | None = None, allow_mock: bool = False) -> tuple[str, list[dict]]:
