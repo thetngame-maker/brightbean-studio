@@ -9,6 +9,8 @@
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
     if (!cards.length) return;
 
+    const FOLLOWUP_DELAY_MS = 3 * 24 * 60 * 60 * 1000;
+
     function formatAge(isoValue) {
         const timestamp = Date.parse(isoValue || '');
         if (!Number.isFinite(timestamp)) return '';
@@ -22,6 +24,15 @@
         if (days < 30) return `${days}d ago`;
         const months = Math.floor(days / 30);
         return `${months}mo ago`;
+    }
+
+    function formatDue(timestamp) {
+        if (!Number.isFinite(timestamp) || timestamp <= 0) return '';
+        const diff = timestamp - Date.now();
+        if (diff <= 0) return 'Follow-up due';
+        const hours = Math.ceil(diff / (60 * 60 * 1000));
+        if (hours < 24) return `Due in ${hours}h`;
+        return `Due in ${Math.ceil(hours / 24)}d`;
     }
 
     function creatorHandleFor(card) {
@@ -66,8 +77,14 @@
     function addRequestedTools(card, item) {
         if (item.permission_status !== 'requested') return;
         const requestIso = item.requested_at || item.permission_updated_at || '';
-        const timestamp = Date.parse(requestIso);
-        card.dataset.permissionRequestedAt = Number.isFinite(timestamp) ? String(timestamp) : '0';
+        const requestedAt = Date.parse(requestIso);
+        card.dataset.permissionRequestedAt = Number.isFinite(requestedAt) ? String(requestedAt) : '0';
+
+        const lastFollowupAt = Date.parse(item.last_followup_at || '');
+        const outreachBase = Number.isFinite(lastFollowupAt) ? lastFollowupAt : requestedAt;
+        const dueAt = Number.isFinite(outreachBase) ? outreachBase + FOLLOWUP_DELAY_MS : 0;
+        card.dataset.followupDueAt = String(dueAt || 0);
+        card.dataset.followupDue = dueAt && dueAt <= Date.now() ? '1' : '0';
 
         const permissionForm = card.querySelector('form[action*="/permission/"]');
         const panel = permissionForm ? permissionForm.closest('div.mt-3') : null;
@@ -90,6 +107,15 @@
             history.textContent = `${item.followup_count} ${noun}${last}`;
             if (item.last_followup_at) history.title = new Date(item.last_followup_at).toLocaleString();
             statusText.parentElement.appendChild(history);
+        }
+
+        if (statusText && dueAt && !panel.querySelector('.ugc-followup-due')) {
+            const due = document.createElement('div');
+            const overdue = dueAt <= Date.now();
+            due.className = `ugc-followup-due mt-1 inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${overdue ? 'bg-red-100 text-red-700' : 'bg-stone-100 text-stone-600'}`;
+            due.textContent = formatDue(dueAt);
+            due.title = `Next follow-up: ${new Date(dueAt).toLocaleString()}`;
+            statusText.parentElement.appendChild(due);
         }
 
         const actions = panel.querySelector('.flex.flex-wrap.gap-1\\.5');
@@ -131,7 +157,6 @@
                 form.innerHTML = `<input type="hidden" name="csrfmiddlewaretoken" value="${csrf.value}"><input type="hidden" name="channel" value="${card.dataset.source || 'manual'}"><button type="submit" class="ugc-log-followup px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100 cursor-pointer">Mark follow-up sent</button>`;
                 const copyButton = actions.querySelector('.ugc-copy-followup');
                 if (copyButton && copyButton.nextSibling) actions.insertBefore(form, copyButton.nextSibling);
-                else if (copyButton) actions.insertBefore(form, copyButton.nextSibling);
                 else actions.insertBefore(form, actions.firstChild);
             }
         }
@@ -149,14 +174,81 @@
         }).forEach((card) => grid.appendChild(card));
     }
 
+    function sortFollowupDue() {
+        if (sortSelect.value !== 'followup_due') return;
+        cards.slice().sort((a, b) => {
+            const aTime = Number(a.dataset.followupDueAt || 0);
+            const bTime = Number(b.dataset.followupDueAt || 0);
+            if (aTime && bTime) return aTime - bTime;
+            if (aTime) return -1;
+            if (bTime) return 1;
+            return Number(b.dataset.submitted || 0) - Number(a.dataset.submitted || 0);
+        }).forEach((card) => grid.appendChild(card));
+    }
+
     if (!sortSelect.querySelector('option[value="oldest_request"]')) {
         const option = document.createElement('option');
         option.value = 'oldest_request';
         option.textContent = 'Oldest request';
         sortSelect.appendChild(option);
     }
+    if (!sortSelect.querySelector('option[value="followup_due"]')) {
+        const option = document.createElement('option');
+        option.value = 'followup_due';
+        option.textContent = 'Follow-up due first';
+        sortSelect.appendChild(option);
+    }
 
-    sortSelect.addEventListener('change', () => window.setTimeout(sortOldestRequest, 0));
+    let dueFilter = document.getElementById('ugc-followup-filter');
+    const permissionFilter = document.getElementById('ugc-permission-filter');
+    if (!dueFilter && permissionFilter && permissionFilter.parentNode) {
+        dueFilter = document.createElement('select');
+        dueFilter.id = 'ugc-followup-filter';
+        dueFilter.className = 'h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-violet-400';
+        dueFilter.setAttribute('aria-label', 'Follow-up timing');
+        dueFilter.innerHTML = '<option value="">All follow-ups</option><option value="due">Follow-up due</option><option value="scheduled">Follow-up scheduled</option>';
+        permissionFilter.parentNode.insertBefore(dueFilter, sortSelect);
+    }
+
+    function applyDueFilter() {
+        if (!dueFilter) return;
+        const mode = dueFilter.value;
+        cards.forEach((card) => {
+            const isRequested = card.dataset.permissionStatus === 'requested';
+            const dueAt = Number(card.dataset.followupDueAt || 0);
+            let matches = true;
+            if (mode === 'due') matches = isRequested && dueAt > 0 && dueAt <= Date.now();
+            if (mode === 'scheduled') matches = isRequested && dueAt > Date.now();
+            card.dataset.followupFilterMatch = matches ? '1' : '0';
+            if (!matches) card.style.display = 'none';
+        });
+        const selectVisible = document.getElementById('ugc-select-visible');
+        if (selectVisible) selectVisible.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function reapplyFiltersAndSort() {
+        window.setTimeout(() => {
+            sortOldestRequest();
+            sortFollowupDue();
+            applyDueFilter();
+        }, 0);
+    }
+
+    sortSelect.addEventListener('change', reapplyFiltersAndSort);
+    if (dueFilter) dueFilter.addEventListener('change', () => {
+        const permission = document.getElementById('ugc-permission-filter');
+        if (dueFilter.value && permission && !permission.value) {
+            permission.value = 'requested';
+            permission.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+            reapplyFiltersAndSort();
+        }
+    });
+
+    ['ugc-search-submit', 'ugc-search-clear', 'ugc-source', 'ugc-permission-filter'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener(id === 'ugc-source' || id === 'ugc-permission-filter' ? 'change' : 'click', reapplyFiltersAndSort);
+    });
 
     const intelligenceUrl = window.location.pathname.replace(/\/?$/, '/discovered/intelligence/');
     fetch(intelligenceUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
@@ -167,6 +259,8 @@
                 if (card) addRequestedTools(card, item);
             });
             sortOldestRequest();
+            sortFollowupDue();
+            applyDueFilter();
         })
         .catch(() => {});
 })();
