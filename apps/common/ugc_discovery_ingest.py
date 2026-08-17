@@ -24,6 +24,19 @@ def _text(value: Any, limit: int) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _metric(value: Any):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str):
+        try:
+            return max(0, int(value.replace(",", "").strip()))
+        except ValueError:
+            return None
+    return None
+
+
 def _duplicate_exists(*, workspace_id, platform: str, external_id: str, source_url: str) -> bool:
     base = UGCSubmission.objects.for_workspace(workspace_id)
     if external_id:
@@ -55,7 +68,8 @@ def ingest_discovered_items(
     Normalized item keys:
       platform, creator_handle, creator_name, creator_external_id,
       source_url, external_id, title, caption, discovery_query,
-      media_url, target_type, target_id, target_label, target_url.
+      media_url, like_count, comment_count, view_count,
+      target_type, target_id, target_label, target_url.
 
     Dedupe uses platform + external_id when an external id exists, otherwise
     platform + source_url. Invalid and duplicate rows are skipped, never fatal
@@ -123,8 +137,15 @@ def ingest_discovered_items(
         metadata = set_permission(metadata, status=NOT_CONTACTED)
         metadata["discovery_import"] = {
             "media_url": _text(raw.get("media_url") or raw.get("display_url"), 2000),
-            "like_count": raw.get("like_count") if isinstance(raw.get("like_count"), int) else None,
-            "comment_count": raw.get("comment_count") if isinstance(raw.get("comment_count"), int) else None,
+            "like_count": _metric(raw.get("like_count") if raw.get("like_count") is not None else raw.get("likes")),
+            "comment_count": _metric(raw.get("comment_count") if raw.get("comment_count") is not None else raw.get("comments")),
+            "view_count": _metric(
+                raw.get("view_count")
+                if raw.get("view_count") is not None
+                else raw.get("video_view_count")
+                if raw.get("video_view_count") is not None
+                else raw.get("views")
+            ),
         }
 
         with transaction.atomic():
