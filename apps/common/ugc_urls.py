@@ -23,6 +23,7 @@ urlpatterns = [
     path("discovered/searches/save/", ugc_discovery_search_views.save_discovery_search, name="save_discovery_search"),
     path("discovered/searches/<uuid:search_id>/update/", ugc_discovery_search_views.update_discovery_search, name="update_discovery_search"),
     path("discovered/searches/<uuid:search_id>/run-background-test/", ugc_discovery_run_views.queue_background_test_run, name="queue_background_test_run"),
+    path("discovered/media/repair/", ugc_discovery_run_views.queue_discovered_media_repair, name="queue_discovered_media_repair"),
     path("discovered/new/", ugc_discovery_views.discovered_item_form, name="discovered_item_form"),
     path("discovered/new/create/", ugc_discovery_views.create_discovered_item, name="create_discovered_item"),
     path("discovered/bulk/", ugc_discovery_bulk_views.bulk_discovery_form, name="bulk_discovery_form"),
