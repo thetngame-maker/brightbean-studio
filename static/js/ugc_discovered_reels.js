@@ -24,6 +24,66 @@
         return (source && source.src) || video.currentSrc || video.src || '';
     }
 
+    function posterFor(card) {
+        const video = card.querySelector('video');
+        return video ? (video.poster || video.dataset.generatedPoster || '') : '';
+    }
+
+    function revealVideoFrame(video) {
+        if (!video || video.dataset.posterPrepared === '1') return;
+        video.dataset.posterPrepared = '1';
+        video.setAttribute('playsinline', '');
+        video.setAttribute('preload', 'metadata');
+        video.muted = true;
+
+        let captured = false;
+        let seekAttempted = false;
+
+        function seekToPreview() {
+            if (seekAttempted) return;
+            seekAttempted = true;
+            const duration = Number.isFinite(video.duration) ? video.duration : 0;
+            const previewTime = duration > 1 ? Math.min(0.25, duration * 0.02) : 0.05;
+            try {
+                video.currentTime = previewTime;
+            } catch (error) {
+                // Some browsers will render the first frame after loadeddata without seeking.
+            }
+        }
+
+        function capturePoster() {
+            if (captured || !video.videoWidth || !video.videoHeight) return;
+            captured = true;
+            try {
+                const maxWidth = 720;
+                const scale = Math.min(1, maxWidth / video.videoWidth);
+                const canvas = document.createElement('canvas');
+                canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+                canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+                const context = canvas.getContext('2d');
+                if (!context) return;
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const poster = canvas.toDataURL('image/jpeg', 0.82);
+                video.poster = poster;
+                video.dataset.generatedPoster = poster;
+            } catch (error) {
+                // Cross-origin storage can prevent canvas export. The paused sought
+                // frame remains visible, which still avoids the black card preview.
+            }
+            video.pause();
+        }
+
+        if (video.readyState >= 1) seekToPreview();
+        video.addEventListener('loadedmetadata', seekToPreview, { once: true });
+        video.addEventListener('loadeddata', () => {
+            seekToPreview();
+            window.setTimeout(capturePoster, 30);
+        }, { once: true });
+        video.addEventListener('seeked', capturePoster, { once: true });
+
+        try { video.load(); } catch (error) {}
+    }
+
     let modal = document.getElementById('ugc-reel-modal');
     if (!modal) {
         modal = document.createElement('div');
@@ -93,6 +153,9 @@
         if (!source || !player) return false;
         player.pause();
         player.removeAttribute('src');
+        const poster = posterFor(card);
+        if (poster) player.poster = poster;
+        else player.removeAttribute('poster');
         player.load();
         player.src = source;
         title.textContent = titleFor(card);
@@ -139,8 +202,7 @@
     reelCards.forEach((card) => {
         const video = card.querySelector('video');
         if (!video) return;
-        video.setAttribute('playsinline', '');
-        video.setAttribute('preload', 'metadata');
+        revealVideoFrame(video);
 
         const mediaWrap = video.parentElement;
         if (mediaWrap) mediaWrap.classList.add('relative');
