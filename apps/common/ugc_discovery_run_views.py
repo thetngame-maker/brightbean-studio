@@ -1,16 +1,58 @@
-"""UI endpoints for queueing saved discovery searches on the worker."""
+"""UI endpoints for queueing and monitoring saved discovery searches."""
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.http import JsonResponse
 from django.shortcuts import redirect
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from apps.members.decorators import require_permission
 
 from .ugc_discovery_providers import live_provider_ready, provider_health
-from .ugc_discovery_search_views import get_saved_search
+from .ugc_discovery_search_views import _clean_searches, get_saved_search
 from .ugc_discovery_tasks import run_saved_discovery_search
 from .ugc_views import _get_workspace
+
+
+def _status_signature(searches):
+    """Compact non-secret fingerprint for client-side run-status polling."""
+    parts = []
+    for item in searches:
+        parts.append(
+            ":".join(
+                [
+                    str(item.get("id") or ""),
+                    str(item.get("last_run_status") or ""),
+                    str(item.get("last_started_at") or ""),
+                    str(item.get("last_run_at") or ""),
+                    str(item.get("last_provider") or ""),
+                    str(item.get("last_created_count") or 0),
+                    str(item.get("last_duplicate_count") or 0),
+                    str(item.get("last_invalid_count") or 0),
+                ]
+            )
+        )
+    return "|".join(parts)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_GET
+def discovery_run_status(request, workspace_id):
+    """Return a lightweight fingerprint so the Discovery page can self-refresh.
+
+    The endpoint intentionally returns no provider credentials, queries, target
+    details, or UGC payloads. Its only job is to tell the page when worker-owned
+    run state has changed since the previous poll.
+    """
+    workspace = _get_workspace(request, workspace_id)
+    searches = _clean_searches(workspace.discovery_searches)
+    return JsonResponse(
+        {
+            "signature": _status_signature(searches),
+            "running_count": sum(1 for item in searches if item.get("last_run_status") == "running"),
+        }
+    )
 
 
 @login_required
