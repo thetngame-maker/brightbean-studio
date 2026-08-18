@@ -128,6 +128,24 @@
 {{ block.super }}
 <script nonce="{{ request.csp_nonce }}">
 (function () {
+    if (!document.querySelector('link[data-ugc-mobile-css]')) {
+        const mobileCss = document.createElement('link');
+        mobileCss.rel = 'stylesheet';
+        mobileCss.href = '/static/css/ugc_mobile.css';
+        mobileCss.dataset.ugcMobileCss = '1';
+        document.head.appendChild(mobileCss);
+    }
+    if (!document.querySelector('script[data-ugc-mobile]')) {
+        const mobileScript = document.createElement('script');
+        mobileScript.src = '/static/js/ugc_mobile.js';
+        mobileScript.dataset.ugcMobile = '1';
+        if (document.currentScript && document.currentScript.nonce) mobileScript.nonce = document.currentScript.nonce;
+        document.head.appendChild(mobileScript);
+    }
+})();
+</script>
+<script nonce="{{ request.csp_nonce }}">
+(function () {
     const statusUrl = "{% url 'ugc:discovery_run_status' workspace_id=workspace.id %}";
     const renderedWorkspaceUpdatedAt = "{{ workspace.updated_at|date:'c'|escapejs }}";
     let stopped = false;
