@@ -2,6 +2,69 @@
     function text(node) { return (node && node.textContent || '').trim(); }
     function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 
+    function setupMobileBulkToolbar() {
+        if (!document.body.classList.contains('ugc-mobile-community')) return;
+
+        function enhance(toolbar) {
+            if (!toolbar || toolbar.dataset.mobileBulkReady === '1') return;
+            toolbar.dataset.mobileBulkReady = '1';
+            toolbar.classList.add('ugc-mobile-bulk-toolbar');
+
+            const actionButtons = Array.from(toolbar.querySelectorAll('.ugc-bulk-action'));
+            const actionRow = actionButtons.length ? actionButtons[0].parentElement : null;
+            if (actionRow) actionRow.classList.add('ugc-mobile-bulk-actions');
+
+            const selectionRow = toolbar.querySelector('.flex.items-center.gap-3.min-w-0');
+            if (selectionRow) selectionRow.classList.add('ugc-mobile-bulk-selection-row');
+
+            function selectedCount() {
+                return document.querySelectorAll('.ugc-select-item:checked').length;
+            }
+
+            function syncExpandedState() {
+                const count = selectedCount();
+                toolbar.classList.toggle('ugc-mobile-bulk-has-selection', count > 0);
+                if (actionRow) actionRow.setAttribute('aria-hidden', count > 0 ? 'false' : 'true');
+            }
+
+            toolbar.addEventListener('change', (event) => {
+                if (event.target && (event.target.matches('.ugc-select-item') || event.target.matches('#ugc-select-visible'))) {
+                    window.setTimeout(syncExpandedState, 0);
+                }
+            });
+
+            document.addEventListener('change', (event) => {
+                if (event.target && event.target.matches('.ugc-select-item')) window.setTimeout(syncExpandedState, 0);
+            });
+
+            toolbar.addEventListener('click', (event) => {
+                if (event.target && event.target.closest('#ugc-select-top-ten')) {
+                    window.setTimeout(syncExpandedState, 25);
+                }
+            });
+
+            const observer = new MutationObserver(() => {
+                const topTen = toolbar.querySelector('#ugc-select-top-ten');
+                if (topTen) topTen.classList.add('ugc-mobile-top-ten');
+                syncExpandedState();
+            });
+            observer.observe(toolbar, { childList: true, subtree: true });
+
+            const topTen = toolbar.querySelector('#ugc-select-top-ten');
+            if (topTen) topTen.classList.add('ugc-mobile-top-ten');
+            syncExpandedState();
+        }
+
+        const existing = document.getElementById('ugc-bulk-permission-form');
+        if (existing) enhance(existing);
+
+        const pageObserver = new MutationObserver(() => {
+            const toolbar = document.getElementById('ugc-bulk-permission-form');
+            if (toolbar) enhance(toolbar);
+        });
+        pageObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
     function setupCommunityContent() {
         const heading = Array.from(document.querySelectorAll('h1')).find((node) => text(node) === 'Community Content');
         if (!heading) return false;
@@ -24,7 +87,10 @@
         const controlsWrap = searchForm ? searchForm.parentElement : null;
         const filterPanel = sort ? sort.parentElement : null;
         if (controlsWrap) controlsWrap.classList.add('ugc-mobile-controls-wrap');
-        if (!controlsWrap || !filterPanel) return true;
+        if (!controlsWrap || !filterPanel) {
+            setupMobileBulkToolbar();
+            return true;
+        }
         filterPanel.classList.add('ugc-mobile-filter-panel');
 
         let toggle = document.getElementById('ugc-mobile-filter-toggle');
@@ -75,6 +141,8 @@
             if (!isMobile()) filterPanel.classList.remove('ugc-mobile-filter-panel-closed');
             else if (toggle.getAttribute('aria-expanded') !== 'true') filterPanel.classList.add('ugc-mobile-filter-panel-closed');
         });
+
+        setupMobileBulkToolbar();
         return true;
     }
 
