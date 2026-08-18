@@ -25,11 +25,20 @@
         return heading ? (heading.textContent || '').trim() : 'Instagram Reel';
     }
 
-    function videoSourceFor(card) {
+    function sourceDescriptor(card) {
         const video = card.querySelector('video');
-        if (!video) return '';
+        if (!video) return { url: '', type: '' };
         const source = video.querySelector('source');
-        return (source && source.src) || video.currentSrc || video.src || '';
+        return {
+            url: (source && (source.getAttribute('src') || source.src)) || video.currentSrc || video.src || '',
+            type: (source && source.getAttribute('type')) || video.getAttribute('type') || ''
+        };
+    }
+
+    function originalSourceFor(card) {
+        const links = Array.from(card.querySelectorAll('a[href]'));
+        const sourceLink = links.find((link) => /view source/i.test(link.textContent || ''));
+        return sourceLink ? sourceLink.href : '';
     }
 
     function posterFor(card) {
@@ -37,12 +46,69 @@
         return video ? (video.poster || video.dataset.generatedPoster || '') : '';
     }
 
-    function revealVideoFrame(video) {
+    function setCardVideoState(card, state, message) {
+        const video = card.querySelector('video');
+        if (!video) return;
+        card.dataset.reelLoadState = state;
+        let note = card.querySelector('.ugc-reel-load-note');
+        if (!note) {
+            note = document.createElement('div');
+            note.className = 'ugc-reel-load-note hidden absolute inset-x-2 bottom-2 z-20 rounded-lg bg-black/75 px-3 py-2 text-[10px] font-medium text-white backdrop-blur-sm';
+            const mediaWrap = video.parentElement;
+            if (mediaWrap) mediaWrap.appendChild(note);
+        }
+        if (!message) {
+            note.classList.add('hidden');
+            note.textContent = '';
+            return;
+        }
+        note.innerHTML = '';
+        const label = document.createElement('span');
+        label.textContent = message;
+        note.appendChild(label);
+        const original = originalSourceFor(card);
+        if (original && state === 'error') {
+            const link = document.createElement('a');
+            link.href = original;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.className = 'ml-2 font-semibold underline underline-offset-2';
+            link.textContent = 'Open on Instagram ↗';
+            note.appendChild(link);
+        }
+        note.classList.remove('hidden');
+    }
+
+    function monitorVideo(card, video) {
+        let settled = false;
+        const settle = (state, message) => {
+            if (settled && state !== 'error') return;
+            settled = true;
+            setCardVideoState(card, state, message);
+        };
+        const healthy = () => {
+            const duration = Number(video.duration || 0);
+            if ((Number.isFinite(duration) && duration > 0) || video.readyState >= 2) settle('ready', '');
+        };
+        video.addEventListener('loadedmetadata', healthy);
+        video.addEventListener('loadeddata', healthy);
+        video.addEventListener('canplay', healthy);
+        video.addEventListener('error', () => settle('error', 'Reel could not be loaded in Studio.'));
+        window.setTimeout(() => {
+            if (!settled && video.readyState < 1) setCardVideoState(card, 'loading', 'Still loading Reel…');
+        }, 4500);
+        window.setTimeout(() => {
+            if (!settled && video.readyState < 1) settle('error', 'Reel preview did not load.');
+        }, 12000);
+    }
+
+    function revealVideoFrame(video, card) {
         if (!video || video.dataset.posterPrepared === '1') return;
         video.dataset.posterPrepared = '1';
         video.setAttribute('playsinline', '');
         video.setAttribute('preload', 'metadata');
         video.muted = true;
+        monitorVideo(card, video);
 
         let captured = false;
         let seekAttempted = false;
@@ -52,11 +118,7 @@
             seekAttempted = true;
             const duration = Number.isFinite(video.duration) ? video.duration : 0;
             const previewTime = duration > 1 ? Math.min(0.25, duration * 0.02) : 0.05;
-            try {
-                video.currentTime = previewTime;
-            } catch (error) {
-                // Some browsers will render the first frame after loadeddata without seeking.
-            }
+            try { video.currentTime = previewTime; } catch (error) {}
         }
 
         function capturePoster() {
@@ -74,10 +136,7 @@
                 const poster = canvas.toDataURL('image/jpeg', 0.82);
                 video.poster = poster;
                 video.dataset.generatedPoster = poster;
-            } catch (error) {
-                // Cross-origin storage can prevent canvas export. The paused sought
-                // frame remains visible, which still avoids the black card preview.
-            }
+            } catch (error) {}
             video.pause();
         }
 
@@ -115,6 +174,7 @@
                 <div class="relative min-h-0 flex-1 flex items-center justify-center bg-black p-2 sm:p-4">
                     <button id="ugc-reel-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous Reel">‹</button>
                     <video id="ugc-reel-player" controls playsinline preload="metadata" class="max-w-full max-h-[calc(100vh-10rem)] rounded-lg bg-black"></video>
+                    <div id="ugc-reel-error" class="hidden absolute inset-x-4 bottom-4 rounded-xl bg-red-950/90 border border-red-700/50 px-4 py-3 text-xs text-red-100"></div>
                     <button id="ugc-reel-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next Reel">›</button>
                 </div>
                 <div class="flex sm:hidden items-center justify-between gap-3 px-4 py-3 border-t border-white/10 bg-stone-950">
@@ -128,6 +188,7 @@
     }
 
     const player = modal.querySelector('#ugc-reel-player');
+    const errorBox = modal.querySelector('#ugc-reel-error');
     const title = modal.querySelector('#ugc-reel-title');
     const contributor = modal.querySelector('#ugc-reel-contributor');
     const counter = modal.querySelector('#ugc-reel-counter');
@@ -156,21 +217,57 @@
         });
     }
 
-    function render(card) {
-        const source = videoSourceFor(card);
-        if (!source || !player) return false;
+    function clearPlayer() {
+        if (!player) return;
         player.pause();
         player.removeAttribute('src');
+        while (player.firstChild) player.removeChild(player.firstChild);
+        try { player.load(); } catch (error) {}
+    }
+
+    function showModalError(card, message) {
+        if (!errorBox) return;
+        errorBox.innerHTML = '';
+        const textNode = document.createElement('span');
+        textNode.textContent = message;
+        errorBox.appendChild(textNode);
+        const original = originalSourceFor(card);
+        if (original) {
+            const link = document.createElement('a');
+            link.href = original;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.className = 'ml-2 font-semibold underline underline-offset-2';
+            link.textContent = 'Open on Instagram ↗';
+            errorBox.appendChild(link);
+        }
+        errorBox.classList.remove('hidden');
+    }
+
+    function render(card) {
+        const descriptor = sourceDescriptor(card);
+        if (!descriptor.url || !player) return false;
+        clearPlayer();
+        if (errorBox) errorBox.classList.add('hidden');
         const poster = posterFor(card);
         if (poster) player.poster = poster;
         else player.removeAttribute('poster');
-        player.load();
-        player.src = source;
+        const source = document.createElement('source');
+        source.src = descriptor.url;
+        if (descriptor.type) source.type = descriptor.type;
+        player.appendChild(source);
         title.textContent = titleFor(card);
         contributor.textContent = contributorFor(card);
         currentCard = card;
         updateNavigation();
+        player.onerror = () => showModalError(card, 'This Reel could not be played in Safari.');
+        player.onloadedmetadata = () => {
+            if (errorBox) errorBox.classList.add('hidden');
+        };
         player.load();
+        window.setTimeout(() => {
+            if (currentCard === card && player.readyState < 1) showModalError(card, 'This Reel is taking too long to load.');
+        }, 12000);
         return true;
     }
 
@@ -180,17 +277,13 @@
         modal.classList.remove('hidden');
         modal.classList.add('flex');
         document.body.style.overflow = 'hidden';
-        window.setTimeout(() => player.play().catch(() => {}), 80);
+        window.setTimeout(() => player.play().catch(() => {}), 100);
         if (closeButton) closeButton.focus();
     }
 
     function closeReel() {
         if (!modal || modal.classList.contains('hidden')) return;
-        if (player) {
-            player.pause();
-            player.removeAttribute('src');
-            player.load();
-        }
+        clearPlayer();
         modal.classList.add('hidden');
         modal.classList.remove('flex');
         document.body.style.overflow = '';
@@ -204,20 +297,20 @@
         let index = visible.indexOf(currentCard);
         if (index < 0) index = 0;
         const nextCard = visible[(index + direction + visible.length) % visible.length];
-        if (render(nextCard)) window.setTimeout(() => player.play().catch(() => {}), 60);
+        if (render(nextCard)) window.setTimeout(() => player.play().catch(() => {}), 80);
     }
 
     reelCards.forEach((card) => {
         const video = card.querySelector('video');
         if (!video) return;
-        revealVideoFrame(video);
+        revealVideoFrame(video, card);
 
         const mediaWrap = video.parentElement;
         if (mediaWrap) mediaWrap.classList.add('relative');
 
         const badgeCandidates = Array.from(card.querySelectorAll('span')).filter((node) => {
-            const text = (node.textContent || '').trim().toLowerCase();
-            return text === 'photo' || text === 'community post';
+            const value = (node.textContent || '').trim().toLowerCase();
+            return value === 'photo' || value === 'community post';
         });
         if (badgeCandidates[0]) {
             badgeCandidates[0].innerHTML = '<span aria-hidden="true">▶</span> Reel';
