@@ -1,4 +1,19 @@
 (function () {
+    if (!document.querySelector('link[data-ugc-mobile-css]')) {
+        const mobileCss = document.createElement('link');
+        mobileCss.rel = 'stylesheet';
+        mobileCss.href = '/static/css/ugc_mobile.css';
+        mobileCss.dataset.ugcMobileCss = '1';
+        document.head.appendChild(mobileCss);
+    }
+    if (!document.querySelector('script[data-ugc-mobile]')) {
+        const mobileScript = document.createElement('script');
+        mobileScript.src = '/static/js/ugc_mobile.js';
+        mobileScript.dataset.ugcMobile = '1';
+        if (document.currentScript && document.currentScript.nonce) mobileScript.nonce = document.currentScript.nonce;
+        document.head.appendChild(mobileScript);
+    }
+
     const grid = document.getElementById('ugc-card-grid');
     const sortSelect = document.getElementById('ugc-sort');
     if (!grid || !sortSelect || !sortSelect.parentNode) return;
