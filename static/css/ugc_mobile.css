@@ -1,0 +1,350 @@
+/* Mobile-first refinements for Community Content and Discovery Searches.
+   Scoped by body classes applied by ugc_mobile.js so other Studio pages are untouched. */
+
+@media (max-width: 767px) {
+    body.ugc-mobile-community .ugc-mobile-page-header {
+        margin-bottom: 0.75rem !important;
+        gap: 0.65rem !important;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-page-header h1,
+    body.ugc-mobile-discovery-searches .ugc-mobile-page-header h1 {
+        font-size: 1.55rem !important;
+        line-height: 1.15 !important;
+        letter-spacing: -0.025em;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-page-header p,
+    body.ugc-mobile-discovery-searches .ugc-mobile-page-header p {
+        font-size: 0.86rem !important;
+        line-height: 1.45 !important;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-header-actions {
+        display: grid !important;
+        grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%;
+        gap: 0.6rem !important;
+        align-items: center;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-header-actions > a {
+        min-height: 44px;
+        justify-content: center;
+        font-size: 0.8rem !important;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-header-actions > div {
+        font-size: 0.68rem !important;
+        line-height: 1.2;
+        max-width: 105px;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-tabs {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        overflow-y: hidden;
+        gap: 0 !important;
+        margin-left: -0.25rem;
+        margin-right: -0.25rem;
+        padding: 0 0.25rem;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    body.ugc-mobile-community .ugc-mobile-tabs::-webkit-scrollbar { display: none; }
+    body.ugc-mobile-community .ugc-mobile-tabs > a {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        padding: 0.65rem 0.85rem !important;
+        font-size: 0.82rem !important;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-controls-wrap {
+        gap: 0.65rem !important;
+        margin-bottom: 0.75rem !important;
+    }
+
+    body.ugc-mobile-community #ugc-search-form {
+        gap: 0.5rem !important;
+    }
+    body.ugc-mobile-community #ugc-search,
+    body.ugc-mobile-community #ugc-search-submit {
+        height: 44px !important;
+    }
+    body.ugc-mobile-community #ugc-search-submit {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        font-size: 0.78rem !important;
+    }
+
+    body.ugc-mobile-community .ugc-mobile-filter-toggle {
+        display: flex;
+        width: 100%;
+        min-height: 44px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        border: 1px solid #e7e5e4;
+        border-radius: 0.75rem;
+        background: #fff;
+        padding: 0 0.9rem;
+        color: #44403c;
+        font-size: 0.78rem;
+        font-weight: 650;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-toggle .ugc-filter-summary {
+        color: #78716c;
+        font-size: 0.68rem;
+        font-weight: 500;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-toggle .ugc-filter-chevron {
+        transition: transform 160ms ease;
+        color: #8b5cf6;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-toggle[aria-expanded="true"] .ugc-filter-chevron {
+        transform: rotate(180deg);
+    }
+
+    body.ugc-mobile-community .ugc-mobile-filter-panel {
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem !important;
+        width: 100%;
+        overflow: hidden;
+        transition: max-height 180ms ease, opacity 160ms ease, margin 160ms ease;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-panel.ugc-mobile-filter-panel-closed {
+        max-height: 0;
+        opacity: 0;
+        margin: 0 !important;
+        pointer-events: none;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-panel:not(.ugc-mobile-filter-panel-closed) {
+        max-height: 420px;
+        opacity: 1;
+        padding-top: 0.1rem;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-panel > form,
+    body.ugc-mobile-community .ugc-mobile-filter-panel > select {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+    body.ugc-mobile-community .ugc-mobile-filter-panel select {
+        width: 100% !important;
+        height: 42px !important;
+        font-size: 0.75rem !important;
+        padding-left: 0.7rem !important;
+        padding-right: 1.8rem !important;
+    }
+    body.ugc-mobile-community #ugc-result-count {
+        grid-column: 1 / -1;
+        justify-self: end;
+        padding-right: 0.15rem;
+    }
+
+    /* Performance becomes one swipeable row instead of three rows of tiles. */
+    body.ugc-mobile-community #ugc-discovery-performance {
+        margin-bottom: 0.65rem !important;
+        padding: 0.65rem !important;
+        border-radius: 0.85rem !important;
+    }
+    body.ugc-mobile-community #ugc-discovery-performance > div {
+        gap: 0.5rem !important;
+    }
+    body.ugc-mobile-community #ugc-discovery-performance .min-w-\[155px\] {
+        min-width: 0 !important;
+    }
+    body.ugc-mobile-community #ugc-discovery-performance .grid {
+        display: flex !important;
+        overflow-x: auto;
+        gap: 0.45rem !important;
+        scroll-snap-type: x proximity;
+        scrollbar-width: none;
+        padding-bottom: 0.1rem;
+        -webkit-overflow-scrolling: touch;
+    }
+    body.ugc-mobile-community #ugc-discovery-performance .grid::-webkit-scrollbar { display: none; }
+    body.ugc-mobile-community #ugc-discovery-performance .grid > div {
+        flex: 0 0 108px;
+        min-width: 108px;
+        scroll-snap-align: start;
+        padding: 0.55rem 0.65rem !important;
+    }
+
+    /* Keep bulk actions reachable while scrolling the review queue. */
+    body.ugc-mobile-community #ugc-bulk-permission-form {
+        position: sticky;
+        bottom: calc(0.5rem + env(safe-area-inset-bottom));
+        z-index: 35;
+        margin-bottom: 0.65rem !important;
+        border-color: #ddd6fe !important;
+        background: rgba(255,255,255,0.96) !important;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        box-shadow: 0 10px 30px rgba(28,25,23,0.14);
+        padding: 0.6rem 0.7rem !important;
+        gap: 0.45rem !important;
+    }
+    body.ugc-mobile-community #ugc-bulk-permission-form > div:nth-of-type(2) {
+        flex-wrap: nowrap !important;
+        overflow-x: auto;
+        width: 100%;
+        padding-bottom: 0.1rem;
+        scrollbar-width: none;
+    }
+    body.ugc-mobile-community #ugc-bulk-permission-form > div:nth-of-type(2)::-webkit-scrollbar { display: none; }
+    body.ugc-mobile-community #ugc-bulk-permission-form button {
+        min-height: 36px;
+        white-space: nowrap;
+    }
+
+    body.ugc-mobile-community #ugc-card-grid {
+        gap: 0.75rem !important;
+    }
+    body.ugc-mobile-community #ugc-card-grid .ugc-card {
+        border-radius: 1rem !important;
+    }
+    body.ugc-mobile-community #ugc-card-grid .ugc-card > div:first-child[style] {
+        max-height: 210px !important;
+    }
+    body.ugc-mobile-community #ugc-card-grid .ugc-card > div:first-child[style] img,
+    body.ugc-mobile-community #ugc-card-grid .ugc-card > div:first-child[style] video {
+        height: 210px !important;
+    }
+    body.ugc-mobile-community #ugc-card-grid .ugc-card > .p-3\.5 {
+        padding: 0.8rem !important;
+    }
+    body.ugc-mobile-community .ugc-card-select {
+        width: 36px !important;
+        height: 36px !important;
+        top: 0.55rem !important;
+        left: 0.55rem !important;
+    }
+
+    body.ugc-mobile-community #ugc-preview-modal {
+        padding: 0 !important;
+    }
+    body.ugc-mobile-community #ugc-preview-panel {
+        height: 100dvh;
+        max-height: 100dvh !important;
+        border-radius: 0 !important;
+        border: 0 !important;
+    }
+
+    /* Discovery Search mobile layout */
+    body.ugc-mobile-discovery-searches .ugc-mobile-page-header {
+        margin-bottom: 0.85rem !important;
+        gap: 0.65rem !important;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-provider-badge {
+        width: 100%;
+        justify-content: center;
+        min-height: 42px;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-discovery-grid {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.85rem !important;
+        padding-bottom: calc(1rem + env(safe-area-inset-bottom)) !important;
+    }
+
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-toggle {
+        display: flex;
+        width: 100%;
+        min-height: 46px;
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid #ddd6fe;
+        border-radius: 0.9rem;
+        background: #faf8ff;
+        padding: 0 0.9rem;
+        color: #6d28d9;
+        font-size: 0.82rem;
+        font-weight: 700;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-toggle .ugc-filter-chevron {
+        transition: transform 160ms ease;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-toggle[aria-expanded="true"] .ugc-filter-chevron {
+        transform: rotate(180deg);
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-section {
+        transition: max-height 220ms ease, opacity 160ms ease, margin 160ms ease, padding 160ms ease;
+        overflow: hidden;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-section.ugc-mobile-collapsed {
+        max-height: 0;
+        opacity: 0;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        margin: 0 !important;
+        border-width: 0 !important;
+        pointer-events: none;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-add-search-section:not(.ugc-mobile-collapsed) {
+        max-height: 1200px;
+        opacity: 1;
+    }
+
+    body.ugc-mobile-discovery-searches .ugc-mobile-saved-searches-header p {
+        display: none;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-saved-search-card {
+        padding: 0.9rem !important;
+        border-radius: 1rem !important;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-card-layout {
+        display: grid !important;
+        grid-template-columns: 40px minmax(0, 1fr);
+        gap: 0.65rem !important;
+        align-items: start;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-card-layout > div:first-child {
+        width: 40px !important;
+        height: 40px !important;
+        grid-column: 1;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-card-layout > div:nth-child(2) {
+        grid-column: 2;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions {
+        grid-column: 1 / -1;
+        display: grid !important;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem !important;
+        width: 100%;
+        padding-top: 0.25rem;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions > * {
+        width: 100%;
+        min-width: 0;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions button,
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions a,
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions select {
+        width: 100% !important;
+        min-height: 44px !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        font-size: 0.76rem !important;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-search-actions select {
+        display: block;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-saved-search-card details {
+        margin-top: 0.75rem !important;
+        padding-top: 0.75rem !important;
+    }
+    body.ugc-mobile-discovery-searches .ugc-mobile-saved-search-card details summary {
+        min-height: 38px;
+        display: flex;
+        align-items: center;
+    }
+}
