@@ -2,6 +2,17 @@
     function text(node) { return (node && node.textContent || '').trim(); }
     function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 
+    function loadMobileCardCleanup() {
+        if (!document.body.classList.contains('ugc-mobile-community')) return;
+        if (document.querySelector('script[data-ugc-mobile-cards]')) return;
+        const script = document.createElement('script');
+        script.src = '/static/js/ugc_mobile_cards.js';
+        script.dataset.ugcMobileCards = '1';
+        const current = document.currentScript;
+        if (current && current.nonce) script.nonce = current.nonce;
+        document.head.appendChild(script);
+    }
+
     function setupMobileBulkToolbar() {
         if (!document.body.classList.contains('ugc-mobile-community')) return;
 
@@ -89,6 +100,7 @@
         if (controlsWrap) controlsWrap.classList.add('ugc-mobile-controls-wrap');
         if (!controlsWrap || !filterPanel) {
             setupMobileBulkToolbar();
+            loadMobileCardCleanup();
             return true;
         }
         filterPanel.classList.add('ugc-mobile-filter-panel');
@@ -143,6 +155,7 @@
         });
 
         setupMobileBulkToolbar();
+        loadMobileCardCleanup();
         return true;
     }
 
