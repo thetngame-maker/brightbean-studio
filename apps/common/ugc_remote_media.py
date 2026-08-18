@@ -8,8 +8,11 @@ moderation previews and later approved usage do not depend on remote URLs.
 from __future__ import annotations
 
 import io
+import json
 import logging
 import mimetypes
+import subprocess
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -37,6 +40,8 @@ ALLOWED_VIDEO_TYPES = {
     "video/quicktime": ".mov",
     "video/webm": ".webm",
 }
+WEB_VIDEO_MIME_TYPE = "video/mp4"
+WEB_VIDEO_NORMALIZATION_VERSION = 1
 
 
 def _discovery_import(submission: UGCSubmission) -> dict:
@@ -73,6 +78,26 @@ def _set_capture_status(submission: UGCSubmission, status: str) -> None:
     submission.save(update_fields=["metadata", "updated_at"])
 
 
+def _set_video_normalization_state(submission: UGCSubmission, *, status: str, version: int = 0) -> None:
+    metadata = dict(submission.metadata or {})
+    discovery = dict(metadata.get("discovery_import") or {})
+    discovery["video_normalization_status"] = str(status or "")[:100]
+    if version:
+        discovery["video_normalization_version"] = int(version)
+    metadata["discovery_import"] = discovery
+    submission.metadata = metadata
+    submission.save(update_fields=["metadata", "updated_at"])
+
+
+def _video_is_web_normalized(submission: UGCSubmission) -> bool:
+    discovery = _discovery_import(submission)
+    try:
+        version = int(discovery.get("video_normalization_version") or 0)
+    except (TypeError, ValueError):
+        version = 0
+    return version >= WEB_VIDEO_NORMALIZATION_VERSION and discovery.get("video_normalization_status") == "ready"
+
+
 def _safe_filename(submission: UGCSubmission, content_type: str, source_url: str, media_type: str) -> str:
     allowed = ALLOWED_VIDEO_TYPES if media_type == "video" else ALLOWED_IMAGE_TYPES
     extension = allowed.get(content_type)
@@ -87,6 +112,14 @@ def _safe_filename(submission: UGCSubmission, content_type: str, source_url: str
     return f"ugc-{safe_external}{extension.lower()}"
 
 
+def _web_video_filename(submission: UGCSubmission) -> str:
+    metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
+    provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
+    external = str(provenance.get("external_id") or submission.id).strip()
+    safe_external = "".join(ch for ch in external if ch.isalnum() or ch in "-_")[:80] or str(submission.id)
+    return f"ugc-{safe_external}-web.mp4"
+
+
 def _image_dimensions(data: bytes) -> tuple[int, int]:
     try:
         from PIL import Image
@@ -97,12 +130,175 @@ def _image_dimensions(data: bytes) -> tuple[int, int]:
         return 0, 0
 
 
+def _probe_video(path: str) -> dict:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type,codec_name,pix_fmt",
+                "-of",
+                "json",
+                path,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        payload = json.loads(result.stdout or "{}")
+        streams = payload.get("streams") if isinstance(payload, dict) else []
+        streams = streams if isinstance(streams, list) else []
+        video = next((row for row in streams if row.get("codec_type") == "video"), {})
+        audio = next((row for row in streams if row.get("codec_type") == "audio"), {})
+        return {
+            "video_codec": str(video.get("codec_name") or "").lower(),
+            "pixel_format": str(video.get("pix_fmt") or "").lower(),
+            "audio_codec": str(audio.get("codec_name") or "").lower(),
+        }
+    except Exception as exc:
+        logger.info("Could not probe discovered Reel: %s", exc)
+        return {}
+
+
+def _normalize_video_bytes(data: bytes) -> tuple[bytes, str]:
+    """Return a Safari-friendly MP4 and normalization mode.
+
+    H.264/AAC sources only need the MP4 metadata moved to the front of the file.
+    Other codec/pixel-format combinations are transcoded to the broadly supported
+    H.264 + AAC + yuv420p profile.
+    """
+    if not data:
+        raise ValueError("empty video")
+
+    with tempfile.TemporaryDirectory(prefix="ugc-video-") as tmp:
+        source_path = str(Path(tmp) / "source.bin")
+        output_path = str(Path(tmp) / "output.mp4")
+        Path(source_path).write_bytes(data)
+        probe = _probe_video(source_path)
+        video_codec = probe.get("video_codec") or ""
+        pixel_format = probe.get("pixel_format") or ""
+        audio_codec = probe.get("audio_codec") or ""
+
+        can_remux = (
+            video_codec == "h264"
+            and pixel_format in {"yuv420p", "yuvj420p", ""}
+            and audio_codec in {"aac", ""}
+        )
+
+        if can_remux:
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                source_path,
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0?",
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+                output_path,
+            ]
+            mode = "remuxed"
+        else:
+            command = [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                source_path,
+                "-map",
+                "0:v:0",
+                "-map",
+                "0:a:0?",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-movflags",
+                "+faststart",
+                "-f",
+                "mp4",
+                output_path,
+            ]
+            mode = "transcoded"
+
+        try:
+            subprocess.run(command, check=True, capture_output=True, timeout=180)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or b"").decode("utf-8", errors="ignore")[-500:]
+            raise RuntimeError(f"ffmpeg_failed:{stderr or exc.returncode}") from exc
+
+        normalized = Path(output_path).read_bytes()
+        if not normalized:
+            raise RuntimeError("ffmpeg_empty_output")
+        if len(normalized) > MAX_REMOTE_VIDEO_BYTES:
+            raise RuntimeError("normalized_video_too_large")
+        return normalized, mode
+
+
+def _replace_media_asset_video(submission: UGCSubmission, normalized: bytes, *, mode: str) -> bool:
+    asset = submission.media_asset
+    if not asset or not asset.is_video:
+        return False
+
+    old_name = asset.file.name
+    filename = _web_video_filename(submission)
+    try:
+        asset.file.save(filename, ContentFile(normalized), save=False)
+        asset.filename = filename
+        asset.mime_type = WEB_VIDEO_MIME_TYPE
+        asset.file_size = len(normalized)
+        asset.save(update_fields=["file", "filename", "mime_type", "file_size", "updated_at"])
+        try:
+            if old_name and old_name != asset.file.name:
+                asset.file.storage.delete(old_name)
+        except Exception:
+            logger.info("Could not remove old discovered Reel file %s", old_name)
+    except Exception:
+        logger.exception("Could not replace discovered Reel asset for %s", submission.id)
+        return False
+
+    metadata = dict(submission.metadata or {})
+    discovery = dict(metadata.get("discovery_import") or {})
+    discovery["video_normalization_status"] = "ready"
+    discovery["video_normalization_version"] = WEB_VIDEO_NORMALIZATION_VERSION
+    discovery["video_normalization_mode"] = mode
+    discovery["media_capture_status"] = "captured"
+    metadata["discovery_import"] = discovery
+    submission.metadata = metadata
+    submission.save(update_fields=["metadata", "updated_at"])
+    return True
+
+
 def capture_submission_media(submission: UGCSubmission) -> tuple[bool, str]:
     """Download one discovered image or Reel and attach a durable MediaAsset."""
     desired_type = _desired_media_type(submission)
     if submission.media_asset_id:
         if desired_type == "video" and submission.media_asset and not submission.media_asset.is_video:
             return False, "wrong_existing_media_type"
+        if desired_type == "video" and submission.media_asset and submission.media_asset.is_video and not _video_is_web_normalized(submission):
+            normalize_captured_discovered_video(str(submission.id))
         return True, "already_captured"
 
     source_url = _remote_media_url(submission)
@@ -148,8 +344,17 @@ def capture_submission_media(submission: UGCSubmission) -> tuple[bool, str]:
     if len(data) > max_bytes:
         return False, f"{desired_type}_too_large"
 
+    normalization_mode = ""
+    if desired_type == "video":
+        try:
+            data, normalization_mode = _normalize_video_bytes(data)
+            content_type = WEB_VIDEO_MIME_TYPE
+        except Exception as exc:
+            logger.warning("Could not normalize discovered Reel %s: %s", submission.id, exc)
+            return False, f"video_normalization_failed:{exc.__class__.__name__}"
+
     width, height = _image_dimensions(data) if desired_type == "image" else (0, 0)
-    filename = _safe_filename(submission, content_type, source_url, desired_type)
+    filename = _web_video_filename(submission) if desired_type == "video" else _safe_filename(submission, content_type, source_url, desired_type)
     attribution = f"@{submission.contributor_handle}" if submission.contributor_handle else submission.contributor_name
 
     asset = MediaAsset.objects.create(
@@ -175,6 +380,10 @@ def capture_submission_media(submission: UGCSubmission) -> tuple[bool, str]:
     discovery["media_capture_status"] = "captured"
     discovery["media_asset_id"] = str(asset.id)
     discovery["media_type"] = desired_type
+    if desired_type == "video":
+        discovery["video_normalization_status"] = "ready"
+        discovery["video_normalization_version"] = WEB_VIDEO_NORMALIZATION_VERSION
+        discovery["video_normalization_mode"] = normalization_mode
     metadata["discovery_import"] = discovery
     submission.metadata = metadata
     submission.save(update_fields=["media_asset", "metadata", "updated_at"])
@@ -200,17 +409,68 @@ def capture_discovered_media(submission_id):
 
 
 @background(schedule=0)
+def normalize_captured_discovered_video(submission_id):
+    """Normalize an existing captured Reel into a Safari-friendly MP4."""
+    try:
+        submission = UGCSubmission.objects.select_related("media_asset").get(id=submission_id)
+    except UGCSubmission.DoesNotExist:
+        return
+
+    if not submission.media_asset or not submission.media_asset.is_video or _video_is_web_normalized(submission):
+        return
+
+    discovery = _discovery_import(submission)
+    if discovery.get("video_normalization_status") == "normalizing":
+        return
+    _set_video_normalization_state(submission, status="normalizing")
+
+    try:
+        submission.media_asset.file.open("rb")
+        try:
+            data = submission.media_asset.file.read(MAX_REMOTE_VIDEO_BYTES + 1)
+        finally:
+            submission.media_asset.file.close()
+        if not data or len(data) > MAX_REMOTE_VIDEO_BYTES:
+            raise RuntimeError("existing_video_missing_or_too_large")
+        normalized, mode = _normalize_video_bytes(data)
+        if not _replace_media_asset_video(submission, normalized, mode=mode):
+            raise RuntimeError("replace_failed")
+    except Exception as exc:
+        logger.warning("Could not normalize existing discovered Reel %s: %s", submission.id, exc)
+        _set_video_normalization_state(submission, status=f"failed:{exc.__class__.__name__}")
+
+
+@background(schedule=0)
 def repair_workspace_discovered_media(workspace_id):
-    """Backfill missing discovered media without duplicate queue jobs."""
-    submissions = list(
+    """Backfill missing media and normalize older discovered Reels."""
+    missing = list(
         UGCSubmission.objects.for_workspace(workspace_id)
         .filter(media_asset__isnull=True, metadata__provenance__discovery_source__isnull=False)
         .order_by("submitted_at")[:100]
     )
-    for submission in submissions:
+    for submission in missing:
         if not _remote_media_url(submission):
             continue
         if _capture_status(submission) in {"queued", "captured"}:
             continue
         _set_capture_status(submission, "queued")
         capture_discovered_media(str(submission.id))
+
+    existing_videos = list(
+        UGCSubmission.objects.for_workspace(workspace_id)
+        .select_related("media_asset")
+        .filter(media_asset__media_type=MediaAsset.MediaType.VIDEO, metadata__provenance__discovery_source__isnull=False)
+        .order_by("submitted_at")[:100]
+    )
+    queued = 0
+    for submission in existing_videos:
+        if _video_is_web_normalized(submission):
+            continue
+        status = str(_discovery_import(submission).get("video_normalization_status") or "")
+        if status == "normalizing":
+            continue
+        _set_video_normalization_state(submission, status="queued")
+        normalize_captured_discovered_video(str(submission.id))
+        queued += 1
+        if queued >= 20:
+            break
