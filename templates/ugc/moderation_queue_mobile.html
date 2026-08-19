@@ -15,6 +15,9 @@
   .ugc-lite-tabs{display:flex;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #e5e5ea;margin:0 -4px 12px;padding:0 4px}.ugc-lite-tabs::-webkit-scrollbar{display:none}
   .ugc-lite-tab{flex:0 0 auto;padding:11px 14px 10px;text-decoration:none;color:#6e6e73;font-size:15px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}.ugc-lite-tab.active{color:#7c3aed;border-color:#7c3aed}
   .ugc-lite-tools{margin:0 0 12px;display:flex;flex-direction:column;gap:9px}
+  .ugc-lite-quickwrap{display:flex;align-items:center;gap:7px;overflow-x:auto;scrollbar-width:none;padding:0 0 1px}.ugc-lite-quickwrap::-webkit-scrollbar{display:none}
+  .ugc-lite-quicklabel{flex:0 0 auto;color:#8e8e93;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.04em;padding-right:2px}
+  .ugc-lite-quick{flex:0 0 auto;display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:999px;text-decoration:none;background:#fff;border:1px solid #e5e5ea;color:#3a3a3c;font-size:12px;font-weight:700;white-space:nowrap}.ugc-lite-quick.primary{background:#f1eafe;border-color:#e3d4fd;color:#6d28d9}.ugc-lite-quick.good{background:#e9f9ef;border-color:#d4f0df;color:#08783e}.ugc-lite-quick.warn{background:#fff3e6;border-color:#fde2c2;color:#b45309}
   .ugc-lite-search{display:grid;grid-template-columns:1fr auto;gap:8px}
   .ugc-lite-search input{min-width:0;height:44px;border:1px solid #e5e5ea;border-radius:13px;background:#fff;padding:0 13px;font-size:15px;color:#1c1c1e;outline:none}
   .ugc-lite-search input:focus{border-color:#b69cf7;box-shadow:0 0 0 3px rgba(124,58,237,.08)}
@@ -63,6 +66,14 @@
 
   {% if active_tab == 'discovered' %}
   <div class="ugc-lite-tools">
+    <div class="ugc-lite-quickwrap" aria-label="Quick community views">
+      <span class="ugc-lite-quicklabel">Quick</span>
+      <a class="ugc-lite-quick primary" href="?tab=discovered&relevance=strong&media=reels&permission=not_contacted&sort=engaged">★ Top prospects</a>
+      <a class="ugc-lite-quick" href="?tab=discovered&relevance=relevant&media=all&permission=not_contacted&sort=engaged">Needs outreach</a>
+      <a class="ugc-lite-quick" href="?tab=discovered&relevance=relevant&media=all&permission=requested&sort=newest">Waiting reply</a>
+      <a class="ugc-lite-quick good" href="?tab=discovered&relevance=relevant&media=all&permission=granted&sort=engaged">✓ Granted</a>
+      <a class="ugc-lite-quick warn" href="?tab=discovered&relevance=low&media=all&permission=all&sort=newest">⚠ Low relevance</a>
+    </div>
     <form class="ugc-lite-search" method="get">
       <input type="hidden" name="tab" value="{{ active_tab }}">
       <input type="hidden" name="relevance" value="{{ ugc_mobile_relevance }}">
@@ -152,6 +163,8 @@
         <div class="ugc-lite-actions" style="grid-template-columns:1fr 1fr"><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action good" type="submit" {% if not submission.consent_confirmed %}disabled{% endif %}>Approve</button></form><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action bad" type="submit">Reject</button></form></div>
       {% elif active_tab == 'approved' %}
         <div class="ugc-lite-actions" style="grid-template-columns:1fr"><form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="ugc-lite-action primary" type="submit">Use in post</button></form></div>
+      {% elif active_tab == 'removed' %}
+        <div class="ugc-lite-actions" style="grid-template-columns:1fr"><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="restore"><input type="hidden" name="note" value="Restored manually from mobile Community review."><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action good" type="submit">Restore</button></form></div>
       {% endif %}
 
       {% if submission.mobile_source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ submission.mobile_source_url }}" target="_blank" rel="noopener noreferrer">Instagram ↗</a></div>{% else %}{% with source_url=submission.metadata|ugc_source_url %}{% if source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Source ↗</a></div>{% endif %}{% endwith %}{% endif %}
