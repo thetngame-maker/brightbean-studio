@@ -1,13 +1,17 @@
-"""Lightweight phone moderation queue.
+"""Lightweight phone moderation queue and focused review flow.
 
 Desktop keeps using the original moderation view/template. Phones render a small,
 server-paginated queue with minimal HTML and no enhancement bundle so Safari
 never has to hydrate the desktop moderation dashboard.
 """
 
+from urllib.parse import urlencode
+
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
+from django.http import Http404
 from django.shortcuts import render
+from django.urls import reverse
 
 from apps.members.decorators import require_permission
 
@@ -114,9 +118,6 @@ def _decorate_submission(submission):
     likes = _metric(submission.mobile_like_count)
     comments = _metric(submission.mobile_comment_count)
     views = _metric(submission.mobile_view_count)
-    # Comments represent stronger intent than a like, while views are useful but
-    # much higher-volume. This mirrors the mobile review goal: surface posts that
-    # are both seen and actively engaged with without letting raw views dominate.
     submission.mobile_engagement_score = likes + (comments * 10) + (views / 100)
     return submission
 
@@ -149,37 +150,31 @@ def _matches_permission(submission, permission_filter):
 
 def _sort_mobile(submissions, sort_mode):
     if sort_mode == "liked":
-        return sorted(
-            submissions,
-            key=lambda item: (_metric(getattr(item, "mobile_like_count", 0)), item.submitted_at),
-            reverse=True,
-        )
+        return sorted(submissions, key=lambda item: (_metric(getattr(item, "mobile_like_count", 0)), item.submitted_at), reverse=True)
     if sort_mode == "viewed":
-        return sorted(
-            submissions,
-            key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at),
-            reverse=True,
-        )
+        return sorted(submissions, key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at), reverse=True)
     if sort_mode == "engaged":
-        return sorted(
-            submissions,
-            key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at),
-            reverse=True,
-        )
+        return sorted(submissions, key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at), reverse=True)
     return sorted(submissions, key=lambda item: item.submitted_at, reverse=True)
 
 
-@login_required
-@require_permission("manage_workspace_settings")
-def moderation_queue(request, workspace_id):
-    if not _is_mobile_request(request):
-        return ugc_views.moderation_queue(request, workspace_id)
+def _filters_from_request(request):
+    relevance = (request.GET.get("relevance") or "relevant").strip().lower()
+    if relevance not in VALID_RELEVANCE:
+        relevance = "relevant"
+    media = (request.GET.get("media") or "all").strip().lower()
+    if media not in VALID_MEDIA:
+        media = "all"
+    sort_mode = (request.GET.get("sort") or "newest").strip().lower()
+    if sort_mode not in VALID_SORT:
+        sort_mode = "newest"
+    permission = (request.GET.get("permission") or "all").strip().lower()
+    if permission not in VALID_PERMISSION:
+        permission = "all"
+    return relevance, media, sort_mode, permission
 
-    workspace = _get_workspace(request, workspace_id)
-    tab = request.GET.get("tab", "pending")
-    if tab not in VALID_TABS:
-        tab = "pending"
 
+def _filtered_queue(request, workspace, tab):
     qs = (
         UGCSubmission.objects.for_workspace(workspace.id)
         .select_related("contributor", "media_asset", "moderated_by")
@@ -191,7 +186,6 @@ def moderation_queue(request, workspace_id):
             )
         )
     )
-
     if tab == "discovered":
         qs = qs.filter(status=UGCSubmission.Status.PENDING).filter(_discovered_q())
     elif tab == "pending":
@@ -199,9 +193,7 @@ def moderation_queue(request, workspace_id):
     elif tab == "approved":
         qs = qs.filter(status=UGCSubmission.Status.APPROVED)
     elif tab == "reported":
-        qs = qs.filter(
-            reports__status__in=[UGCReport.Status.OPEN, UGCReport.Status.REVIEWING]
-        ).distinct()
+        qs = qs.filter(reports__status__in=[UGCReport.Status.OPEN, UGCReport.Status.REVIEWING]).distinct()
     elif tab == "removed":
         qs = qs.filter(status=UGCSubmission.Status.REMOVED)
 
@@ -221,33 +213,52 @@ def moderation_queue(request, workspace_id):
             | Q(target_label__icontains=search_query)
         )
 
-    relevance_filter = (request.GET.get("relevance") or "relevant").strip().lower()
-    if relevance_filter not in VALID_RELEVANCE:
-        relevance_filter = "relevant"
-
-    media_filter = (request.GET.get("media") or "all").strip().lower()
-    if media_filter not in VALID_MEDIA:
-        media_filter = "all"
-
-    sort_mode = (request.GET.get("sort") or "newest").strip().lower()
-    if sort_mode not in VALID_SORT:
-        sort_mode = "newest"
-
-    permission_filter = (request.GET.get("permission") or "all").strip().lower()
-    if permission_filter not in VALID_PERMISSION:
-        permission_filter = "all"
-
-    # Mobile queues are intentionally small (currently hundreds, not millions),
-    # so score/filter/sort before slicing. This keeps the iPhone path entirely
-    # server-rendered and avoids the intelligence/hydration bundle that caused
-    # Safari stalls.
+    relevance, media, sort_mode, permission = _filters_from_request(request)
     decorated = [_decorate_submission(submission) for submission in qs[:500]]
     if tab == "discovered":
-        decorated = [submission for submission in decorated if _matches_relevance(submission, relevance_filter)]
-        decorated = [submission for submission in decorated if _matches_permission(submission, permission_filter)]
-    decorated = [submission for submission in decorated if _matches_media(submission, media_filter)]
+        decorated = [item for item in decorated if _matches_relevance(item, relevance)]
+        decorated = [item for item in decorated if _matches_permission(item, permission)]
+    decorated = [item for item in decorated if _matches_media(item, media)]
     decorated = _sort_mobile(decorated, sort_mode)
+    return decorated, {
+        "kind": kind,
+        "search": search_query,
+        "relevance": relevance,
+        "media": media,
+        "sort": sort_mode,
+        "permission": permission,
+    }
 
+
+def _queue_query(params, *, page=None):
+    values = {
+        "tab": params.get("tab", "discovered"),
+        "relevance": params.get("relevance", "relevant"),
+        "media": params.get("media", "all"),
+        "sort": params.get("sort", "newest"),
+        "permission": params.get("permission", "all"),
+    }
+    if params.get("kind"):
+        values["kind"] = params["kind"]
+    if params.get("search"):
+        values["q"] = params["search"]
+    if page:
+        values["page"] = page
+    return urlencode(values)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+def moderation_queue(request, workspace_id):
+    if not _is_mobile_request(request):
+        return ugc_views.moderation_queue(request, workspace_id)
+
+    workspace = _get_workspace(request, workspace_id)
+    tab = request.GET.get("tab", "pending")
+    if tab not in VALID_TABS:
+        tab = "pending"
+
+    decorated, filters = _filtered_queue(request, workspace, tab)
     total_items = len(decorated)
     total_pages = max(1, (total_items + MOBILE_PAGE_SIZE - 1) // MOBILE_PAGE_SIZE)
     page = min(_positive_page(request.GET.get("page")), total_pages)
@@ -258,7 +269,7 @@ def moderation_queue(request, workspace_id):
         "workspace": workspace,
         "submissions": submissions,
         "active_tab": tab,
-        "active_kind": kind,
+        "active_kind": filters["kind"],
         "kind_choices": UGCSubmission.Kind.choices,
         "queue_counts": _queue_counts(workspace),
         "ugc_mobile_page": page,
@@ -266,13 +277,61 @@ def moderation_queue(request, workspace_id):
         "ugc_mobile_total_pages": total_pages,
         "ugc_mobile_prev_page": page - 1 if page > 1 else None,
         "ugc_mobile_next_page": page + 1 if page < total_pages else None,
-        "ugc_mobile_search": search_query,
-        "ugc_mobile_relevance": relevance_filter,
-        "ugc_mobile_media": media_filter,
-        "ugc_mobile_sort": sort_mode,
-        "ugc_mobile_permission": permission_filter,
+        "ugc_mobile_search": filters["search"],
+        "ugc_mobile_relevance": filters["relevance"],
+        "ugc_mobile_media": filters["media"],
+        "ugc_mobile_sort": filters["sort"],
+        "ugc_mobile_permission": filters["permission"],
     }
     response = render(request, "ugc/moderation_queue_mobile.html", context)
     response["X-UGC-Mobile-Lite"] = "1"
     response["X-UGC-Mobile-Page"] = str(page)
+    return response
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+def mobile_review(request, workspace_id, submission_id):
+    workspace = _get_workspace(request, workspace_id)
+    tab = request.GET.get("tab", "discovered")
+    if tab not in VALID_TABS:
+        tab = "discovered"
+
+    decorated, filters = _filtered_queue(request, workspace, tab)
+    index = next((i for i, item in enumerate(decorated) if item.id == submission_id), None)
+    if index is None:
+        raise Http404("Community item is not in this filtered review queue.")
+
+    submission = decorated[index]
+    params = {"tab": tab, **filters}
+    queue_url = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id})
+    return_to = request.GET.get("return_to") or f"{queue_url}?{_queue_query(params)}"
+    if not return_to.startswith("/"):
+        return_to = f"{queue_url}?{_queue_query(params)}"
+
+    prev_item = decorated[index - 1] if index > 0 else None
+    next_item = decorated[index + 1] if index + 1 < len(decorated) else None
+    review_query = _queue_query(params)
+
+    if next_item:
+        action_return_to = reverse("ugc:mobile_review", kwargs={"workspace_id": workspace.id, "submission_id": next_item.id})
+        action_return_to = f"{action_return_to}?{review_query}&return_to={urlencode({'x': return_to})[2:]}"
+    else:
+        action_return_to = return_to
+
+    context = {
+        "workspace": workspace,
+        "submission": submission,
+        "active_tab": tab,
+        "queue_counts": _queue_counts(workspace),
+        "review_index": index + 1,
+        "review_total": len(decorated),
+        "review_prev": prev_item,
+        "review_next": next_item,
+        "review_query": review_query,
+        "review_return_to": return_to,
+        "review_action_return_to": action_return_to,
+    }
+    response = render(request, "ugc/moderation_review_mobile.html", context)
+    response["X-UGC-Mobile-Review"] = "1"
     return response
