@@ -37,8 +37,8 @@ MOBILE_PAGE_SIZE = 12
 FOLLOWUP_AFTER_DAYS = 3
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
 VALID_MEDIA = {"all", "reels", "photos"}
-VALID_SORT = {"newest", "engaged", "liked", "viewed"}
-VALID_PERMISSION = {"all", "not_contacted", "requested", "granted", "declined"}
+VALID_SORT = {"newest", "engaged", "liked", "viewed", "followup"}
+VALID_PERMISSION = {"all", "not_contacted", "requested", "followup_due", "granted", "declined"}
 
 
 def _is_mobile_request(request):
@@ -219,6 +219,11 @@ def _matches_media(submission, media_filter):
 def _matches_permission(submission, permission_filter):
     if permission_filter == "all":
         return True
+    if permission_filter == "followup_due":
+        return (
+            getattr(submission, "mobile_permission_status", "not_contacted") == "requested"
+            and bool(getattr(submission, "mobile_followup_due", False))
+        )
     return getattr(submission, "mobile_permission_status", "not_contacted") == permission_filter
 
 
@@ -229,6 +234,16 @@ def _sort_mobile(submissions, sort_mode):
         return sorted(submissions, key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at), reverse=True)
     if sort_mode == "engaged":
         return sorted(submissions, key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at), reverse=True)
+    if sort_mode == "followup":
+        return sorted(
+            submissions,
+            key=lambda item: (
+                0 if getattr(item, "mobile_followup_due", False) else 1,
+                getattr(item, "mobile_followup_due_at", None).timestamp()
+                if getattr(item, "mobile_followup_due_at", None)
+                else float("inf"),
+            ),
+        )
     return sorted(submissions, key=lambda item: item.submitted_at, reverse=True)
 
 
