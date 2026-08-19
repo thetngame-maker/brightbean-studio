@@ -8,6 +8,7 @@ from apps.members.decorators import require_permission
 from .models import UGCSubmission
 from .ugc_permissions import get_permission
 from .ugc_provenance import get_provenance
+from .ugc_relevance import score_relevance
 from .ugc_views import _get_workspace, _discovered_q
 
 
@@ -25,7 +26,7 @@ def _metric(value):
 @login_required
 @require_permission("manage_workspace_settings")
 def discovery_intelligence(request, workspace_id):
-    """Return engagement, query, discovery method, permission timing, and outreach history."""
+    """Return engagement, provenance, relevance, permission timing, and outreach history."""
     workspace = _get_workspace(request, workspace_id)
     submissions = (
         UGCSubmission.objects.for_workspace(workspace.id)
@@ -46,6 +47,16 @@ def discovery_intelligence(request, workspace_id):
         engagement_score = likes + (comments * 3) + int(views * 0.02)
         requested_at = str(outreach.get("requested_at") or permission.get("updated_at") or "")
         method = str(discovery.get("discovery_method") or "").strip().lower()
+
+        relevance = score_relevance(
+            {
+                "caption": submission.body or "",
+                "location_name": discovery.get("location_name") or "",
+            },
+            query=provenance.get("discovery_query", ""),
+            target_label=submission.target_label or submission.title or "",
+        )
+
         items.append(
             {
                 "id": str(submission.id),
@@ -56,6 +67,9 @@ def discovery_intelligence(request, workspace_id):
                 "discovery_query": provenance.get("discovery_query", ""),
                 "discovery_source": provenance.get("discovery_source", ""),
                 "discovery_method": method if method in {"keyword", "hashtag", "location", "account"} else "",
+                "relevance_status": relevance.get("relevance_status", "possible"),
+                "relevance_score": relevance.get("relevance_score", 45),
+                "relevance_reason": relevance.get("relevance_reason", ""),
                 "permission_status": permission.get("status", "not_contacted"),
                 "permission_updated_at": permission.get("updated_at", ""),
                 "permission_channel": permission.get("channel", ""),
