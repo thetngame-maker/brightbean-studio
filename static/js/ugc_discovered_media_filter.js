@@ -6,6 +6,13 @@
         mobileCss.dataset.ugcMobileCss = '1';
         document.head.appendChild(mobileCss);
     }
+    if (!document.querySelector('link[data-ugc-mobile-performance-css]')) {
+        const perfCss = document.createElement('link');
+        perfCss.rel = 'stylesheet';
+        perfCss.href = '/static/css/ugc_mobile_performance.css';
+        perfCss.dataset.ugcMobilePerformanceCss = '1';
+        document.head.appendChild(perfCss);
+    }
     if (!document.querySelector('script[data-ugc-mobile]')) {
         const mobileScript = document.createElement('script');
         mobileScript.src = '/static/js/ugc_mobile.js';
@@ -20,11 +27,38 @@
 
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
     if (!cards.length) return;
+    const isMobile = window.matchMedia('(max-width: 767px)').matches;
 
-    cards.forEach((card) => {
+    cards.forEach((card, index) => {
         card.dataset.mediaType = card.querySelector('video') ? 'reel' : 'photo';
         card.dataset.discoveryMethod = card.dataset.discoveryMethod || '';
+        if (isMobile) {
+            card.classList.add('ugc-mobile-render-card');
+            const image = card.querySelector('img');
+            if (image) {
+                image.decoding = 'async';
+                image.fetchPriority = index < 2 ? 'high' : 'low';
+                if (index >= 2) image.loading = 'lazy';
+            }
+            const video = card.querySelector('video');
+            if (video && index >= 2) video.preload = 'none';
+        }
     });
+
+    if (isMobile && 'IntersectionObserver' in window) {
+        const mediaObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) return;
+                const video = entry.target.querySelector('video');
+                if (video && video.preload === 'none') {
+                    video.preload = 'metadata';
+                    video.load();
+                }
+                mediaObserver.unobserve(entry.target);
+            });
+        }, { rootMargin: '600px 0px' });
+        cards.slice(2).forEach((card) => mediaObserver.observe(card));
+    }
 
     let mediaSelect = document.getElementById('ugc-media-filter');
     if (!mediaSelect) {
@@ -109,9 +143,6 @@
         });
 
         window.requestAnimationFrame(() => {
-            cards.forEach((card) => {
-                if (!combinedMatches(card)) card.style.setProperty('display', 'none', 'important');
-            });
             const resultCount = document.getElementById('ugc-result-count');
             if (resultCount) {
                 const visible = cards.filter((card) => !card.classList.contains('hidden') && card.style.display !== 'none').length;
@@ -124,6 +155,7 @@
                 );
                 resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`;
             }
+            document.dispatchEvent(new CustomEvent('ugc:filters-changed'));
         });
     }
 
@@ -161,18 +193,18 @@
     }
 
     const intelligenceUrl = window.location.pathname.replace(/\/?$/, '/discovered/intelligence/');
-    fetch(intelligenceUrl, {
-        headers: { 'Accept': 'application/json' },
-        credentials: 'same-origin',
-        cache: 'no-store'
-    })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error('Discovery intelligence unavailable')))
-        .then(applyIntelligence)
-        .catch(() => applyLibraryFilters());
+    if (!window.ugcDiscoveryIntelligencePromise) {
+        window.ugcDiscoveryIntelligencePromise = fetch(intelligenceUrl, {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store'
+        }).then((response) => response.ok ? response.json() : Promise.reject(new Error('Discovery intelligence unavailable')));
+    }
+    window.ugcDiscoveryIntelligencePromise.then(applyIntelligence).catch(() => applyLibraryFilters());
 
     applyLibraryFilters();
 
-    if (!document.querySelector('script[data-ugc-discovery-performance]')) {
+    if (!isMobile && !document.querySelector('script[data-ugc-discovery-performance]')) {
         const performanceScript = document.createElement('script');
         performanceScript.src = '/static/js/ugc_discovered_performance.js';
         performanceScript.dataset.ugcDiscoveryPerformance = '1';
