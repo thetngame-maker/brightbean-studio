@@ -57,6 +57,22 @@ def _metric(value):
     return 0
 
 
+def _permission_message(submission):
+    handle = (submission.contributor_handle or "").strip().lstrip("@")
+    title = (submission.title or submission.target_label or "your post").strip()
+    greeting = f"Hi @{handle}!" if handle else "Hi!"
+    credit = (
+        f" We’ll credit you as @{handle} and link back to your original post."
+        if handle
+        else " We’ll credit you and link back to your original post."
+    )
+    return (
+        f"{greeting} We came across your {title} post and would love to feature it on "
+        f"The TN Game’s social media and website.{credit} If you’re okay with us sharing it, "
+        "please reply YES to this message. Thank you!"
+    )
+
+
 def _decorate_submission(submission):
     metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
     provenance = get_provenance(metadata)
@@ -80,6 +96,10 @@ def _decorate_submission(submission):
     submission.mobile_thumbnail_url = discovery.get("thumbnail_url") or ""
     submission.mobile_source_url = provenance.get("source_url") or ""
     submission.mobile_permission_status = get_permission(metadata).get("status") or "not_contacted"
+    submission.mobile_permission_message = _permission_message(submission)
+
+    handle = (submission.contributor_handle or provenance.get("source_handle") or "").strip().lstrip("@")
+    submission.mobile_creator_profile_url = f"https://www.instagram.com/{handle}/" if handle else submission.mobile_source_url
 
     stored_media_type = str(discovery.get("media_type") or "").strip().lower()
     if submission.media_asset and submission.media_asset.is_video:
