@@ -15,6 +15,13 @@ from .ugc_provenance import get_provenance
 from .ugc_views import _discovered_q, _get_workspace
 
 
+def _return_to(request, workspace_id):
+    value = str(request.POST.get("return_to") or "").strip()
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    return f"/workspace/{workspace_id}/community-content/?tab=discovered"
+
+
 @login_required
 @require_permission("manage_workspace_settings")
 @require_POST
@@ -33,10 +40,11 @@ def log_followup(request, workspace_id, submission_id):
         id=submission_id,
     )
 
+    return_to = _return_to(request, workspace.id)
     permission = get_permission(submission.metadata)
     if permission.get("status") != REQUESTED:
         messages.error(request, "Follow-ups can only be logged after permission has been requested.")
-        return redirect(f"/workspace/{workspace.id}/community-content/?tab=discovered")
+        return redirect(return_to)
 
     now = timezone.now()
     metadata = dict(submission.metadata or {})
@@ -71,4 +79,4 @@ def log_followup(request, workspace_id, submission_id):
         request,
         f"Follow-up #{outreach['followup_count']} logged for @{submission.contributor_handle or 'creator'}.",
     )
-    return redirect(f"/workspace/{workspace.id}/community-content/?tab=discovered")
+    return redirect(return_to)
