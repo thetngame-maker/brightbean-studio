@@ -65,8 +65,15 @@
     select.addEventListener('change', apply);
 
     const url = window.location.pathname.replace(/\/?$/, '/discovered/intelligence/');
-    fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin', cache: 'no-store' })
-        .then((response) => response.ok ? response.json() : Promise.reject(new Error('Relevance unavailable')))
+    if (!window.ugcDiscoveryIntelligencePromise) {
+        window.ugcDiscoveryIntelligencePromise = fetch(url, {
+            headers: { 'Accept': 'application/json' },
+            credentials: 'same-origin',
+            cache: 'no-store'
+        }).then((response) => response.ok ? response.json() : Promise.reject(new Error('Relevance unavailable')));
+    }
+
+    window.ugcDiscoveryIntelligencePromise
         .then((payload) => {
             const byId = new Map((payload.items || []).map((item) => [String(item.id || ''), item]));
             cards.forEach((card) => {
@@ -74,6 +81,7 @@
                 const item = byId.get(id);
                 if (!item) return;
                 card.dataset.relevanceStatus = String(item.relevance_status || 'possible');
+                card.dataset.relevance = card.dataset.relevanceStatus;
                 card.dataset.relevanceScore = String(item.relevance_score || 0);
                 badgeFor(card, item);
             });
