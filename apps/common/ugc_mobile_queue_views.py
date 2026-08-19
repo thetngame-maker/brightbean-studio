@@ -5,6 +5,8 @@ server-paginated queue with minimal HTML and no enhancement bundle so Safari
 never has to hydrate the desktop moderation dashboard.
 """
 
+import math
+from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
@@ -12,6 +14,8 @@ from django.db.models import Count, Q
 from django.http import Http404
 from django.shortcuts import render
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from apps.members.decorators import require_permission
 
@@ -30,6 +34,7 @@ from .ugc_views import (
 
 
 MOBILE_PAGE_SIZE = 12
+FOLLOWUP_AFTER_DAYS = 3
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
 VALID_MEDIA = {"all", "reels", "photos"}
 VALID_SORT = {"newest", "engaged", "liked", "viewed"}
@@ -61,6 +66,20 @@ def _metric(value):
     return 0
 
 
+def _as_datetime(value):
+    if not value:
+        return None
+    if hasattr(value, "tzinfo"):
+        parsed = value
+    else:
+        parsed = parse_datetime(str(value))
+    if parsed is None:
+        return None
+    if timezone.is_naive(parsed):
+        parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
+    return parsed
+
+
 def _permission_message(submission):
     handle = (submission.contributor_handle or "").strip().lstrip("@")
     title = (submission.title or submission.target_label or "your post").strip()
@@ -75,6 +94,51 @@ def _permission_message(submission):
         f"The TN Game’s social media and website.{credit} If you’re okay with us sharing it, "
         "please reply YES to this message. Thank you!"
     )
+
+
+def _followup_message(submission):
+    handle = (submission.contributor_handle or "").strip().lstrip("@")
+    greeting = f"Hi @{handle}!" if handle else "Hi!"
+    return (
+        f"{greeting} Just following up on our earlier message — we’d still love to feature your post "
+        "on The TN Game’s social media and website, with full credit and a link back to your original post. "
+        "If you’re okay with us sharing it, please reply YES. Thank you!"
+    )
+
+
+def _followup_state(metadata, permission):
+    outreach = metadata.get("outreach") if isinstance(metadata.get("outreach"), dict) else {}
+    requested_at = _as_datetime(outreach.get("requested_at") or permission.get("updated_at"))
+    last_followup_at = _as_datetime(outreach.get("last_followup_at"))
+    try:
+        count = max(0, int(outreach.get("followup_count") or 0))
+    except (TypeError, ValueError):
+        count = 0
+
+    anchor = last_followup_at or requested_at
+    due_at = anchor + timedelta(days=FOLLOWUP_AFTER_DAYS) if anchor else None
+    label = "Waiting reply"
+    due = False
+    overdue_days = 0
+    if due_at:
+        seconds = (due_at - timezone.now()).total_seconds()
+        if seconds <= 0:
+            due = True
+            overdue_days = max(0, int(abs(seconds) // 86400))
+            label = "Follow-up due" if overdue_days == 0 else f"Overdue by {overdue_days}d"
+        else:
+            days = max(1, math.ceil(seconds / 86400))
+            label = "Due tomorrow" if days == 1 else f"Due in {days}d"
+
+    return {
+        "requested_at": requested_at,
+        "last_followup_at": last_followup_at,
+        "followup_count": count,
+        "due_at": due_at,
+        "due": due,
+        "label": label,
+        "overdue_days": overdue_days,
+    }
 
 
 def _decorate_submission(submission):
@@ -99,8 +163,18 @@ def _decorate_submission(submission):
     submission.mobile_view_count = discovery.get("view_count")
     submission.mobile_thumbnail_url = discovery.get("thumbnail_url") or ""
     submission.mobile_source_url = provenance.get("source_url") or ""
-    submission.mobile_permission_status = get_permission(metadata).get("status") or "not_contacted"
+
+    permission = get_permission(metadata)
+    submission.mobile_permission_status = permission.get("status") or "not_contacted"
     submission.mobile_permission_message = _permission_message(submission)
+    submission.mobile_followup_message = _followup_message(submission)
+    followup = _followup_state(metadata, permission)
+    submission.mobile_requested_at = followup["requested_at"]
+    submission.mobile_last_followup_at = followup["last_followup_at"]
+    submission.mobile_followup_count = followup["followup_count"]
+    submission.mobile_followup_due_at = followup["due_at"]
+    submission.mobile_followup_due = followup["due"]
+    submission.mobile_followup_label = followup["label"]
 
     handle = (submission.contributor_handle or provenance.get("source_handle") or "").strip().lstrip("@")
     submission.mobile_creator_profile_url = f"https://www.instagram.com/{handle}/" if handle else submission.mobile_source_url
