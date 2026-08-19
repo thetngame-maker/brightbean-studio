@@ -23,6 +23,7 @@
   .review-metrics{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.review-metric{display:inline-flex;align-items:center;gap:4px;padding:6px 9px;border-radius:999px;background:#f7f7f9;color:#636366;font-size:12px}
   .review-caption{margin:12px 0 0;font-size:15px;line-height:1.48;color:#3a3a3c;white-space:pre-line}
   .review-source{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.review-link{min-height:42px;border-radius:11px;border:1px solid #e5e5ea;background:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#6d28d9;font-size:12px;font-weight:720}
+  .review-followup{margin-top:12px;padding:10px 11px;border-radius:12px;background:#f7f7f9;border:1px solid #e5e5ea;display:flex;align-items:center;justify-content:space-between;gap:10px}.review-followup.due{background:#fff7ed;border-color:#fed7aa}.review-followup-copy{min-width:0}.review-followup-copy strong{display:block;font-size:12px;color:#3a3a3c}.review-followup-copy span{display:block;margin-top:2px;color:#8e8e93;font-size:10px}.review-followup-badge{flex:0 0 auto;min-height:26px;padding:0 8px;border-radius:999px;display:flex;align-items:center;background:#fff;color:#6d28d9;font-size:10px;font-weight:750}.review-followup.due .review-followup-badge{color:#b45309}
   .review-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.review-actions form{min-width:0}.review-action{width:100%;min-height:44px;border-radius:11px;border:1px solid #e5e5ea;background:#f2f2f7;color:#3a3a3c;font-size:12px;font-weight:740;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 5px;text-decoration:none}.review-action.primary{background:#7c3aed;border-color:#7c3aed;color:#fff}.review-action.good{background:#e9f9ef;border-color:#c7eed5;color:#08783e}.review-action.bad{background:#fff0f0;border-color:#ffd3d3;color:#c62828}.review-action:disabled{opacity:.5}
   .review-state{grid-column:span 2;min-height:44px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:740}.review-state.good{background:#e9f9ef;color:#08783e;border:1px solid #c7eed5}.review-state.bad{background:#fff0f0;color:#c62828;border:1px solid #ffd3d3}
   .review-detail{margin-top:12px;border-top:1px solid #f2f2f7}.review-detail summary{list-style:none;min-height:42px;display:flex;align-items:center;justify-content:space-between;color:#636366;font-size:12px;font-weight:700;cursor:pointer}.review-detail summary::-webkit-details-marker{display:none}.review-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-bottom:8px}.review-info{background:#f7f7f9;border-radius:11px;padding:9px;font-size:11px;color:#8e8e93}.review-info strong{display:block;color:#3a3a3c;font-size:12px;margin-top:2px;word-break:break-word}
@@ -71,14 +72,24 @@
     </div>
 
     {% if active_tab == 'discovered' %}
+      {% if submission.mobile_permission_status == 'requested' %}
+      <div class="review-followup {% if submission.mobile_followup_due %}due{% endif %}">
+        <div class="review-followup-copy">
+          <strong>Waiting for permission</strong>
+          <span>{% if submission.mobile_last_followup_at %}Follow-up #{{ submission.mobile_followup_count }} sent {{ submission.mobile_last_followup_at|naturaltime }}{% elif submission.mobile_requested_at %}Requested {{ submission.mobile_requested_at|naturaltime }}{% else %}Permission requested{% endif %}</span>
+        </div>
+        <span class="review-followup-badge">{{ submission.mobile_followup_label }}</span>
+      </div>
+      {% endif %}
+
     <div class="review-actions">
       {% if submission.mobile_permission_status == 'not_contacted' %}
         <button class="review-action review-copy" type="button" data-copy-text="{{ submission.mobile_permission_message|escape }}">Copy request</button>
         <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark sent</button></form>
         <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
       {% elif submission.mobile_permission_status == 'requested' %}
-        <button class="review-action review-copy" type="button" data-copy-text="{{ submission.mobile_permission_message|escape }}">Copy request</button>
-        <button class="review-action" type="button" disabled>Waiting reply</button>
+        <button class="review-action review-copy" type="button" data-copy-text="{{ submission.mobile_followup_message|escape }}">Copy follow-up</button>
+        <form method="post" action="{% url 'ugc:log_followup' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark follow-up</button></form>
         <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
       {% elif submission.mobile_permission_status == 'granted' %}<div class="review-state good">✓ Permission granted</div>
       {% elif submission.mobile_permission_status == 'declined' %}<div class="review-state bad">Permission declined</div>{% endif %}
@@ -92,6 +103,7 @@
         <div class="review-info">Relevance<strong>{{ submission.mobile_relevance_status|title }}</strong></div>
         <div class="review-info">Permission<strong>{{ submission.mobile_permission_status|cut:'_'|title }}</strong></div>
         <div class="review-info">Discovery<strong>{{ submission.mobile_discovery_method|default:"—"|title }}</strong></div>
+        {% if submission.mobile_permission_status == 'requested' %}<div class="review-info">Follow-ups<strong>{{ submission.mobile_followup_count }}</strong></div><div class="review-info">Next follow-up<strong>{{ submission.mobile_followup_label }}</strong></div>{% endif %}
       </div>
       {% if submission.mobile_permission_status != 'declined' %}<form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action bad" type="submit">Decline permission</button></form>{% endif %}
       <form class="review-danger" method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="note" value="Removed manually from focused mobile review."><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">Remove from Community</button></form>
