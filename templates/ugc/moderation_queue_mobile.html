@@ -38,6 +38,7 @@
   .ugc-lite-actions form{min-width:0}.ugc-lite-action{width:100%;min-height:42px;border-radius:11px;border:1px solid #e5e5ea;background:#f2f2f7;color:#3a3a3c;font-size:12px;font-weight:720;text-align:center;padding:0 5px}.ugc-lite-action:disabled{opacity:.48}
   .ugc-lite-action.primary{background:#7c3aed;border-color:#7c3aed;color:#fff}.ugc-lite-action.good{background:#e9f9ef;border-color:#c7eed5;color:#08783e}.ugc-lite-action.bad{background:#fff0f0;border-color:#ffd3d3;color:#c62828}
   .ugc-lite-source{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid #f2f2f7;font-size:13px;color:#8e8e93}.ugc-lite-source a{color:#7c3aed;text-decoration:none;font-weight:680}
+  .ugc-lite-more{margin-top:2px;border-top:1px solid #f2f2f7}.ugc-lite-more summary{list-style:none;min-height:42px;display:flex;align-items:center;justify-content:center;color:#8e8e93;font-size:13px;font-weight:650;cursor:pointer;-webkit-tap-highlight-color:transparent}.ugc-lite-more summary::-webkit-details-marker{display:none}.ugc-lite-more[open] summary{color:#636366}.ugc-lite-more-panel{padding:0 0 3px}.ugc-lite-remove{width:100%;min-height:44px;border:0;border-radius:12px;background:#fff0f0;color:#c62828;font-size:14px;font-weight:720}.ugc-lite-remove-note{display:block;text-align:center;color:#8e8e93;font-size:11px;line-height:1.35;padding:7px 10px 2px}
   .ugc-lite-pages{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:10px 0 calc(24px + env(safe-area-inset-bottom))}
   .ugc-lite-pagebtn{min-height:44px;display:flex;align-items:center;justify-content:center;padding:0 14px;border-radius:12px;background:#fff;border:1px solid #e5e5ea;color:#6d28d9;text-decoration:none;font-size:14px;font-weight:700}.ugc-lite-pagebtn.next{background:#7c3aed;border-color:#7c3aed;color:#fff}
   .ugc-lite-pageinfo{text-align:center;color:#8e8e93;font-size:11px}.ugc-lite-pageinfo strong{display:block;color:#3a3a3c;font-size:13px}
@@ -126,6 +127,22 @@
       {% endif %}
 
       {% if submission.mobile_source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ submission.mobile_source_url }}" target="_blank" rel="noopener noreferrer">Instagram ↗</a></div>{% else %}{% with source_url=submission.metadata|ugc_source_url %}{% if source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Source ↗</a></div>{% endif %}{% endwith %}{% endif %}
+
+      {% if active_tab != 'removed' %}
+      <details class="ugc-lite-more">
+        <summary>••• More</summary>
+        <div class="ugc-lite-more-panel">
+          <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="remove">
+            <input type="hidden" name="note" value="Removed manually from mobile Community review.">
+            <input type="hidden" name="return_to" value="{{ request.get_full_path }}">
+            <button class="ugc-lite-remove" type="submit">Remove from Community</button>
+          </form>
+          <span class="ugc-lite-remove-note">Moves this item to Removed and preserves its source and moderation history.</span>
+        </div>
+      </details>
+      {% endif %}
     </div>
   </article>
   {% empty %}
