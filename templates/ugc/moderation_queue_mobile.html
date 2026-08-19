@@ -2,7 +2,6 @@
 {% load humanize common_extras %}
 
 {% block title %}Community · TN Social Studio{% endblock %}
-
 {% block page_header %}{% endblock %}
 
 {% block content %}
@@ -10,28 +9,35 @@
 @media (max-width:767px){
   .ugc-lite{margin:-.25rem -.5rem 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#1c1c1e}
   .ugc-lite-head{display:flex;align-items:center;justify-content:space-between;padding:10px 4px 12px}
-  .ugc-lite-title{display:flex;align-items:center;gap:9px;font-size:28px;line-height:1;font-weight:750;letter-spacing:-.03em}
+  .ugc-lite-title{display:flex;align-items:center;gap:9px;font-size:28px;line-height:1;font-weight:760;letter-spacing:-.035em}
   .ugc-lite-count{min-width:34px;height:30px;padding:0 9px;border-radius:999px;background:#fff1dc;color:#c2410c;display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
-  .ugc-lite-add{width:46px;height:46px;border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:30px;line-height:1;box-shadow:0 6px 18px rgba(124,58,237,.2)}
-  .ugc-lite-tabs{display:flex;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #e5e5ea;margin:0 -4px 14px;padding:0 4px}.ugc-lite-tabs::-webkit-scrollbar{display:none}
-  .ugc-lite-tab{flex:0 0 auto;padding:12px 14px 11px;text-decoration:none;color:#6e6e73;font-size:15px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}.ugc-lite-tab.active{color:#7c3aed;border-color:#7c3aed}
-  .ugc-lite-card{background:#fff;border-radius:18px;overflow:hidden;margin:0 0 14px;box-shadow:0 1px 3px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.04)}
-  .ugc-lite-media{width:100%;background:#000;display:block;aspect-ratio:4/3;object-fit:cover}
-  video.ugc-lite-media{aspect-ratio:9/12;max-height:62vh}
-  .ugc-lite-body{padding:14px 15px 15px}
+  .ugc-lite-add{width:44px;height:44px;border-radius:50%;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;font-size:29px;line-height:1;box-shadow:0 5px 16px rgba(124,58,237,.18)}
+  .ugc-lite-tabs{display:flex;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid #e5e5ea;margin:0 -4px 12px;padding:0 4px}.ugc-lite-tabs::-webkit-scrollbar{display:none}
+  .ugc-lite-tab{flex:0 0 auto;padding:11px 14px 10px;text-decoration:none;color:#6e6e73;font-size:15px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}.ugc-lite-tab.active{color:#7c3aed;border-color:#7c3aed}
+  .ugc-lite-tools{margin:0 0 12px;display:flex;flex-direction:column;gap:9px}
+  .ugc-lite-search{display:grid;grid-template-columns:1fr auto;gap:8px}
+  .ugc-lite-search input{min-width:0;height:44px;border:1px solid #e5e5ea;border-radius:13px;background:#fff;padding:0 13px;font-size:15px;color:#1c1c1e;outline:none}
+  .ugc-lite-search input:focus{border-color:#b69cf7;box-shadow:0 0 0 3px rgba(124,58,237,.08)}
+  .ugc-lite-search button{height:44px;border:0;border-radius:13px;background:#1c1c1e;color:#fff;padding:0 16px;font-size:14px;font-weight:700}
+  .ugc-lite-filterchips{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding-bottom:1px}.ugc-lite-filterchips::-webkit-scrollbar{display:none}
+  .ugc-lite-filterchip{flex:0 0 auto;min-height:34px;display:inline-flex;align-items:center;padding:0 12px;border-radius:999px;background:#f2f2f7;color:#636366;text-decoration:none;font-size:13px;font-weight:650}.ugc-lite-filterchip.active{background:#1c1c1e;color:#fff}
+  .ugc-lite-card{background:#fff;border-radius:20px;overflow:hidden;margin:0 0 14px;box-shadow:0 1px 3px rgba(0,0,0,.07),0 7px 22px rgba(0,0,0,.035)}
+  .ugc-lite-mediawrap{position:relative;background:#111}
+  .ugc-lite-media{width:100%;background:#111;display:block;aspect-ratio:4/3;object-fit:cover}
+  video.ugc-lite-media{aspect-ratio:9/12;max-height:60vh;background:#111}
+  .ugc-lite-reelbadge{position:absolute;right:11px;top:11px;z-index:2;display:inline-flex;align-items:center;gap:5px;height:30px;padding:0 10px;border-radius:999px;background:rgba(0,0,0,.68);color:#fff;font-size:12px;font-weight:700;pointer-events:none}
+  .ugc-lite-body{padding:13px 14px 14px}
   .ugc-lite-row{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
   .ugc-lite-pill{display:inline-flex;align-items:center;min-height:25px;padding:0 9px;border-radius:999px;background:#f2f2f7;color:#636366;font-size:12px;font-weight:650}
-  .ugc-lite-pill.violet{background:#f1eafe;color:#6d28d9}
-  .ugc-lite-name{font-size:19px;font-weight:730;letter-spacing:-.015em;margin:10px 0 2px}
+  .ugc-lite-pill.violet{background:#f1eafe;color:#6d28d9}.ugc-lite-pill.good{background:#e9f9ef;color:#08783e}.ugc-lite-pill.warn{background:#fff3e6;color:#b45309}
+  .ugc-lite-name{font-size:20px;font-weight:740;letter-spacing:-.02em;margin:9px 0 2px}
   .ugc-lite-creator{font-size:14px;color:#8e8e93}
-  .ugc-lite-caption{font-size:15px;line-height:1.45;color:#3a3a3c;margin:11px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-  .ugc-lite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:13px}
-  .ugc-lite-action{min-height:44px;border-radius:12px;border:1px solid #e5e5ea;background:#f2f2f7;color:#3a3a3c;font-size:13px;font-weight:700;text-align:center;padding:0 8px}
-  .ugc-lite-action.primary{background:#7c3aed;border-color:#7c3aed;color:#fff}
-  .ugc-lite-action.good{background:#e9f9ef;border-color:#c7eed5;color:#08783e}
-  .ugc-lite-action.bad{background:#fff0f0;border-color:#ffd3d3;color:#c62828}
-  .ugc-lite-source{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:13px;padding-top:12px;border-top:1px solid #f2f2f7;font-size:13px;color:#8e8e93}
-  .ugc-lite-source a{color:#7c3aed;text-decoration:none;font-weight:650}
+  .ugc-lite-metrics{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;color:#636366;font-size:13px}.ugc-lite-metric{display:inline-flex;align-items:center;gap:4px;background:#f7f7f9;border-radius:999px;padding:5px 9px}
+  .ugc-lite-caption{font-size:15px;line-height:1.43;color:#3a3a3c;margin:10px 0 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .ugc-lite-actions{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:13px}
+  .ugc-lite-actions form{min-width:0}.ugc-lite-action{width:100%;min-height:42px;border-radius:11px;border:1px solid #e5e5ea;background:#f2f2f7;color:#3a3a3c;font-size:12px;font-weight:720;text-align:center;padding:0 5px}.ugc-lite-action:disabled{opacity:.48}
+  .ugc-lite-action.primary{background:#7c3aed;border-color:#7c3aed;color:#fff}.ugc-lite-action.good{background:#e9f9ef;border-color:#c7eed5;color:#08783e}.ugc-lite-action.bad{background:#fff0f0;border-color:#ffd3d3;color:#c62828}
+  .ugc-lite-source{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px;padding-top:11px;border-top:1px solid #f2f2f7;font-size:13px;color:#8e8e93}.ugc-lite-source a{color:#7c3aed;text-decoration:none;font-weight:680}
   .ugc-lite-pages{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;padding:10px 0 calc(24px + env(safe-area-inset-bottom))}
   .ugc-lite-pagebtn{min-height:44px;display:flex;align-items:center;justify-content:center;padding:0 14px;border-radius:12px;background:#fff;border:1px solid #e5e5ea;color:#6d28d9;text-decoration:none;font-size:14px;font-weight:700}.ugc-lite-pagebtn.next{background:#7c3aed;border-color:#7c3aed;color:#fff}
   .ugc-lite-pageinfo{text-align:center;color:#8e8e93;font-size:11px}.ugc-lite-pageinfo strong{display:block;color:#3a3a3c;font-size:13px}
@@ -53,52 +59,84 @@
     <a class="ugc-lite-tab {% if active_tab == 'removed' %}active{% endif %}" href="?tab=removed">Removed {{ queue_counts.removed }}</a>
   </nav>
 
+  {% if active_tab == 'discovered' %}
+  <div class="ugc-lite-tools">
+    <form class="ugc-lite-search" method="get">
+      <input type="hidden" name="tab" value="{{ active_tab }}">
+      <input type="hidden" name="relevance" value="{{ ugc_mobile_relevance }}">
+      <input type="search" name="q" value="{{ ugc_mobile_search }}" placeholder="Search creator, caption, place…" aria-label="Search discovered content">
+      <button type="submit">Search</button>
+    </form>
+    <div class="ugc-lite-filterchips" aria-label="Relevance filters">
+      <a class="ugc-lite-filterchip {% if ugc_mobile_relevance == 'relevant' %}active{% endif %}" href="?tab=discovered&relevance=relevant{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">Relevant</a>
+      <a class="ugc-lite-filterchip {% if ugc_mobile_relevance == 'strong' %}active{% endif %}" href="?tab=discovered&relevance=strong{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">Strong</a>
+      <a class="ugc-lite-filterchip {% if ugc_mobile_relevance == 'possible' %}active{% endif %}" href="?tab=discovered&relevance=possible{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">Possible</a>
+      <a class="ugc-lite-filterchip {% if ugc_mobile_relevance == 'low' %}active{% endif %}" href="?tab=discovered&relevance=low{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">Low</a>
+      <a class="ugc-lite-filterchip {% if ugc_mobile_relevance == 'all' %}active{% endif %}" href="?tab=discovered&relevance=all{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">All</a>
+    </div>
+  </div>
+  {% endif %}
+
   {% for submission in submissions %}
   <article class="ugc-lite-card">
     {% if submission.media_asset %}
+      <div class="ugc-lite-mediawrap">
       {% if submission.media_asset.is_image %}
         <img class="ugc-lite-media" src="{{ submission.media_asset.file.url }}" alt="{{ submission.media_asset.alt_text|default:submission.title }}" loading="{% if forloop.first %}eager{% else %}lazy{% endif %}" decoding="async">
       {% elif submission.media_asset.is_video %}
-        <video class="ugc-lite-media" controls playsinline preload="none"><source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}"></video>
+        <video class="ugc-lite-media" controls playsinline preload="none"{% if submission.mobile_thumbnail_url %} poster="{{ submission.mobile_thumbnail_url }}"{% endif %}><source src="{{ submission.media_asset.file.url }}" type="{{ submission.media_asset.mime_type }}"></video>
+        <span class="ugc-lite-reelbadge">▶ Reel</span>
       {% endif %}
+      </div>
     {% endif %}
     <div class="ugc-lite-body">
       <div class="ugc-lite-row">
-        <span class="ugc-lite-pill">{{ submission.get_kind_display }}</span>
+        <span class="ugc-lite-pill">{% if submission.media_asset.is_video %}Reel{% else %}{{ submission.get_kind_display }}{% endif %}</span>
         <span class="ugc-lite-pill violet">{{ submission.metadata|ugc_source_label:submission.source }}</span>
+        {% if active_tab == 'discovered' %}
+          {% if submission.mobile_discovery_method %}<span class="ugc-lite-pill">{{ submission.mobile_discovery_method|title }}</span>{% endif %}
+          {% if submission.mobile_relevance_status == 'strong' %}<span class="ugc-lite-pill good">✓ Strong</span>{% elif submission.mobile_relevance_status == 'low' %}<span class="ugc-lite-pill warn">⚠ Low relevance</span>{% else %}<span class="ugc-lite-pill good">✓ Relevant</span>{% endif %}
+        {% endif %}
       </div>
       <div class="ugc-lite-name">{{ submission.title|default:submission.target_label|default:"Community content" }}</div>
       <div class="ugc-lite-creator">{% if submission.attribution == 'anonymous' %}Anonymous contributor{% elif submission.contributor_handle %}@{{ submission.contributor_handle }}{% elif submission.contributor_name %}{{ submission.contributor_name }}{% else %}Community contributor{% endif %} · {{ submission.submitted_at|naturaltime }}</div>
+
+      {% if submission.mobile_like_count != None or submission.mobile_comment_count != None or submission.mobile_view_count != None %}
+      <div class="ugc-lite-metrics">
+        {% if submission.mobile_like_count != None %}<span class="ugc-lite-metric">♥ {{ submission.mobile_like_count|intcomma }}</span>{% endif %}
+        {% if submission.mobile_comment_count != None %}<span class="ugc-lite-metric">💬 {{ submission.mobile_comment_count|intcomma }}</span>{% endif %}
+        {% if submission.mobile_view_count != None %}<span class="ugc-lite-metric">◉ {{ submission.mobile_view_count|intcomma }}</span>{% endif %}
+      </div>
+      {% endif %}
+
       {% if submission.body %}<p class="ugc-lite-caption">{{ submission.body }}</p>{% endif %}
 
       {% if active_tab == 'discovered' %}
         {% with permission_status=submission.metadata|ugc_permission_status %}
         <div class="ugc-lite-actions">
-          {% if permission_status != 'requested' %}
-          <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action" type="submit">Request</button></form>
-          {% else %}<button class="ugc-lite-action" type="button" disabled>Requested</button>{% endif %}
+          {% if permission_status != 'requested' %}<form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action" type="submit">Request</button></form>{% else %}<button class="ugc-lite-action" type="button" disabled>Requested</button>{% endif %}
           <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action good" type="submit">Granted</button></form>
-          {% if permission_status != 'declined' %}<form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action bad" type="submit">Decline</button></form>{% endif %}
+          {% if permission_status != 'declined' %}<form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action bad" type="submit">Decline</button></form>{% else %}<button class="ugc-lite-action bad" type="button" disabled>Declined</button>{% endif %}
         </div>
         {% endwith %}
       {% elif active_tab == 'pending' %}
-        <div class="ugc-lite-actions"><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action good" type="submit" {% if not submission.consent_confirmed %}disabled{% endif %}>Approve</button></form><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action bad" type="submit">Reject</button></form></div>
+        <div class="ugc-lite-actions" style="grid-template-columns:1fr 1fr"><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action good" type="submit" {% if not submission.consent_confirmed %}disabled{% endif %}>Approve</button></form><form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="ugc-lite-action bad" type="submit">Reject</button></form></div>
       {% elif active_tab == 'approved' %}
-        <div class="ugc-lite-actions"><form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="ugc-lite-action primary" type="submit">Use in post</button></form></div>
+        <div class="ugc-lite-actions" style="grid-template-columns:1fr"><form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="ugc-lite-action primary" type="submit">Use in post</button></form></div>
       {% endif %}
 
-      {% with source_url=submission.metadata|ugc_source_url %}{% if source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Instagram ↗</a></div>{% endif %}{% endwith %}
+      {% if submission.mobile_source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ submission.mobile_source_url }}" target="_blank" rel="noopener noreferrer">Instagram ↗</a></div>{% else %}{% with source_url=submission.metadata|ugc_source_url %}{% if source_url %}<div class="ugc-lite-source"><span>{{ submission.target_label|default:submission.target_type }}</span><a href="{{ source_url }}" target="_blank" rel="noopener noreferrer">Source ↗</a></div>{% endif %}{% endwith %}{% endif %}
     </div>
   </article>
   {% empty %}
-    <div class="ugc-lite-empty">No {{ active_tab }} community content.</div>
+    <div class="ugc-lite-empty">No {{ active_tab }} community content matches this view.</div>
   {% endfor %}
 
   {% if ugc_mobile_total_pages > 1 %}
   <nav class="ugc-lite-pages" aria-label="Community pages">
-    {% if ugc_mobile_prev_page %}<a class="ugc-lite-pagebtn" href="?tab={{ active_tab }}&page={{ ugc_mobile_prev_page }}{% if active_kind %}&kind={{ active_kind }}{% endif %}">‹ Previous</a>{% else %}<span></span>{% endif %}
+    {% if ugc_mobile_prev_page %}<a class="ugc-lite-pagebtn" href="?tab={{ active_tab }}&page={{ ugc_mobile_prev_page }}{% if active_kind %}&kind={{ active_kind }}{% endif %}{% if ugc_mobile_relevance %}&relevance={{ ugc_mobile_relevance }}{% endif %}{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">‹ Previous</a>{% else %}<span></span>{% endif %}
     <div class="ugc-lite-pageinfo"><strong>Page {{ ugc_mobile_page }} of {{ ugc_mobile_total_pages }}</strong>{{ ugc_mobile_total_items }} items</div>
-    {% if ugc_mobile_next_page %}<a class="ugc-lite-pagebtn next" href="?tab={{ active_tab }}&page={{ ugc_mobile_next_page }}{% if active_kind %}&kind={{ active_kind }}{% endif %}">Next ›</a>{% else %}<span></span>{% endif %}
+    {% if ugc_mobile_next_page %}<a class="ugc-lite-pagebtn next" href="?tab={{ active_tab }}&page={{ ugc_mobile_next_page }}{% if active_kind %}&kind={{ active_kind }}{% endif %}{% if ugc_mobile_relevance %}&relevance={{ ugc_mobile_relevance }}{% endif %}{% if ugc_mobile_search %}&q={{ ugc_mobile_search|urlencode }}{% endif %}">Next ›</a>{% else %}<span></span>{% endif %}
   </nav>
   {% endif %}
 </div>
