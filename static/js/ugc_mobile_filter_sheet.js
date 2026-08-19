@@ -23,7 +23,7 @@
             body.ugc-mobile-community .ugc-ios-filter-trigger.has-filters .ugc-ios-filter-count { display:inline-flex; }
             .ugc-ios-filter-backdrop {
                 position:fixed; inset:0; z-index:420; background:rgba(0,0,0,.28); opacity:0; pointer-events:none;
-                transition:opacity 180ms ease; backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px);
+                transition:opacity 180ms ease;
             }
             .ugc-ios-filter-backdrop.open { opacity:1; pointer-events:auto; }
             .ugc-ios-filter-sheet {
@@ -100,10 +100,6 @@
         document.dispatchEvent(new CustomEvent('ugc:filters-changed'));
     }
 
-    function selectedOption(control) {
-        return control && control.options ? control.options[control.selectedIndex] : null;
-    }
-
     function meaningful(control, config) {
         if (!control) return false;
         const value = String(control.value || '');
@@ -164,7 +160,6 @@
             const section = buildSection(config);
             if (section) scroll.appendChild(section);
         });
-
         const resetLabel = document.createElement('div');
         resetLabel.className = 'ugc-ios-filter-section-label';
         resetLabel.textContent = 'Options';
@@ -178,7 +173,6 @@
         resetRow.addEventListener('click', resetAll);
         resetGroup.appendChild(resetRow);
         scroll.appendChild(resetGroup);
-
         const note = document.createElement('div');
         note.className = 'ugc-ios-count-note';
         note.id = 'ugc-ios-filter-result-note';
@@ -203,7 +197,7 @@
         if (!note) return;
         const cards = Array.from(document.querySelectorAll('#ugc-card-grid .ugc-card'));
         const visible = cards.filter((card) => !card.classList.contains('hidden') && !card.classList.contains('ugc-relevance-hidden') && card.style.display !== 'none').length;
-        note.textContent = `${visible} item${visible === 1 ? '' : 's'} shown`;
+        note.textContent = `${visible} item${visible === 1 ? '' : 's'} currently loaded`;
     }
 
     function resetAll() {
@@ -235,7 +229,6 @@
     backdrop.addEventListener('click', close);
     sheet.querySelector('[data-action="done"]').addEventListener('click', close);
     sheet.querySelector('[data-action="reset"]').addEventListener('click', resetAll);
-
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape' && sheet.classList.contains('open')) close();
     });
@@ -258,4 +251,12 @@
     });
     observer.observe(panel, { childList:true, subtree:true });
     syncTrigger();
+
+    if (!document.querySelector('script[data-ugc-mobile-virtual-feed]')) {
+        const virtualFeed = document.createElement('script');
+        virtualFeed.src = '/static/js/ugc_mobile_virtual_feed.js';
+        virtualFeed.dataset.ugcMobileVirtualFeed = '1';
+        if (document.currentScript && document.currentScript.nonce) virtualFeed.nonce = document.currentScript.nonce;
+        document.head.appendChild(virtualFeed);
+    }
 })();
