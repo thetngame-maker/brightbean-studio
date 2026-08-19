@@ -18,6 +18,7 @@ app_name = "ugc"
 
 urlpatterns = [
     path("", ugc_mobile_queue_views.moderation_queue, name="moderation_queue"),
+    path("review/<uuid:submission_id>/", ugc_mobile_queue_views.mobile_review, name="mobile_review"),
     path("new/", ugc_intake_views.manual_submission_form, name="manual_submission_form"),
     path("new/create/", ugc_views.create_manual_submission_view, name="create_manual_submission"),
     path("discovered/searches/", ugc_discovery_search_views.discovery_searches, name="discovery_searches"),
