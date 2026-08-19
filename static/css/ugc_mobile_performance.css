@@ -1,0 +1,28 @@
+@media (max-width: 767px) {
+  body.ugc-mobile-community #ugc-card-grid .ugc-mobile-render-card {
+    content-visibility: auto;
+    contain-intrinsic-size: 620px;
+    contain: layout paint style;
+  }
+
+  body.ugc-mobile-community #ugc-card-grid .ugc-mobile-render-card img {
+    background: #f5f5f4;
+  }
+
+  body.ugc-mobile-community #ugc-card-grid .ugc-mobile-render-card video[preload="none"] {
+    background: linear-gradient(135deg, #171717, #262626);
+  }
+
+  /* The iOS feed does not need dashboard analytics running above the content. */
+  body.ugc-mobile-community #ugc-discovery-performance {
+    display: none !important;
+  }
+
+  /* Avoid expensive blur work during initial feed rendering. */
+  body.ugc-mobile-community #ugc-bulk-permission-form,
+  body.ugc-mobile-community .ugc-ios-backdrop,
+  body.ugc-mobile-community .ugc-ios-filter-backdrop {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
