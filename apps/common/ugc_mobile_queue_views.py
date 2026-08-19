@@ -13,6 +13,7 @@ from apps.members.decorators import require_permission
 
 from . import ugc_views
 from .models import UGCReport, UGCSubmission
+from .ugc_permissions import get_permission
 from .ugc_provenance import get_provenance
 from .ugc_relevance import score_relevance
 from .ugc_views import (
@@ -28,6 +29,7 @@ MOBILE_PAGE_SIZE = 12
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
 VALID_MEDIA = {"all", "reels", "photos"}
 VALID_SORT = {"newest", "engaged", "liked", "viewed"}
+VALID_PERMISSION = {"all", "not_contacted", "requested", "granted", "declined"}
 
 
 def _is_mobile_request(request):
@@ -77,6 +79,7 @@ def _decorate_submission(submission):
     submission.mobile_view_count = discovery.get("view_count")
     submission.mobile_thumbnail_url = discovery.get("thumbnail_url") or ""
     submission.mobile_source_url = provenance.get("source_url") or ""
+    submission.mobile_permission_status = get_permission(metadata).get("status") or "not_contacted"
 
     stored_media_type = str(discovery.get("media_type") or "").strip().lower()
     if submission.media_asset and submission.media_asset.is_video:
@@ -116,6 +119,12 @@ def _matches_media(submission, media_filter):
     if media_filter == "photos":
         return media_type == "image"
     return True
+
+
+def _matches_permission(submission, permission_filter):
+    if permission_filter == "all":
+        return True
+    return getattr(submission, "mobile_permission_status", "not_contacted") == permission_filter
 
 
 def _sort_mobile(submissions, sort_mode):
@@ -204,6 +213,10 @@ def moderation_queue(request, workspace_id):
     if sort_mode not in VALID_SORT:
         sort_mode = "newest"
 
+    permission_filter = (request.GET.get("permission") or "all").strip().lower()
+    if permission_filter not in VALID_PERMISSION:
+        permission_filter = "all"
+
     # Mobile queues are intentionally small (currently hundreds, not millions),
     # so score/filter/sort before slicing. This keeps the iPhone path entirely
     # server-rendered and avoids the intelligence/hydration bundle that caused
@@ -211,6 +224,7 @@ def moderation_queue(request, workspace_id):
     decorated = [_decorate_submission(submission) for submission in qs[:500]]
     if tab == "discovered":
         decorated = [submission for submission in decorated if _matches_relevance(submission, relevance_filter)]
+        decorated = [submission for submission in decorated if _matches_permission(submission, permission_filter)]
     decorated = [submission for submission in decorated if _matches_media(submission, media_filter)]
     decorated = _sort_mobile(decorated, sort_mode)
 
@@ -236,6 +250,7 @@ def moderation_queue(request, workspace_id):
         "ugc_mobile_relevance": relevance_filter,
         "ugc_mobile_media": media_filter,
         "ugc_mobile_sort": sort_mode,
+        "ugc_mobile_permission": permission_filter,
     }
     response = render(request, "ugc/moderation_queue_mobile.html", context)
     response["X-UGC-Mobile-Lite"] = "1"
