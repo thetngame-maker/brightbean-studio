@@ -26,6 +26,8 @@ from .ugc_views import (
 
 MOBILE_PAGE_SIZE = 12
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
+VALID_MEDIA = {"all", "reels", "photos"}
+VALID_SORT = {"newest", "engaged", "liked", "viewed"}
 
 
 def _is_mobile_request(request):
@@ -38,6 +40,19 @@ def _positive_page(raw):
         return max(1, int(raw or 1))
     except (TypeError, ValueError):
         return 1
+
+
+def _metric(value):
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str):
+        try:
+            return max(0, int(value.replace(",", "").strip()))
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 def _decorate_submission(submission):
@@ -62,6 +77,24 @@ def _decorate_submission(submission):
     submission.mobile_view_count = discovery.get("view_count")
     submission.mobile_thumbnail_url = discovery.get("thumbnail_url") or ""
     submission.mobile_source_url = provenance.get("source_url") or ""
+
+    stored_media_type = str(discovery.get("media_type") or "").strip().lower()
+    if submission.media_asset and submission.media_asset.is_video:
+        submission.mobile_media_type = "video"
+    elif submission.media_asset and submission.media_asset.is_image:
+        submission.mobile_media_type = "image"
+    elif stored_media_type in {"video", "image"}:
+        submission.mobile_media_type = stored_media_type
+    else:
+        submission.mobile_media_type = ""
+
+    likes = _metric(submission.mobile_like_count)
+    comments = _metric(submission.mobile_comment_count)
+    views = _metric(submission.mobile_view_count)
+    # Comments represent stronger intent than a like, while views are useful but
+    # much higher-volume. This mirrors the mobile review goal: surface posts that
+    # are both seen and actively engaged with without letting raw views dominate.
+    submission.mobile_engagement_score = likes + (comments * 10) + (views / 100)
     return submission
 
 
@@ -72,6 +105,39 @@ def _matches_relevance(submission, relevance_filter):
     if relevance_filter == "relevant":
         return status != "low"
     return status == relevance_filter
+
+
+def _matches_media(submission, media_filter):
+    if media_filter == "all":
+        return True
+    media_type = getattr(submission, "mobile_media_type", "")
+    if media_filter == "reels":
+        return media_type == "video"
+    if media_filter == "photos":
+        return media_type == "image"
+    return True
+
+
+def _sort_mobile(submissions, sort_mode):
+    if sort_mode == "liked":
+        return sorted(
+            submissions,
+            key=lambda item: (_metric(getattr(item, "mobile_like_count", 0)), item.submitted_at),
+            reverse=True,
+        )
+    if sort_mode == "viewed":
+        return sorted(
+            submissions,
+            key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at),
+            reverse=True,
+        )
+    if sort_mode == "engaged":
+        return sorted(
+            submissions,
+            key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at),
+            reverse=True,
+        )
+    return sorted(submissions, key=lambda item: item.submitted_at, reverse=True)
 
 
 @login_required
@@ -130,13 +196,23 @@ def moderation_queue(request, workspace_id):
     if relevance_filter not in VALID_RELEVANCE:
         relevance_filter = "relevant"
 
+    media_filter = (request.GET.get("media") or "all").strip().lower()
+    if media_filter not in VALID_MEDIA:
+        media_filter = "all"
+
+    sort_mode = (request.GET.get("sort") or "newest").strip().lower()
+    if sort_mode not in VALID_SORT:
+        sort_mode = "newest"
+
     # Mobile queues are intentionally small (currently hundreds, not millions),
-    # so score relevance before slicing. This keeps the iPhone path entirely
+    # so score/filter/sort before slicing. This keeps the iPhone path entirely
     # server-rendered and avoids the intelligence/hydration bundle that caused
     # Safari stalls.
     decorated = [_decorate_submission(submission) for submission in qs[:500]]
     if tab == "discovered":
         decorated = [submission for submission in decorated if _matches_relevance(submission, relevance_filter)]
+    decorated = [submission for submission in decorated if _matches_media(submission, media_filter)]
+    decorated = _sort_mobile(decorated, sort_mode)
 
     total_items = len(decorated)
     total_pages = max(1, (total_items + MOBILE_PAGE_SIZE - 1) // MOBILE_PAGE_SIZE)
@@ -158,6 +234,8 @@ def moderation_queue(request, workspace_id):
         "ugc_mobile_next_page": page + 1 if page < total_pages else None,
         "ugc_mobile_search": search_query,
         "ugc_mobile_relevance": relevance_filter,
+        "ugc_mobile_media": media_filter,
+        "ugc_mobile_sort": sort_mode,
     }
     response = render(request, "ugc/moderation_queue_mobile.html", context)
     response["X-UGC-Mobile-Lite"] = "1"
