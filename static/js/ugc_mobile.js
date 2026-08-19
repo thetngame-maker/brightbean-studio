@@ -2,6 +2,16 @@
     function text(node) { return (node && node.textContent || '').trim(); }
     function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 
+    function loadRelevanceFilter() {
+        if (document.querySelector('script[data-ugc-relevance]')) return;
+        const script = document.createElement('script');
+        script.src = '/static/js/ugc_discovered_relevance.js';
+        script.dataset.ugcRelevance = '1';
+        const current = document.currentScript;
+        if (current && current.nonce) script.nonce = current.nonce;
+        document.head.appendChild(script);
+    }
+
     function loadMobileCardCleanup() {
         if (!document.body.classList.contains('ugc-mobile-community')) return;
         if (document.querySelector('script[data-ugc-mobile-cards]')) return;
@@ -80,6 +90,7 @@
         const heading = Array.from(document.querySelectorAll('h1')).find((node) => text(node) === 'Community Content');
         if (!heading) return false;
         document.body.classList.add('ugc-mobile-community');
+        loadRelevanceFilter();
 
         const headerRoot = heading.closest('.flex.flex-col.gap-4');
         if (headerRoot) headerRoot.classList.add('ugc-mobile-page-header');
