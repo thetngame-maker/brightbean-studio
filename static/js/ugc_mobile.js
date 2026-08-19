@@ -34,6 +34,17 @@
         document.head.appendChild(script);
     }
 
+    function loadMobilePagination() {
+        if (!document.body.classList.contains('ugc-mobile-community') || !isMobile()) return;
+        if (document.querySelector('script[data-ugc-mobile-pagination]')) return;
+        const script = document.createElement('script');
+        script.src = '/static/js/ugc_mobile_pagination.js';
+        script.dataset.ugcMobilePagination = '1';
+        const current = document.currentScript;
+        if (current && current.nonce) script.nonce = current.nonce;
+        document.head.appendChild(script);
+    }
+
     function setupMobileBulkToolbar() {
         if (!document.body.classList.contains('ugc-mobile-community')) return;
 
@@ -123,6 +134,7 @@
         if (!controlsWrap || !filterPanel) {
             setupMobileBulkToolbar();
             loadMobileCardCleanup();
+            window.setTimeout(loadMobilePagination, 100);
             return true;
         }
         filterPanel.classList.add('ugc-mobile-filter-panel');
@@ -179,6 +191,7 @@
         setupMobileBulkToolbar();
         loadMobileCardCleanup();
         window.setTimeout(loadMobileFilterSheet, 60);
+        window.setTimeout(loadMobilePagination, 120);
         return true;
     }
 
