@@ -22,6 +22,7 @@ from .ugc_discovery_providers import (
 from .ugc_discovery_search_views import _clean_searches, _schedule_state
 from .ugc_keyword_discovery import fetch_apify_keyword_results
 from .ugc_location_fallback import deep_location_fallback
+from .ugc_relevance import tag_relevance
 from .ugc_remote_media import repair_workspace_discovered_media
 
 logger = logging.getLogger(__name__)
@@ -38,21 +39,17 @@ def _find_search(searches, search_id):
 
 
 def _claim_search(workspace_id, search_id, *, force=False):
-    """Atomically claim one saved search and return a snapshot to execute."""
     with transaction.atomic():
         workspace = Workspace.objects.select_for_update().get(id=workspace_id)
         searches = _clean_searches(workspace.discovery_searches)
         item = _find_search(searches, search_id)
-        if not item:
-            return None
-        if not item.get("target_type") or not item.get("target_id"):
+        if not item or not item.get("target_type") or not item.get("target_id"):
             return None
 
         now = timezone.now()
         started_raw = item.get("last_started_at") or ""
         if item.get("last_run_status") == "running" and started_raw:
             from django.utils.dateparse import parse_datetime
-
             started = parse_datetime(started_raw)
             if started is not None:
                 if timezone.is_naive(started):
@@ -108,7 +105,6 @@ def _location_provider_label(provider: str, diagnostics: dict | None) -> str:
 
 
 def _previous_keyword_depth(claimed: dict) -> int:
-    """Recover durable depth from the provider label preserved by saved searches."""
     provider_label = str(claimed.get("last_provider") or "")
     marker = "depth"
     if marker not in provider_label:
@@ -133,7 +129,6 @@ def _next_keyword_depth(claimed: dict) -> int:
 
 
 def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool) -> tuple[dict, int, bool, int]:
-    """Return provider request, target-new count, fill mode, and scan depth."""
     target = max(1, min(100, int(claimed.get("result_limit") or 25)))
     search_type = str(claimed.get("search_type") or "").lower()
     fill_mode = provider != "mock" and not test_mode and search_type in {"keyword", "hashtag"}
@@ -151,7 +146,6 @@ def _provider_request_for_fill(claimed: dict, *, provider: str, test_mode: bool)
 
 
 def _tag_discovery_method(rows, search_type: str):
-    """Persist how a provider row was discovered independent of provider actor."""
     method = str(search_type or "").strip().lower()
     if method not in {"keyword", "hashtag", "location", "account"}:
         method = ""
@@ -176,7 +170,6 @@ def _keyword_source_counts(rows) -> dict[str, int]:
 
 @background(schedule=0)
 def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
-    """Execute one saved search on the shared Railway background worker."""
     claimed = _claim_search(workspace_id, search_id, force=bool(test_mode or force_run))
     if not claimed:
         return
@@ -186,6 +179,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
     fill_stats = {}
     progressive_depth = 0
     keyword_sources = {"keyword_posts": 0, "popular_reels": 0, "keyword_fallback": 0}
+    relevance_rejected = 0
     try:
         provider_request, target_new, fill_mode, progressive_depth = _provider_request_for_fill(
             claimed,
@@ -209,15 +203,20 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             fill_mode = True
 
         if not rows and provider == "apify" and search_type == "location":
-            rows, diagnostics = deep_location_fallback(
-                claimed,
-                int(claimed.get("result_limit") or 25),
-            )
+            rows, diagnostics = deep_location_fallback(claimed, int(claimed.get("result_limit") or 25))
 
         rows = _tag_discovery_method(rows, search_type)
+        if search_type == "keyword" and not test_mode:
+            rows = tag_relevance(
+                rows,
+                query=str(claimed.get("query") or ""),
+                target_label=str(claimed.get("target_label") or claimed.get("name") or ""),
+            )
+            relevance_rejected = sum(1 for row in rows if isinstance(row, dict) and row.get("relevance_status") == "low")
+            rows = [row for row in rows if not isinstance(row, dict) or row.get("relevance_status") != "low"]
 
         workspace = Workspace.objects.get(id=workspace_id)
-        provider_scanned_count = len(rows)
+        provider_scanned_count = len(rows) + relevance_rejected
         if fill_mode:
             selected_rows, fill_stats = select_rows_for_new_target(
                 workspace_id=workspace.id,
@@ -237,6 +236,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             default_target_url=claimed.get("target_url", ""),
         )
         summary["provider_scanned_count"] = provider_scanned_count
+        summary["relevance_rejected_count"] = relevance_rejected
         if fill_mode:
             summary["fill_target"] = target_new
             summary["fill_selected_new"] = int(fill_stats.get("selected_new_count") or 0)
@@ -266,6 +266,7 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 "duplicate_count": summary["duplicate_count"],
                 "invalid_count": summary["invalid_count"],
                 "provider_scanned_count": provider_scanned_count,
+                "relevance_rejected_count": relevance_rejected,
                 "progressive_scan_depth": progressive_depth if search_type == "keyword" else 0,
                 "keyword_source_counts": keyword_sources if search_type == "keyword" else {},
                 "fill_mode": bool(fill_mode),
@@ -284,7 +285,6 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
 
 @background(schedule=0)
 def run_due_discovery_searches():
-    """Queue due searches and repair discovered thumbnails on active workspaces."""
     if not live_provider_ready():
         return
 
