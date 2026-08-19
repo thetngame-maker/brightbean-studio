@@ -6,7 +6,10 @@
     if (!grid || grid.dataset.virtualFeedReady === '1') return;
 
     const cards = Array.from(grid.querySelectorAll('.ugc-card'));
-    if (cards.length <= 12) return;
+    /* Server-side mobile paging now sends 16 cards. Do not virtualize an
+       already-small page; virtualization remains as a fallback for older or
+       non-paged responses. */
+    if (cards.length <= 20) return;
 
     grid.dataset.virtualFeedReady = '1';
     const BATCH_SIZE = 12;
@@ -101,7 +104,5 @@
         if (event.key === 'Enter') window.setTimeout(scheduleReset, 0);
     });
 
-    /* Give the existing filter/relevance modules time to capture the full card list,
-       then reduce the live DOM to one small mobile batch. */
     window.setTimeout(resetWindow, 350);
 })();
