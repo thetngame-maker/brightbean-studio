@@ -396,6 +396,13 @@ def _queue_query(params, *, page=None):
     return urlencode(values)
 
 
+def _review_url(workspace, submission, params, return_to):
+    url = reverse("ugc:mobile_review", kwargs={"workspace_id": workspace.id, "submission_id": submission.id})
+    query = _queue_query(params)
+    encoded_return = urlencode({"x": return_to})[2:]
+    return f"{url}?{query}&return_to={encoded_return}"
+
+
 @login_required
 @require_permission("manage_workspace_settings")
 def moderation_queue(request, workspace_id):
@@ -413,6 +420,11 @@ def moderation_queue(request, workspace_id):
     page = min(_positive_page(request.GET.get("page")), total_pages)
     start = (page - 1) * MOBILE_PAGE_SIZE
     submissions = decorated[start : start + MOBILE_PAGE_SIZE]
+    params = {"tab": tab, **filters}
+    queue_url = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id})
+    current_return_to = f"{queue_url}?{_queue_query(params, page=page if page > 1 else None)}"
+    today_session = tab == "discovered" and filters["permission"] == "today"
+    start_review_url = _review_url(workspace, decorated[0], params, current_return_to) if today_session and decorated else ""
 
     context = {
         "workspace": workspace,
@@ -432,6 +444,8 @@ def moderation_queue(request, workspace_id):
         "ugc_mobile_media": filters["media"],
         "ugc_mobile_sort": filters["sort"],
         "ugc_mobile_permission": filters["permission"],
+        "ugc_mobile_today_session": today_session,
+        "ugc_mobile_start_review_url": start_review_url,
     }
     response = render(request, "ugc/moderation_queue_mobile.html", context)
     response["X-UGC-Mobile-Lite"] = "1"
@@ -464,11 +478,11 @@ def mobile_review(request, workspace_id, submission_id):
     review_query = _queue_query(params)
 
     if next_item:
-        action_return_to = reverse("ugc:mobile_review", kwargs={"workspace_id": workspace.id, "submission_id": next_item.id})
-        action_return_to = f"{action_return_to}?{review_query}&return_to={urlencode({'x': return_to})[2:]}"
+        action_return_to = _review_url(workspace, next_item, params, return_to)
     else:
         action_return_to = return_to
 
+    today_session = tab == "discovered" and filters["permission"] == "today"
     context = {
         "workspace": workspace,
         "submission": submission,
@@ -477,6 +491,9 @@ def mobile_review(request, workspace_id, submission_id):
         "ugc_mobile_workflow_counts": workflow_counts,
         "review_index": index + 1,
         "review_total": len(decorated),
+        "review_remaining": max(0, len(decorated) - index),
+        "review_session_label": "Today" if today_session else "Review",
+        "review_is_today": today_session,
         "review_prev": prev_item,
         "review_next": next_item,
         "review_query": review_query,
