@@ -15,7 +15,7 @@
   .review-nav{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:3px 1px 8px;position:sticky;top:0;z-index:12;background:rgba(248,248,250,.96);backdrop-filter:saturate(180%) blur(16px)}
   .review-done,.review-step{min-height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;text-decoration:none;font-size:12px;font-weight:720}
   .review-done{padding:0 9px;color:#6d28d9;background:#fff;border:1px solid #e5e5ea}.review-step{width:36px;color:#6d28d9;background:#fff;border:1px solid #e5e5ea}.review-step.disabled{color:#c7c7cc;background:#f2f2f7}
-  .review-title{text-align:center;min-width:0}.review-title strong{display:block;font-size:14px}.review-title span{display:block;color:#8e8e93;font-size:10px;margin-top:1px}
+  .review-title{text-align:center;min-width:0}.review-title strong{display:block;font-size:14px}.review-title span{display:block;color:#8e8e93;font-size:10px;margin-top:1px}.review-progress{height:3px;max-width:105px;margin:4px auto 0;border-radius:999px;background:#e5e5ea;overflow:hidden}.review-progress>i{display:block;height:100%;width:0;background:#7c3aed;border-radius:999px;transition:width .2s ease}
   .review-media{background:#111;border-radius:18px;overflow:hidden;position:relative}.review-media img,.review-media video{display:block;width:100%;max-height:68vh;object-fit:contain;background:#111}.review-media video{aspect-ratio:9/12}
   .review-body{background:#fff;border-radius:18px;margin-top:9px;padding:13px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .review-pills{display:flex;flex-wrap:wrap;gap:6px}.review-pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#f2f2f7;color:#636366;font-size:11px;font-weight:650}.review-pill.violet{background:#f1eafe;color:#6d28d9}.review-pill.good{background:#e9f9ef;color:#08783e}.review-pill.warn{background:#fff3e6;color:#b45309}
@@ -32,10 +32,13 @@
 }
 </style>
 
-<div class="review-lite">
+<div class="review-lite" data-today-session="{% if review_is_today %}1{% else %}0{% endif %}" data-remaining="{{ review_total }}">
   <div class="review-nav">
-    <a class="review-done" href="{{ review_return_to }}">Done</a>
-    <div class="review-title"><strong>Review</strong><span>{{ review_index }} of {{ review_total }}</span></div>
+    <a class="review-done" href="{{ review_return_to }}" data-end-review-session>Done</a>
+    <div class="review-title">
+      <strong>{% if review_is_today %}Today Review{% else %}Review{% endif %}</strong>
+      {% if review_is_today %}<span><b data-session-done>0</b> completed · {{ review_total }} remaining</span><div class="review-progress"><i data-session-progress></i></div>{% else %}<span>{{ review_index }} of {{ review_total }}</span>{% endif %}
+    </div>
     <div style="display:flex;gap:5px;justify-content:flex-end">
       {% if review_prev %}<a class="review-step" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_prev.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}" aria-label="Previous">‹</a>{% else %}<span class="review-step disabled">‹</span>{% endif %}
       {% if review_next %}<a class="review-step" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}" aria-label="Next">›</a>{% else %}<span class="review-step disabled">›</span>{% endif %}
@@ -85,12 +88,12 @@
     <div class="review-actions">
       {% if submission.mobile_permission_status == 'not_contacted' %}
         <button class="review-action review-copy" type="button" data-copy-text="{{ submission.mobile_permission_message|escape }}">Copy request</button>
-        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark sent</button></form>
-        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
+        <form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="requested"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark sent</button></form>
+        <form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
       {% elif submission.mobile_permission_status == 'requested' %}
         <button class="review-action review-copy" type="button" data-copy-text="{{ submission.mobile_followup_message|escape }}">Copy follow-up</button>
-        <form method="post" action="{% url 'ugc:log_followup' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark follow-up</button></form>
-        <form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
+        <form class="review-complete-action" method="post" action="{% url 'ugc:log_followup' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action primary" type="submit">Mark follow-up</button></form>
+        <form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action good" type="submit">Granted</button></form>
       {% elif submission.mobile_permission_status == 'granted' %}<div class="review-state good">✓ Permission granted</div>
       {% elif submission.mobile_permission_status == 'declined' %}<div class="review-state bad">Permission declined</div>{% endif %}
     </div>
@@ -105,14 +108,14 @@
         <div class="review-info">Discovery<strong>{{ submission.mobile_discovery_method|default:"—"|title }}</strong></div>
         {% if submission.mobile_permission_status == 'requested' %}<div class="review-info">Follow-ups<strong>{{ submission.mobile_followup_count }}</strong></div><div class="review-info">Next follow-up<strong>{{ submission.mobile_followup_label }}</strong></div>{% endif %}
       </div>
-      {% if submission.mobile_permission_status != 'declined' %}<form method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action bad" type="submit">Decline permission</button></form>{% endif %}
-      <form class="review-danger" method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="note" value="Removed manually from focused mobile review."><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">Remove from Community</button></form>
+      {% if submission.mobile_permission_status != 'declined' %}<form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="declined"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button class="review-action bad" type="submit">Decline permission</button></form>{% endif %}
+      <form class="review-danger review-complete-action" method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="note" value="Removed manually from focused mobile review."><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">Remove from Community</button></form>
     </details>
   </section>
 
   <nav class="review-bottom" aria-label="Review navigation">
     {% if review_prev %}<a href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_prev.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">‹ Previous</a>{% else %}<span></span>{% endif %}
-    {% if review_next %}<a class="next" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">Next ›</a>{% else %}<a class="next" href="{{ review_return_to }}">Done</a>{% endif %}
+    {% if review_next %}<a class="next" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">{% if review_is_today %}Skip ›{% else %}Next ›{% endif %}</a>{% else %}<a class="next" href="{{ review_return_to }}" data-end-review-session>Done</a>{% endif %}
   </nav>
 </div>
 {% endblock %}
@@ -120,6 +123,24 @@
 {% block extra_js %}
 {{ block.super }}
 <script nonce="{{ request.csp_nonce }}">
-(function(){async function copyText(text){if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}var t=document.createElement('textarea');t.value=text;t.setAttribute('readonly','');t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();var ok=document.execCommand('copy');t.remove();if(!ok)throw new Error('copy');}document.querySelectorAll('.review-copy').forEach(function(b){b.addEventListener('click',async function(){var original=b.textContent;try{await copyText(b.dataset.copyText||'');b.textContent='Copied ✓';b.classList.add('good');}catch(e){b.textContent='Copy failed';}setTimeout(function(){b.textContent=original;b.classList.remove('good');},1500);});});})();
+(function(){
+  async function copyText(text){if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return;}var t=document.createElement('textarea');t.value=text;t.setAttribute('readonly','');t.style.position='fixed';t.style.opacity='0';document.body.appendChild(t);t.select();var ok=document.execCommand('copy');t.remove();if(!ok)throw new Error('copy');}
+  document.querySelectorAll('.review-copy').forEach(function(b){b.addEventListener('click',async function(){var original=b.textContent;try{await copyText(b.dataset.copyText||'');b.textContent='Copied ✓';b.classList.add('good');}catch(e){b.textContent='Copy failed';}setTimeout(function(){b.textContent=original;b.classList.remove('good');},1500);});});
+
+  var root=document.querySelector('.review-lite');
+  if(!root||root.dataset.todaySession!=='1')return;
+  var key='tnstudio-today-review-session';
+  var state;
+  try{state=JSON.parse(sessionStorage.getItem(key)||'null');}catch(e){state=null;}
+  var remaining=parseInt(root.dataset.remaining||'0',10)||0;
+  if(!state||typeof state.completed!=='number'||typeof state.startedTotal!=='number'||state.startedTotal<remaining){state={completed:0,startedTotal:remaining};sessionStorage.setItem(key,JSON.stringify(state));}
+  function paint(){
+    var done=document.querySelector('[data-session-done]');if(done)done.textContent=state.completed;
+    var bar=document.querySelector('[data-session-progress]');if(bar){var total=Math.max(1,state.startedTotal);bar.style.width=Math.min(100,Math.max(0,(state.completed/total)*100))+'%';}
+  }
+  paint();
+  document.querySelectorAll('form.review-complete-action').forEach(function(f){f.addEventListener('submit',function(){state.completed+=1;sessionStorage.setItem(key,JSON.stringify(state));});});
+  document.querySelectorAll('[data-end-review-session]').forEach(function(a){a.addEventListener('click',function(){sessionStorage.removeItem(key);});});
+})();
 </script>
 {% endblock %}
