@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -379,7 +379,7 @@ def _filtered_queue(request, workspace, tab):
     }, workflow_counts
 
 
-def _queue_query(params, *, page=None):
+def _queue_query(params, *, page=None, list_mode=False):
     values = {
         "tab": params.get("tab", "discovered"),
         "relevance": params.get("relevance", "relevant"),
@@ -393,6 +393,8 @@ def _queue_query(params, *, page=None):
         values["q"] = params["search"]
     if page:
         values["page"] = page
+    if list_mode:
+        values["list"] = "1"
     return urlencode(values)
 
 
@@ -415,15 +417,22 @@ def moderation_queue(request, workspace_id):
         tab = "pending"
 
     decorated, filters, workflow_counts = _filtered_queue(request, workspace, tab)
+    params = {"tab": tab, **filters}
+    queue_url = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id})
+    today_session = tab == "discovered" and filters["permission"] == "today"
+
+    # Today is an action-oriented queue: tapping its quick view starts focused review.
+    # `list=1` is reserved for Done/back navigation so it never loops back into review.
+    if today_session and decorated and request.GET.get("list") != "1" and not request.GET.get("page"):
+        return_to = f"{queue_url}?{_queue_query(params, list_mode=True)}"
+        return redirect(_review_url(workspace, decorated[0], params, return_to))
+
     total_items = len(decorated)
     total_pages = max(1, (total_items + MOBILE_PAGE_SIZE - 1) // MOBILE_PAGE_SIZE)
     page = min(_positive_page(request.GET.get("page")), total_pages)
     start = (page - 1) * MOBILE_PAGE_SIZE
     submissions = decorated[start : start + MOBILE_PAGE_SIZE]
-    params = {"tab": tab, **filters}
-    queue_url = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id})
-    current_return_to = f"{queue_url}?{_queue_query(params, page=page if page > 1 else None)}"
-    today_session = tab == "discovered" and filters["permission"] == "today"
+    current_return_to = f"{queue_url}?{_queue_query(params, page=page if page > 1 else None, list_mode=today_session)}"
     start_review_url = _review_url(workspace, decorated[0], params, current_return_to) if today_session and decorated else ""
 
     context = {
@@ -469,9 +478,11 @@ def mobile_review(request, workspace_id, submission_id):
     submission = decorated[index]
     params = {"tab": tab, **filters}
     queue_url = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id})
-    return_to = request.GET.get("return_to") or f"{queue_url}?{_queue_query(params)}"
+    today_session = tab == "discovered" and filters["permission"] == "today"
+    default_return = f"{queue_url}?{_queue_query(params, list_mode=today_session)}"
+    return_to = request.GET.get("return_to") or default_return
     if not return_to.startswith("/"):
-        return_to = f"{queue_url}?{_queue_query(params)}"
+        return_to = default_return
 
     prev_item = decorated[index - 1] if index > 0 else None
     next_item = decorated[index + 1] if index + 1 < len(decorated) else None
@@ -482,7 +493,6 @@ def mobile_review(request, workspace_id, submission_id):
     else:
         action_return_to = return_to
 
-    today_session = tab == "discovered" and filters["permission"] == "today"
     context = {
         "workspace": workspace,
         "submission": submission,
