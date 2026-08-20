@@ -37,8 +37,8 @@ MOBILE_PAGE_SIZE = 12
 FOLLOWUP_AFTER_DAYS = 3
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
 VALID_MEDIA = {"all", "reels", "photos"}
-VALID_SORT = {"newest", "engaged", "liked", "viewed", "followup"}
-VALID_PERMISSION = {"all", "not_contacted", "requested", "followup_due", "granted", "declined"}
+VALID_SORT = {"newest", "engaged", "liked", "viewed", "followup", "today"}
+VALID_PERMISSION = {"all", "not_contacted", "requested", "followup_due", "today", "granted", "declined"}
 
 
 def _is_mobile_request(request):
@@ -196,6 +196,53 @@ def _decorate_submission(submission):
     return submission
 
 
+def _is_top_prospect(submission):
+    return (
+        getattr(submission, "mobile_relevance_status", "possible") == "strong"
+        and getattr(submission, "mobile_media_type", "") == "video"
+        and getattr(submission, "mobile_permission_status", "not_contacted") == "not_contacted"
+    )
+
+
+def _is_followup_due(submission):
+    return (
+        getattr(submission, "mobile_permission_status", "not_contacted") == "requested"
+        and bool(getattr(submission, "mobile_followup_due", False))
+    )
+
+
+def _workflow_counts(submissions):
+    counts = {
+        "today": 0,
+        "top_prospects": 0,
+        "needs_outreach": 0,
+        "waiting_reply": 0,
+        "followup_due": 0,
+        "granted": 0,
+        "low_relevance": 0,
+    }
+    for item in submissions:
+        relevance = getattr(item, "mobile_relevance_status", "possible")
+        permission = getattr(item, "mobile_permission_status", "not_contacted")
+        top = _is_top_prospect(item)
+        due = _is_followup_due(item)
+        if top:
+            counts["top_prospects"] += 1
+        if relevance != "low" and permission == "not_contacted":
+            counts["needs_outreach"] += 1
+        if permission == "requested":
+            counts["waiting_reply"] += 1
+        if due:
+            counts["followup_due"] += 1
+        if relevance != "low" and permission == "granted":
+            counts["granted"] += 1
+        if relevance == "low":
+            counts["low_relevance"] += 1
+        if top or due:
+            counts["today"] += 1
+    return counts
+
+
 def _matches_relevance(submission, relevance_filter):
     status = getattr(submission, "mobile_relevance_status", "possible")
     if relevance_filter == "all":
@@ -220,10 +267,9 @@ def _matches_permission(submission, permission_filter):
     if permission_filter == "all":
         return True
     if permission_filter == "followup_due":
-        return (
-            getattr(submission, "mobile_permission_status", "not_contacted") == "requested"
-            and bool(getattr(submission, "mobile_followup_due", False))
-        )
+        return _is_followup_due(submission)
+    if permission_filter == "today":
+        return _is_followup_due(submission) or _is_top_prospect(submission)
     return getattr(submission, "mobile_permission_status", "not_contacted") == permission_filter
 
 
@@ -242,6 +288,19 @@ def _sort_mobile(submissions, sort_mode):
                 getattr(item, "mobile_followup_due_at", None).timestamp()
                 if getattr(item, "mobile_followup_due_at", None)
                 else float("inf"),
+            ),
+        )
+    if sort_mode == "today":
+        return sorted(
+            submissions,
+            key=lambda item: (
+                0 if _is_followup_due(item) else 1,
+                (
+                    getattr(item, "mobile_followup_due_at", None).timestamp()
+                    if _is_followup_due(item) and getattr(item, "mobile_followup_due_at", None)
+                    else -float(getattr(item, "mobile_engagement_score", 0) or 0)
+                ),
+                -item.submitted_at.timestamp(),
             ),
         )
     return sorted(submissions, key=lambda item: item.submitted_at, reverse=True)
@@ -304,6 +363,7 @@ def _filtered_queue(request, workspace, tab):
 
     relevance, media, sort_mode, permission = _filters_from_request(request)
     decorated = [_decorate_submission(submission) for submission in qs[:500]]
+    workflow_counts = _workflow_counts(decorated) if tab == "discovered" else {}
     if tab == "discovered":
         decorated = [item for item in decorated if _matches_relevance(item, relevance)]
         decorated = [item for item in decorated if _matches_permission(item, permission)]
@@ -316,7 +376,7 @@ def _filtered_queue(request, workspace, tab):
         "media": media,
         "sort": sort_mode,
         "permission": permission,
-    }
+    }, workflow_counts
 
 
 def _queue_query(params, *, page=None):
@@ -347,7 +407,7 @@ def moderation_queue(request, workspace_id):
     if tab not in VALID_TABS:
         tab = "pending"
 
-    decorated, filters = _filtered_queue(request, workspace, tab)
+    decorated, filters, workflow_counts = _filtered_queue(request, workspace, tab)
     total_items = len(decorated)
     total_pages = max(1, (total_items + MOBILE_PAGE_SIZE - 1) // MOBILE_PAGE_SIZE)
     page = min(_positive_page(request.GET.get("page")), total_pages)
@@ -361,6 +421,7 @@ def moderation_queue(request, workspace_id):
         "active_kind": filters["kind"],
         "kind_choices": UGCSubmission.Kind.choices,
         "queue_counts": _queue_counts(workspace),
+        "ugc_mobile_workflow_counts": workflow_counts,
         "ugc_mobile_page": page,
         "ugc_mobile_total_items": total_items,
         "ugc_mobile_total_pages": total_pages,
@@ -386,7 +447,7 @@ def mobile_review(request, workspace_id, submission_id):
     if tab not in VALID_TABS:
         tab = "discovered"
 
-    decorated, filters = _filtered_queue(request, workspace, tab)
+    decorated, filters, workflow_counts = _filtered_queue(request, workspace, tab)
     index = next((i for i, item in enumerate(decorated) if item.id == submission_id), None)
     if index is None:
         raise Http404("Community item is not in this filtered review queue.")
@@ -413,6 +474,7 @@ def mobile_review(request, workspace_id, submission_id):
         "submission": submission,
         "active_tab": tab,
         "queue_counts": _queue_counts(workspace),
+        "ugc_mobile_workflow_counts": workflow_counts,
         "review_index": index + 1,
         "review_total": len(decorated),
         "review_prev": prev_item,
