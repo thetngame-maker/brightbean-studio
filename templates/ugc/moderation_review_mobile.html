@@ -31,6 +31,7 @@
   .review-bottom{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 0 calc(22px + env(safe-area-inset-bottom))}.review-bottom a{min-height:44px;border-radius:12px;border:1px solid #e5e5ea;background:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#6d28d9;font-size:13px;font-weight:720}.review-bottom a.next{background:#7c3aed;border-color:#7c3aed;color:#fff}
   .review-float{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;width:min(94vw,430px);display:grid;grid-template-columns:1fr 1.18fr 1fr;gap:6px;padding:7px;border:1px solid rgba(229,229,234,.9);border-radius:18px;background:rgba(250,250,252,.92);box-shadow:0 12px 34px rgba(0,0,0,.16);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px)}
   .review-float a,.review-float button{min-height:46px;border-radius:12px;border:0;font-size:12px;font-weight:760;display:flex;align-items:center;justify-content:center;text-decoration:none}.review-float a{background:#fff;color:#6d28d9;border:1px solid #e5e5ea}.review-float .disabled{background:#f2f2f7;color:#c7c7cc;border:1px solid #e5e5ea}.review-float form{margin:0}.review-float button{width:100%;background:#e9f9ef;color:#08783e;border:1px solid #c7eed5}.review-float .skip{background:#7c3aed;color:#fff;border-color:#7c3aed}
+  .swipe-cue{position:fixed;top:50%;z-index:29;pointer-events:none;opacity:0;transform:translateY(-50%) scale(.92);transition:opacity .08s linear,transform .08s linear;min-height:44px;padding:0 14px;border-radius:999px;display:flex;align-items:center;font-size:13px;font-weight:800;box-shadow:0 8px 24px rgba(0,0,0,.14)}.swipe-cue.show{opacity:1;transform:translateY(-50%) scale(1)}.swipe-cue.grant{left:14px;background:#e9f9ef;color:#08783e;border:1px solid #bfe8ce}.swipe-cue.skip{right:14px;background:#ede9fe;color:#6d28d9;border:1px solid #ddd1fb}
 }
 </style>
 
@@ -122,9 +123,10 @@
 
   {% if active_tab == 'discovered' %}<div class="review-float" aria-label="Quick review actions">
     {% if review_prev %}<a href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_prev.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">‹ Previous</a>{% else %}<span class="disabled" style="min-height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:760">‹ Previous</span>{% endif %}
-    <form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">✓ Granted</button></form>
-    {% if review_next %}<a class="skip" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">{% if review_is_today %}Skip ›{% else %}Next ›{% endif %}</a>{% else %}<a class="skip" href="{{ review_return_to }}" data-end-review-session>Done</a>{% endif %}
-  </div>{% endif %}
+    <form class="review-complete-action review-float-grant" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">✓ Granted</button></form>
+    {% if review_next %}<a class="skip review-float-skip" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">{% if review_is_today %}Skip ›{% else %}Next ›{% endif %}</a>{% else %}<a class="skip review-float-skip" href="{{ review_return_to }}" data-end-review-session>Done</a>{% endif %}
+  </div>
+  <div class="swipe-cue grant" data-swipe-grant>✓ Grant</div><div class="swipe-cue skip" data-swipe-skip>Skip →</div>{% endif %}
 </div>
 {% endblock %}
 
@@ -136,19 +138,32 @@
   document.querySelectorAll('.review-copy').forEach(function(b){b.addEventListener('click',async function(){var original=b.textContent;try{await copyText(b.dataset.copyText||'');b.textContent='Copied ✓';b.classList.add('good');}catch(e){b.textContent='Copy failed';}setTimeout(function(){b.textContent=original;b.classList.remove('good');},1500);});});
 
   var root=document.querySelector('.review-lite');
-  if(!root||root.dataset.todaySession!=='1')return;
+  if(!root)return;
+  var isToday=root.dataset.todaySession==='1';
   var key='tnstudio-today-review-session';
-  var state;
-  try{state=JSON.parse(sessionStorage.getItem(key)||'null');}catch(e){state=null;}
-  var remaining=parseInt(root.dataset.remaining||'0',10)||0;
-  if(!state||typeof state.completed!=='number'||typeof state.startedTotal!=='number'||state.startedTotal<remaining){state={completed:0,startedTotal:remaining};sessionStorage.setItem(key,JSON.stringify(state));}
-  function paint(){
-    var done=document.querySelector('[data-session-done]');if(done)done.textContent=state.completed;
-    var bar=document.querySelector('[data-session-progress]');if(bar){var total=Math.max(1,state.startedTotal);bar.style.width=Math.min(100,Math.max(0,(state.completed/total)*100))+'%';}
+  var state=null;
+  if(isToday){
+    try{state=JSON.parse(sessionStorage.getItem(key)||'null');}catch(e){state=null;}
+    var remaining=parseInt(root.dataset.remaining||'0',10)||0;
+    if(!state||typeof state.completed!=='number'||typeof state.startedTotal!=='number'||state.startedTotal<remaining){state={completed:0,startedTotal:remaining};sessionStorage.setItem(key,JSON.stringify(state));}
+    function paint(){var done=document.querySelector('[data-session-done]');if(done)done.textContent=state.completed;var bar=document.querySelector('[data-session-progress]');if(bar){var total=Math.max(1,state.startedTotal);bar.style.width=Math.min(100,Math.max(0,(state.completed/total)*100))+'%';}}
+    paint();
+    document.querySelectorAll('form.review-complete-action').forEach(function(f){f.addEventListener('submit',function(){state.completed+=1;sessionStorage.setItem(key,JSON.stringify(state));});});
+    document.querySelectorAll('[data-end-review-session]').forEach(function(a){a.addEventListener('click',function(){sessionStorage.removeItem(key);});});
   }
-  paint();
-  document.querySelectorAll('form.review-complete-action').forEach(function(f){f.addEventListener('submit',function(){state.completed+=1;sessionStorage.setItem(key,JSON.stringify(state));});});
-  document.querySelectorAll('[data-end-review-session]').forEach(function(a){a.addEventListener('click',function(){sessionStorage.removeItem(key);});});
+
+  var grantForm=document.querySelector('form.review-float-grant');
+  var skipLink=document.querySelector('a.review-float-skip');
+  var grantCue=document.querySelector('[data-swipe-grant]');
+  var skipCue=document.querySelector('[data-swipe-skip]');
+  if(grantForm&&skipLink){
+    var sx=0,sy=0,dx=0,dy=0,tracking=false;
+    function hideCues(){if(grantCue)grantCue.classList.remove('show');if(skipCue)skipCue.classList.remove('show');}
+    function touchStart(e){if(!e.touches||e.touches.length!==1)return;var t=e.target;if(t.closest('button,a,input,select,textarea,summary'))return;sx=e.touches[0].clientX;sy=e.touches[0].clientY;dx=0;dy=0;tracking=true;}
+    function touchMove(e){if(!tracking||!e.touches||e.touches.length!==1)return;dx=e.touches[0].clientX-sx;dy=e.touches[0].clientY-sy;if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)*1.35){if(dx>0){if(grantCue)grantCue.classList.add('show');if(skipCue)skipCue.classList.remove('show');}else{if(skipCue)skipCue.classList.add('show');if(grantCue)grantCue.classList.remove('show');}}else{hideCues();}}
+    function touchEnd(){if(!tracking)return;tracking=false;hideCues();if(Math.abs(dx)<90||Math.abs(dx)<Math.abs(dy)*1.5)return;if(dx>0){if(grantForm.requestSubmit)grantForm.requestSubmit();else grantForm.submit();}else{skipLink.click();}}
+    root.addEventListener('touchstart',touchStart,{passive:true});root.addEventListener('touchmove',touchMove,{passive:true});root.addEventListener('touchend',touchEnd,{passive:true});root.addEventListener('touchcancel',function(){tracking=false;hideCues();},{passive:true});
+  }
 })();
 </script>
 {% endblock %}
