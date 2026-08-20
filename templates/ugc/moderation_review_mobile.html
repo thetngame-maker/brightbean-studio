@@ -11,7 +11,7 @@
   div.flex.lg\:hidden.items-center.justify-between.px-4.py-3 .w-9.h-9{width:32px!important;height:32px!important}
   div.flex.lg\:hidden.items-center.justify-between.px-4.py-3 .w-7.h-7{width:24px!important;height:24px!important}
   main{padding-top:6px!important}
-  .review-lite{margin:-.15rem -.25rem 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#1c1c1e}
+  .review-lite{margin:-.15rem -.25rem 0;padding-bottom:82px;font-family:system-ui,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#1c1c1e}
   .review-nav{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:3px 1px 8px;position:sticky;top:0;z-index:12;background:rgba(248,248,250,.96);backdrop-filter:saturate(180%) blur(16px)}
   .review-done,.review-step{min-height:34px;display:inline-flex;align-items:center;justify-content:center;border-radius:10px;text-decoration:none;font-size:12px;font-weight:720}
   .review-done{padding:0 9px;color:#6d28d9;background:#fff;border:1px solid #e5e5ea}.review-step{width:36px;color:#6d28d9;background:#fff;border:1px solid #e5e5ea}.review-step.disabled{color:#c7c7cc;background:#f2f2f7}
@@ -29,6 +29,8 @@
   .review-detail{margin-top:12px;border-top:1px solid #f2f2f7}.review-detail summary{list-style:none;min-height:42px;display:flex;align-items:center;justify-content:space-between;color:#636366;font-size:12px;font-weight:700;cursor:pointer}.review-detail summary::-webkit-details-marker{display:none}.review-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding-bottom:8px}.review-info{background:#f7f7f9;border-radius:11px;padding:9px;font-size:11px;color:#8e8e93}.review-info strong{display:block;color:#3a3a3c;font-size:12px;margin-top:2px;word-break:break-word}
   .review-danger{margin-top:6px}.review-danger button{width:100%;min-height:44px;border:0;border-radius:11px;background:#fff0f0;color:#c62828;font-size:13px;font-weight:740}
   .review-bottom{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px 0 calc(22px + env(safe-area-inset-bottom))}.review-bottom a{min-height:44px;border-radius:12px;border:1px solid #e5e5ea;background:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#6d28d9;font-size:13px;font-weight:720}.review-bottom a.next{background:#7c3aed;border-color:#7c3aed;color:#fff}
+  .review-float{position:fixed;left:50%;bottom:calc(10px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;width:min(94vw,430px);display:grid;grid-template-columns:1fr 1.18fr 1fr;gap:6px;padding:7px;border:1px solid rgba(229,229,234,.9);border-radius:18px;background:rgba(250,250,252,.92);box-shadow:0 12px 34px rgba(0,0,0,.16);backdrop-filter:saturate(180%) blur(18px);-webkit-backdrop-filter:saturate(180%) blur(18px)}
+  .review-float a,.review-float button{min-height:46px;border-radius:12px;border:0;font-size:12px;font-weight:760;display:flex;align-items:center;justify-content:center;text-decoration:none}.review-float a{background:#fff;color:#6d28d9;border:1px solid #e5e5ea}.review-float .disabled{background:#f2f2f7;color:#c7c7cc;border:1px solid #e5e5ea}.review-float form{margin:0}.review-float button{width:100%;background:#e9f9ef;color:#08783e;border:1px solid #c7eed5}.review-float .skip{background:#7c3aed;color:#fff;border-color:#7c3aed}
 }
 </style>
 
@@ -117,6 +119,12 @@
     {% if review_prev %}<a href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_prev.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">‹ Previous</a>{% else %}<span></span>{% endif %}
     {% if review_next %}<a class="next" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">{% if review_is_today %}Skip ›{% else %}Next ›{% endif %}</a>{% else %}<a class="next" href="{{ review_return_to }}" data-end-review-session>Done</a>{% endif %}
   </nav>
+
+  {% if active_tab == 'discovered' %}<div class="review-float" aria-label="Quick review actions">
+    {% if review_prev %}<a href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_prev.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">‹ Previous</a>{% else %}<span class="disabled" style="min-height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:760">‹ Previous</span>{% endif %}
+    <form class="review-complete-action" method="post" action="{% url 'ugc:update_permission' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="permission_status" value="granted"><input type="hidden" name="channel" value="{{ submission.metadata|ugc_source_platform:submission.source }}"><input type="hidden" name="return_to" value="{{ review_action_return_to }}"><button type="submit">✓ Granted</button></form>
+    {% if review_next %}<a class="skip" href="{% url 'ugc:mobile_review' workspace_id=workspace.id submission_id=review_next.id %}?{{ review_query }}&return_to={{ review_return_to|urlencode }}">{% if review_is_today %}Skip ›{% else %}Next ›{% endif %}</a>{% else %}<a class="skip" href="{{ review_return_to }}" data-end-review-session>Done</a>{% endif %}
+  </div>{% endif %}
 </div>
 {% endblock %}
 
