@@ -375,6 +375,15 @@ def use_in_post_view(request, workspace_id, submission_id):
         messages.error(request, "Contributor consent is required before community content can be reused.")
         return _return_to_queue(request, workspace)
 
+    metadata = dict(submission.metadata or {})
+    post_ids = [str(post_id) for post_id in (metadata.get("studio_post_ids") or []) if post_id]
+    allow_duplicate = request.POST.get("allow_duplicate") == "1"
+    if post_ids and not allow_duplicate:
+        existing_post = Post.objects.filter(workspace=workspace, id=post_ids[-1]).first()
+        if existing_post:
+            messages.info(request, "This community item already has a draft. Opening the latest draft instead.")
+            return redirect("composer:compose_edit", workspace_id=workspace.id, post_id=existing_post.id)
+
     source_bits = [f"UGC submission: {submission.id}", f"Target: {submission.target_type}:{submission.target_id}"]
     if submission.target_label:
         source_bits.append(f"Target name: {submission.target_label}")
@@ -405,10 +414,9 @@ def use_in_post_view(request, workspace_id, submission_id):
             alt_text=getattr(submission.media_asset, "alt_text", "") or submission.title or submission.target_label,
         )
 
-    metadata = dict(submission.metadata or {})
-    post_ids = list(metadata.get("studio_post_ids") or [])
     post_ids.append(str(post.id))
     metadata["studio_post_ids"] = post_ids[-20:]
+    metadata["studio_drafted_at"] = timezone.now().isoformat()
     submission.metadata = metadata
     submission.save(update_fields=["metadata", "updated_at"])
 
