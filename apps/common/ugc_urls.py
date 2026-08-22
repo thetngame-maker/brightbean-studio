@@ -11,7 +11,7 @@ from . import (
     ugc_intake_views,
     ugc_location_views,
     ugc_mobile_bulk_views,
-    ugc_mobile_queue_views,
+    ugc_mobile_queue_dispatch,
     ugc_mobile_review_dispatch,
     ugc_views,
 )
@@ -19,7 +19,7 @@ from . import (
 app_name = "ugc"
 
 urlpatterns = [
-    path("", ugc_mobile_queue_views.moderation_queue, name="moderation_queue"),
+    path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
     path("review/<uuid:submission_id>/", ugc_mobile_review_dispatch.mobile_review, name="mobile_review"),
     path("mobile/bulk-remove/", ugc_mobile_bulk_views.bulk_remove, name="mobile_bulk_remove"),
     path("mobile/bulk-grant/", ugc_mobile_bulk_views.bulk_grant, name="mobile_bulk_grant"),
