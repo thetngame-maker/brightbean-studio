@@ -36,6 +36,7 @@ def approved_quality(submission):
                 "needs_check": True,
                 "reason": f"Caption mentions {named}, but this item is attached to {target}.",
                 "kind": "target_mismatch",
+                "suggested_target_label": named,
             }
 
     if getattr(submission, "mobile_relevance_status", "") == "low":
@@ -43,9 +44,10 @@ def approved_quality(submission):
             "needs_check": True,
             "reason": "This approved item has a low relevance score. Double-check it before creating a draft.",
             "kind": "low_relevance",
+            "suggested_target_label": "",
         }
 
-    return {"needs_check": False, "reason": "", "kind": ""}
+    return {"needs_check": False, "reason": "", "kind": "", "suggested_target_label": ""}
 
 
 def decorate_approved_quality(submission):
@@ -53,4 +55,5 @@ def decorate_approved_quality(submission):
     submission.mobile_needs_quality_check = quality["needs_check"]
     submission.mobile_quality_reason = quality["reason"]
     submission.mobile_quality_kind = quality["kind"]
+    submission.mobile_suggested_target_label = quality.get("suggested_target_label", "")
     return submission
