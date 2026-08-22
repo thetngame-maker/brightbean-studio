@@ -16,6 +16,7 @@ from apps.members.decorators import require_permission
 
 from . import ugc_mobile_queue_views
 from .ugc_mobile_quality import decorate_approved_quality
+from .ugc_mobile_target_views import target_choices
 from .ugc_views import _get_workspace, _queue_counts
 
 
@@ -71,7 +72,7 @@ def _focused_context(request, workspace, submission_id, tab):
         if next_item:
             action_return_to = _review_url(workspace, next_item, params, return_to) + f"&draft_state={draft_state}"
 
-    return {
+    context = {
         "workspace": workspace,
         "submission": submission,
         "active_tab": tab,
@@ -83,8 +84,18 @@ def _focused_context(request, workspace, submission_id, tab):
         "review_query": review_query,
         "review_return_to": return_to,
         "review_action_return_to": action_return_to,
+        "review_current_url": request.get_full_path(),
         "approved_draft_state": draft_state,
     }
+    if tab == "approved" and getattr(submission, "mobile_quality_kind", "") == "target_mismatch":
+        context["approved_target_choices"] = target_choices(
+            workspace,
+            suggested_label=getattr(submission, "mobile_suggested_target_label", ""),
+            current_submission=submission,
+        )
+    else:
+        context["approved_target_choices"] = []
+    return context
 
 
 @login_required
