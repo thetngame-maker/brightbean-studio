@@ -38,6 +38,7 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
         row = dict(row)
         row["is_current"] = key == current_key
         row["is_suggested"] = bool(suggested_norm and _normalise(row["target_label"]) == suggested_norm)
+        row["picker_value"] = f'{row["target_type"]}::{row["target_id"]}'
         choices.append(row)
         if len(choices) >= limit:
             break
@@ -53,8 +54,14 @@ def retarget_submission(request, workspace_id, submission_id):
     workspace = _get_workspace(request, workspace_id)
     submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
 
-    target_type = request.POST.get("target_type", "").strip()[:100]
-    target_id = request.POST.get("target_id", "").strip()[:255]
+    target_key = request.POST.get("target_key", "").strip()
+    if "::" in target_key:
+        target_type, target_id = target_key.split("::", 1)
+    else:
+        target_type = request.POST.get("target_type", "").strip()
+        target_id = request.POST.get("target_id", "").strip()
+    target_type = target_type[:100]
+    target_id = target_id[:255]
     return_to = request.POST.get("return_to", "").strip()
 
     candidate = (
