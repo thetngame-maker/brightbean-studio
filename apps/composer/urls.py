@@ -1,10 +1,11 @@
 from django.urls import path
 
-from . import orchestration_views, views
+from . import command_center_views, orchestration_views, views
 
 app_name = "composer"
 
 urlpatterns = [
+    path("command-center/", command_center_views.command_center, name="command_center"),
     path("orchestration/", orchestration_views.orchestration, name="orchestration"),
     path(
         "orchestration/<uuid:post_id>/add-variant/",

@@ -88,6 +88,29 @@ def _effective_schedule(platform_post):
     return platform_post.scheduled_at or platform_post.post.scheduled_at
 
 
+def tight_rollout_count(workspace, *, limit=500):
+    """Count scheduled Posts whose account launches are under 30 minutes apart."""
+    variants = list(
+        PlatformPost.objects.filter(
+            post__workspace=workspace,
+            status=PlatformPost.Status.SCHEDULED,
+        )
+        .select_related("post")
+        .order_by("post_id", "scheduled_at")[:limit]
+    )
+    by_post = {}
+    for variant in variants:
+        effective_at = _effective_schedule(variant)
+        if effective_at is not None:
+            by_post.setdefault(variant.post_id, []).append(effective_at)
+    count = 0
+    for times in by_post.values():
+        times.sort()
+        if any(right - left < timedelta(minutes=30) for left, right in zip(times, times[1:], strict=False)):
+            count += 1
+    return count
+
+
 def build_orchestration(workspace, *, limit=300):
     """Build recent coordination rows and connected-account workload totals."""
     accounts = connected_accounts(workspace)

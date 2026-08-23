@@ -240,6 +240,28 @@ def _workflow_counts(submissions):
     return counts
 
 
+def discovered_workflow_snapshot(workspace, *, limit=500):
+    """Return the canonical discovered-workflow counts for summary surfaces.
+
+    The mobile queue remains the source of truth for relevance, permission,
+    follow-up cadence, and Today membership. Other server-rendered pages can
+    consume this snapshot without growing a second interpretation of Today.
+    """
+    submissions = (
+        UGCSubmission.objects.for_workspace(workspace.id)
+        .filter(status=UGCSubmission.Status.PENDING)
+        .filter(_discovered_q())
+        .select_related("contributor", "creator", "media_asset", "moderated_by", "rights_passport")[:limit]
+    )
+    decorated = [_decorate_submission(submission) for submission in submissions]
+    counts = _workflow_counts(decorated)
+    today = _sort_mobile(
+        [item for item in decorated if _is_followup_due(item) or _is_top_prospect(item)],
+        "today",
+    )
+    return {"items": decorated, "today": today, "counts": counts, "limit_reached": len(decorated) == limit}
+
+
 def _matches_relevance(submission, relevance_filter):
     status = getattr(submission, "mobile_relevance_status", "possible")
     if relevance_filter == "all":
