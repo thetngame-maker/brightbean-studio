@@ -250,6 +250,31 @@ class PublishEngine:
             from apps.common.audit import record_audit_event
             from apps.common.models import AuditEvent
             from apps.common.tourism_guard import blocking_findings_for_post
+            from apps.composer.ugc_publish_guard import post_publish_preflight
+
+            ugc_guard = post_publish_preflight(post.workspace, post, platform_posts)
+            if ugc_guard["blockers"]:
+                first = ugc_guard["blockers"][0]
+                message = f"Publication held by Creator Rights & Credit Guard: {first['message']}"[:1000]
+                PlatformPost.objects.filter(id__in=[pp.id for pp in platform_posts]).update(
+                    status=PlatformPost.Status.ON_HOLD,
+                    publish_error=message,
+                )
+                record_audit_event(
+                    workspace=post.workspace,
+                    action="ugc.publish_guard_blocked",
+                    target=post,
+                    source=AuditEvent.Source.SYSTEM,
+                    metadata={
+                        "submission_id": str(getattr(ugc_guard["submission"], "id", "") or ""),
+                        "rights_passport_id": str(getattr(ugc_guard["passport"], "id", "") or ""),
+                        "platform_post_ids": [str(pp.id) for pp in platform_posts],
+                        "blocker_codes": [item["code"] for item in ugc_guard["blockers"]],
+                        "blocked_account_ids": [item["social_account_id"] for item in ugc_guard["blockers"]],
+                    },
+                )
+                logger.warning("Creator Rights & Credit Guard held post %s before provider dispatch", post.id)
+                return
 
             blockers = blocking_findings_for_post(post.workspace, post.id)
             if blockers:

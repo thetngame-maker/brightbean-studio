@@ -15,8 +15,9 @@ from apps.members.decorators import require_permission
 from apps.social_accounts.models import SocialAccount
 
 from .models import PlatformPost, Post
-from .orchestration import account_rights, build_orchestration, find_submission_for_post
+from .orchestration import build_orchestration
 from .services import sync_post_scheduled_at
+from .ugc_publish_guard import account_rights, find_submission_for_post
 
 ORCHESTRATION_PAGE_SIZE = 12
 VALID_QUEUES = {"all", "coordinated", "action", "spacing"}

@@ -22,6 +22,7 @@ from django.utils import timezone
 from django.utils.html import strip_tags
 from django.views.decorators.http import require_GET, require_POST
 
+from apps.common.audit import record_audit_event
 from apps.common.validators import (
     is_safe_url,
     parse_and_truncate_tag_string,
@@ -48,11 +49,13 @@ from .models import (
     PostVersion,
     Tag,
 )
+from .ugc_publish_guard import payload_publish_preflight, post_publish_preflight
 
 MAX_CSV_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB cap on CSV planner imports
 
 # Shown when every posting slot within the lookahead horizon is already taken.
 _QUEUE_FULL_MSG = "No open posting slot within the scheduling horizon — add posting slots or free one up."
+_UGC_COMMIT_ACTIONS = {"schedule", "publish_now", "add_to_queue", "add_to_queue_priority"}
 
 
 def _get_workspace(request, workspace_id):
@@ -85,6 +88,21 @@ def _parse_selected_account_ids(raw):
     ValidationError (an unhandled 500) instead of being ignored.
     """
     return [s.strip() for s in (raw or "").split(",") if s.strip() and _is_valid_uuid(s.strip())]
+
+
+def _ugc_payload_guard(request, workspace, post, base_caption):
+    """Validate unsaved account captions before entering the publish path."""
+    selected_ids = _parse_selected_account_ids(request.POST.get("selected_accounts", ""))
+    accounts = list(SocialAccount.objects.filter(id__in=selected_ids, workspace=workspace))
+    account_captions = [
+        (
+            account,
+            request.POST.get(f"override_caption_{account.id}", "").strip() or base_caption,
+        )
+        for account in accounts
+    ]
+    result = payload_publish_preflight(workspace, post, account_captions)
+    return result if result["blockers"] else None
 
 
 def _get_account_scope(request):
@@ -595,6 +613,18 @@ def compose(request, workspace_id, post_id=None):
         if cid and cid in asset_url_map:
             extra["cover_image_url"] = asset_url_map[cid]
 
+    composer_publish_guard = (
+        post_publish_preflight(workspace, post, platform_post_list)
+        if post is not None
+        else {
+            "is_ugc": False,
+            "credit_required": False,
+            "required_credit": "",
+            "blockers": [],
+            "is_safe": True,
+        }
+    )
+
     context = {
         "workspace": workspace,
         "post": post,
@@ -629,6 +659,7 @@ def compose(request, workspace_id, post_id=None):
         "account_scope": account_filter if (post_id and account_filter) else "",
         "failed_platform_posts": failed_platform_posts,
         "failed_first_comments": failed_first_comments,
+        "composer_publish_guard": composer_publish_guard,
         "unsplash_enabled": bool(settings.UNSPLASH_ACCESS_KEY),
     }
     return render(request, "composer/compose.html", context)
@@ -777,6 +808,25 @@ def save_post(request, workspace_id, post_id=None):
     post.workspace = workspace
     if not post_id:
         post.author = request.user
+
+    if action in _UGC_COMMIT_ACTIONS:
+        guard = _ugc_payload_guard(request, workspace, post, post.caption)
+        if guard:
+            blocker_messages = list(dict.fromkeys(item["message"] for item in guard["blockers"]))
+            record_audit_event(
+                workspace=workspace,
+                actor=request.user,
+                action="ugc.schedule_guard_blocked",
+                target=post,
+                metadata={
+                    "requested_action": action,
+                    "submission_id": str(guard["submission"].id),
+                    "blocker_codes": [item["code"] for item in guard["blockers"]],
+                    "blocked_account_ids": [item["social_account_id"] for item in guard["blockers"]],
+                },
+                request=request,
+            )
+            return JsonResponse({"errors": {"ugc_rights": " ".join(blocker_messages[:3])}}, status=400)
 
     pinterest_board_error = _validate_pinterest_board_selection(request, post, workspace)
     if pinterest_board_error is not None:
@@ -1080,6 +1130,24 @@ def transition_platform_post(request, workspace_id, post_id, platform_post_id):
         raise PermissionDenied("You do not have permission to schedule this post.")
     if target in approval_states and not perms.get("approve_posts", False) and target != "pending_review":
         raise PermissionDenied("You do not have permission to make approval decisions.")
+
+    if target in {"scheduled", "publishing"}:
+        guard = post_publish_preflight(workspace, pp.post, [pp])
+        if guard["blockers"]:
+            record_audit_event(
+                workspace=workspace,
+                actor=request.user,
+                action="ugc.schedule_guard_blocked",
+                target=pp,
+                metadata={
+                    "requested_action": target,
+                    "submission_id": str(guard["submission"].id),
+                    "blocker_codes": [item["code"] for item in guard["blockers"]],
+                    "blocked_account_ids": [item["social_account_id"] for item in guard["blockers"]],
+                },
+                request=request,
+            )
+            return JsonResponse({"error": guard["blockers"][0]["message"]}, status=400)
 
     if pp.status == target:
         return JsonResponse({"ok": True, "status": pp.status, "noop": True})

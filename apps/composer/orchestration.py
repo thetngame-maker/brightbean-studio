@@ -9,15 +9,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.common.models import UGCSubmission
-from apps.common.ugc_creator_services import rights_can_use
 from apps.social_accounts.models import SocialAccount
 
 from .models import PlatformPost, Post
+from .ugc_publish_guard import _legacy_ugc_map, account_rights, post_publish_preflight, submission_for_post
 
 ACTION_STATUSES = {
     PlatformPost.Status.FAILED,
@@ -33,55 +31,6 @@ def connected_accounts(workspace):
         .filter(connection_status=SocialAccount.ConnectionStatus.CONNECTED)
         .order_by("account_name", "account_handle", "platform")
     )
-
-
-def _legacy_ugc_map(workspace, post_ids):
-    """Map older UGC drafts that predate ContentPerformanceProfile provenance."""
-    wanted = {str(value) for value in post_ids}
-    result = {}
-    submissions = UGCSubmission.objects.for_workspace(workspace.id).select_related("rights_passport")
-    for submission in submissions.iterator(chunk_size=250):
-        for post_id in (submission.metadata or {}).get("studio_post_ids") or []:
-            key = str(post_id)
-            if key in wanted:
-                result[key] = submission
-    return result
-
-
-def submission_for_post(post, legacy_map=None):
-    try:
-        profile = post.performance_profile
-    except (AttributeError, ObjectDoesNotExist):
-        profile = None
-    if profile is not None and profile.source_submission_id:
-        return profile.source_submission
-    return (legacy_map or {}).get(str(post.id))
-
-
-def find_submission_for_post(workspace, post):
-    """Resolve current and legacy UGC provenance for a single mutation."""
-    submission = submission_for_post(post)
-    if submission is not None:
-        return submission
-    return submission_for_post(post, _legacy_ugc_map(workspace, [post.id]))
-
-
-def account_rights(submission, account):
-    """Return whether one UGC asset may be used on one connected account."""
-    if submission is None:
-        return True, ""
-    if submission.status != UGCSubmission.Status.APPROVED:
-        return False, "Community content is no longer approved."
-    if not submission.consent_confirmed:
-        return False, "Contributor consent is required."
-    allowed, error = rights_can_use(submission, "organic_social")
-    if not allowed:
-        return False, error
-    passport = submission.rights_passport
-    allowed_ids = {str(value) for value in (passport.allowed_account_ids or [])}
-    if allowed_ids and str(account.id) not in allowed_ids:
-        return False, "The rights passport does not allow this social account."
-    return True, ""
 
 
 def _effective_schedule(platform_post):
@@ -139,6 +88,12 @@ def build_orchestration(workspace, *, limit=300):
         )
         variant_account_ids = {item.social_account_id for item in variants}
         submission = submission_for_post(post, legacy_map)
+        publish_guard = post_publish_preflight(
+            workspace,
+            post,
+            variants,
+            submission_override=submission,
+        )
         eligible_missing = []
         blocked_missing = []
         for account_id, account in account_by_id.items():
@@ -157,7 +112,7 @@ def build_orchestration(workspace, *, limit=300):
             for left, right in zip(scheduled, scheduled[1:], strict=False)
         ]
         tight_rollout = len(scheduled) > 1 and any(gap < timedelta(minutes=30) for gap in gaps)
-        action_needed = any(item.status in ACTION_STATUSES for item in variants)
+        action_needed = any(item.status in ACTION_STATUSES for item in variants) or bool(publish_guard["blockers"])
         rows.append(
             {
                 "post": post,
@@ -172,6 +127,7 @@ def build_orchestration(workspace, *, limit=300):
                 "tight_rollout": tight_rollout,
                 "is_ugc": submission is not None,
                 "ugc_submission": submission,
+                "publish_guard": publish_guard,
             }
         )
 
@@ -180,6 +136,12 @@ def build_orchestration(workspace, *, limit=300):
         account_variants = [
             variant for row in rows for variant in row["variants"] if variant.social_account_id == account.id
         ]
+        guarded_variant_ids = {
+            blocker["platform_post_id"]
+            for row in rows
+            for blocker in row["publish_guard"]["blockers"]
+            if blocker["social_account_id"] == str(account.id)
+        }
         future = [
             _effective_schedule(item)
             for item in account_variants
@@ -189,7 +151,10 @@ def build_orchestration(workspace, *, limit=300):
             {
                 "account": account,
                 "scheduled_count": len(future),
-                "attention_count": sum(item.status in ACTION_STATUSES for item in account_variants),
+                "attention_count": sum(
+                    item.status in ACTION_STATUSES or str(item.id) in guarded_variant_ids
+                    for item in account_variants
+                ),
                 "next_at": min(future) if future else None,
             }
         )

@@ -352,6 +352,18 @@
                     {% endfor %}
                 </div>
 
+                {% if composer_publish_guard.is_ugc %}
+                <div class="border {% if composer_publish_guard.blockers %}border-red-200 bg-red-50{% else %}border-emerald-200 bg-emerald-50{% endif %} rounded-xl p-3 flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg {% if composer_publish_guard.blockers %}bg-red-100 text-red-700{% else %}bg-emerald-100 text-emerald-700{% endif %} flex items-center justify-center flex-shrink-0 text-sm font-bold">✓</div>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-xs font-semibold {% if composer_publish_guard.blockers %}text-red-800{% else %}text-emerald-800{% endif %}">Creator Rights &amp; Credit Guard</div>
+                        {% if composer_publish_guard.credit_required %}<p class="text-[11px] mt-1 {% if composer_publish_guard.blockers %}text-red-700{% else %}text-emerald-700{% endif %}">Required credit: <strong>{{ composer_publish_guard.required_credit|default:"Add exact credit in the Rights Passport" }}</strong>. Studio checks the shared caption and every account variant again before publishing.</p>{% else %}<p class="text-[11px] mt-1 text-emerald-700">Current Rights Passport allows these account variants. Rights are checked again immediately before provider dispatch.</p>{% endif %}
+                        {% if composer_publish_guard.blockers %}<p class="text-[11px] mt-1 text-red-700">{{ composer_publish_guard.blockers.0.message }}</p>{% endif %}
+                    </div>
+                    {% if composer_publish_guard.required_credit %}<button type="button" @click="restoreCreatorCredit()" class="flex-shrink-0 min-h-8 px-2.5 rounded-lg border border-emerald-300 bg-white text-emerald-700 text-[10px] font-semibold">Restore credit</button>{% endif %}
+                </div>
+                {% endif %}
+
                 {% if failed_platform_posts %}
                 <!-- Publish failures: show the stored error so the user knows what to fix before retrying -->
                 <div class="border border-red-200 bg-red-50 rounded-xl p-3 space-y-1.5">
@@ -1976,12 +1988,14 @@
 {{ char_limits|json_script:"composer-char-limits" }}
 {{ platform_extras|json_script:"composer-platform-extras" }}
 {{ media_items|json_script:"composer-media-items" }}
+{{ composer_publish_guard.required_credit|json_script:"composer-required-credit" }}
 <script nonce="{{ request.csp_nonce }}">
 function composerApp() {
     return {
         // State
         title: '{{ form.title.value|default:""|escapejs }}',
         caption: '{{ form.caption.value|default:""|escapejs }}',
+        requiredCreatorCredit: JSON.parse(document.getElementById('composer-required-credit').textContent),
         selectedAccounts: JSON.parse(document.getElementById('composer-selected-accounts').textContent),
         charLimits: JSON.parse(document.getElementById('composer-char-limits').textContent),
         overrides: {},
@@ -2102,6 +2116,19 @@ function composerApp() {
             if (!this.caption) return '';
             const firstLine = this.caption.split('\n')[0] || '';
             return firstLine.substring(0, 100);
+        },
+
+        restoreCreatorCredit() {
+            const required = (this.requiredCreatorCredit || '').trim();
+            if (!required) return;
+            if (!this.caption.toLocaleLowerCase().includes(required.toLocaleLowerCase())) {
+                this.caption = this.caption.trim() ? `${this.caption.trim()}\n\n${required}` : required;
+            }
+            this.$nextTick(() => {
+                const textarea = this.$root.querySelector('textarea[name="caption"]');
+                if (textarea) textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                this.triggerPreviewUpdate();
+            });
         },
 
         platformIconSvg(platform) {
