@@ -711,6 +711,13 @@ class TourismImpactReport(models.Model):
     target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
     target_label = models.CharField(max_length=255, blank=True, default="")
     target_url = models.URLField(max_length=2000, blank=True, default="")
+    source_schedule = models.ForeignKey(
+        "TourismImpactReportSchedule",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reports",
+    )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
     snapshot = models.JSONField(default=dict)
     partner_notes = models.TextField(blank=True, default="")
@@ -745,9 +752,74 @@ class TourismImpactReport(models.Model):
             models.Index(fields=["workspace", "status", "-period_end"], name="impact_report_status_idx"),
             models.Index(fields=["workspace", "target_type", "target_id"], name="impact_report_target_idx"),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["source_schedule", "period_start", "period_end"],
+                name="impact_report_schedule_period_uniq",
+            )
+        ]
 
     def __str__(self):
         return self.title
+
+
+class TourismImpactReportSchedule(models.Model):
+    """A recurring calendar-period impact report using the existing target catalog."""
+
+    class Cadence(models.TextChoices):
+        WEEKLY = "weekly", "Weekly"
+        MONTHLY = "monthly", "Monthly"
+        QUARTERLY = "quarterly", "Quarterly"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="tourism_impact_report_schedules",
+    )
+    name = models.CharField(max_length=255)
+    cadence = models.CharField(max_length=20, choices=Cadence.choices, default=Cadence.MONTHLY, db_index=True)
+    target_type = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default="")
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    equivalent_cpm = models.DecimalField(max_digits=8, decimal_places=2, default=12)
+    auto_share = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    next_run_at = models.DateTimeField(db_index=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    last_period_end = models.DateField(null=True, blank=True)
+    last_error = models.CharField(max_length=500, blank=True, default="")
+    archived_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_tourism_impact_report_schedules",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_tourism_impact_report_schedules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_tourism_impact_report_schedule"
+        ordering = ["-is_active", "next_run_at", "name"]
+        indexes = [
+            models.Index(fields=["is_active", "next_run_at"], name="impact_schedule_due_idx"),
+            models.Index(fields=["workspace", "archived_at"], name="impact_schedule_ws_idx"),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class ContentPerformanceProfile(models.Model):

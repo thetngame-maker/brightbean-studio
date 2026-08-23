@@ -16,11 +16,12 @@ from django.views.decorators.http import require_POST
 
 from apps.members.decorators import require_permission
 from apps.members.models import WorkspaceMembership
-from apps.notifications.models import EventType, Notification
 
 from .audit import record_audit_event
-from .models import TourismImpactReport
+from .models import TourismImpactReport, TourismImpactReportSchedule
 from .tourism_impact import build_impact_snapshot
+from .tourism_impact_delivery import notify_impact_report_partners
+from .tourism_impact_schedules import next_schedule_run, run_impact_report_schedule
 from .ugc_creator_views import _safe_local_path
 from .ugc_target_catalog import find_catalog_target, target_choices
 from .ugc_views import _get_workspace
@@ -89,7 +90,9 @@ def impact_reports(request, workspace_id):
     status = str(request.GET.get("view") or "active").strip().lower()
     if status not in {"active", "draft", "shared", "archived"}:
         status = "active"
-    reports = TourismImpactReport.objects.for_workspace(workspace.id).select_related("generated_by", "shared_by")
+    reports = TourismImpactReport.objects.for_workspace(workspace.id).select_related(
+        "generated_by", "shared_by", "source_schedule"
+    )
     if status == "active":
         reports = reports.exclude(status=TourismImpactReport.Status.ARCHIVED)
     else:
@@ -103,6 +106,11 @@ def impact_reports(request, workspace_id):
         "archived": all_reports.filter(status=TourismImpactReport.Status.ARCHIVED).count(),
     }
     today = timezone.localdate()
+    schedule_queryset = TourismImpactReportSchedule.objects.for_workspace(workspace.id).filter(
+        archived_at__isnull=True
+    )
+    active_schedule_count = schedule_queryset.filter(is_active=True).count()
+    schedules = list(schedule_queryset.select_related("created_by")[:12])
     return render(
         request,
         "ugc/impact_reports.html",
@@ -116,6 +124,9 @@ def impact_reports(request, workspace_id):
             "impact_default_start": today - timedelta(days=29),
             "impact_default_end": today,
             "impact_client_count": _client_count(workspace),
+            "impact_schedules": schedules,
+            "impact_active_schedule_count": active_schedule_count,
+            "impact_cadence_choices": TourismImpactReportSchedule.Cadence.choices,
         },
     )
 
@@ -180,6 +191,125 @@ def create_impact_report(request, workspace_id):
     )
     messages.success(request, "Impact report generated from the current stored Studio data.")
     return redirect("ugc:impact_report_detail", workspace_id=workspace.id, report_id=report.id)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def create_impact_report_schedule(request, workspace_id):
+    workspace = _get_workspace(request, workspace_id)
+    fallback = reverse("ugc:impact_reports", kwargs={"workspace_id": workspace.id})
+    cadence = str(request.POST.get("cadence") or "").strip().lower()
+    if cadence not in TourismImpactReportSchedule.Cadence.values:
+        messages.error(request, "Choose a weekly, monthly, or quarterly report cadence.")
+        return redirect(fallback)
+    target = _target(workspace, request.POST.get("target_key"))
+    if target is False:
+        messages.error(request, "Choose a destination from the existing TN Game target catalog.")
+        return redirect(fallback)
+    equivalent_cpm = _cpm(request.POST.get("equivalent_cpm"))
+    if equivalent_cpm is None:
+        messages.error(request, "Enter an equivalent CPM between $0 and $1,000.")
+        return redirect(fallback)
+    cadence_label = dict(TourismImpactReportSchedule.Cadence.choices)[cadence]
+    default_name = f"{target['target_label'] + ' · ' if target else ''}{cadence_label} Tourism Impact"
+    schedule = TourismImpactReportSchedule.objects.create(
+        workspace=workspace,
+        name=(str(request.POST.get("name") or "").strip() or default_name)[:255],
+        cadence=cadence,
+        target_type=target["target_type"] if target else "",
+        target_id=target["target_id"] if target else "",
+        target_label=target["target_label"] if target else "",
+        target_url=target.get("target_url") or "" if target else "",
+        equivalent_cpm=equivalent_cpm,
+        auto_share=str(request.POST.get("delivery_mode") or "share") == "share",
+        next_run_at=next_schedule_run(cadence, workspace),
+        created_by=request.user,
+        updated_by=request.user,
+    )
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="tourism_impact.schedule_created",
+        target=schedule,
+        metadata={
+            "cadence": schedule.cadence,
+            "auto_share": schedule.auto_share,
+            "target_type": schedule.target_type,
+            "target_id": schedule.target_id,
+            "next_run_at": schedule.next_run_at.isoformat(),
+        },
+        request=request,
+    )
+    messages.success(request, "Recurring impact report scheduled from completed calendar periods.")
+    return redirect(fallback)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def update_impact_report_schedule(request, workspace_id, schedule_id):
+    workspace = _get_workspace(request, workspace_id)
+    fallback = reverse("ugc:impact_reports", kwargs={"workspace_id": workspace.id})
+    schedule = get_object_or_404(
+        TourismImpactReportSchedule.objects.for_workspace(workspace.id),
+        id=schedule_id,
+    )
+    action = str(request.POST.get("action") or "").strip().lower()
+    before = {"is_active": schedule.is_active, "archived": bool(schedule.archived_at)}
+    if action == "pause":
+        schedule.is_active = False
+        schedule.updated_by = request.user
+        schedule.save(update_fields=["is_active", "updated_by", "updated_at"])
+        action_name = "tourism_impact.schedule_paused"
+        message = "Recurring report paused. Existing snapshots remain unchanged."
+    elif action == "resume":
+        schedule.is_active = True
+        schedule.archived_at = None
+        schedule.next_run_at = next_schedule_run(schedule.cadence, workspace)
+        schedule.updated_by = request.user
+        schedule.save(
+            update_fields=["is_active", "archived_at", "next_run_at", "updated_by", "updated_at"]
+        )
+        action_name = "tourism_impact.schedule_resumed"
+        message = "Recurring report resumed."
+    elif action == "archive":
+        schedule.is_active = False
+        schedule.archived_at = timezone.now()
+        schedule.updated_by = request.user
+        schedule.save(update_fields=["is_active", "archived_at", "updated_by", "updated_at"])
+        action_name = "tourism_impact.schedule_archived"
+        message = "Schedule archived. Its generated reports and audit history were preserved."
+    elif action == "run":
+        try:
+            report, created = run_impact_report_schedule(schedule.id, actor=request.user, force=True)
+        except Exception:
+            messages.error(request, "Studio could not generate this scheduled report. The failure is recorded.")
+            return redirect(fallback)
+        if report is None:
+            messages.error(request, "Archived schedules cannot be run.")
+            return redirect(fallback)
+        if created:
+            messages.success(
+                request,
+                "Report generated and securely shared." if schedule.auto_share else "Internal report draft generated.",
+            )
+        else:
+            messages.info(request, "That completed calendar period already has a report. Opening it instead.")
+        return redirect("ugc:impact_report_detail", workspace_id=workspace.id, report_id=report.id)
+    else:
+        messages.error(request, "That schedule action is no longer available.")
+        return redirect(fallback)
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action=action_name,
+        target=schedule,
+        metadata={"before": before, "after": {"is_active": schedule.is_active, "archived": bool(schedule.archived_at)}},
+        request=request,
+    )
+    messages.success(request, message)
+    return redirect(fallback)
 
 
 @login_required
@@ -260,22 +390,7 @@ def update_impact_report(request, workspace_id, report_id):
         report.shared_by = request.user
         report.shared_at = timezone.now()
         report.save(update_fields=["status", "shared_by", "shared_at", "updated_at"])
-        clients = WorkspaceMembership.objects.filter(
-            workspace=workspace,
-            workspace_role=WorkspaceMembership.WorkspaceRole.CLIENT,
-        ).select_related("user")
-        Notification.objects.bulk_create(
-            [
-                Notification(
-                    user=membership.user,
-                    event_type=EventType.REPORT_GENERATED,
-                    title=f"New impact report: {report.title}",
-                    body=f"{workspace.name} shared a tourism impact report for {report.period_start:%b %d}–{report.period_end:%b %d, %Y}.",
-                    data={"report_id": str(report.id), "portal_url": reverse("client_portal:reports")},
-                )
-                for membership in clients
-            ]
-        )
+        notify_impact_report_partners(report)
         action_name = "tourism_impact.report_shared"
         message = "Report shared in the secure partner portal."
     elif action == "unshare":

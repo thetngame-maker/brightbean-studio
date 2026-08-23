@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -8,7 +9,7 @@ from apps.accounts.models import User
 from apps.analytics.models import PostInsightsSnapshot
 from apps.composer.models import PlatformPost, Post
 from apps.members.models import WorkspaceMembership
-from apps.notifications.models import EventType, Notification
+from apps.notifications.models import DeliveryStatus, EventType, Notification, NotificationDelivery
 from apps.social_accounts.models import SocialAccount
 from apps.workspaces.models import Workspace
 
@@ -16,10 +17,13 @@ from ..models import (
     AuditEvent,
     ContentPerformanceProfile,
     TourismImpactReport,
+    TourismImpactReportSchedule,
     UGCCreator,
     UGCSubmission,
 )
 from ..tourism_impact import build_impact_snapshot
+from ..tourism_impact_schedules import completed_period, next_schedule_run
+from ..tourism_impact_tasks import run_due_impact_report_schedules
 
 
 class TourismImpactReportTests(TestCase):
@@ -313,3 +317,164 @@ class TourismImpactReportTests(TestCase):
         self.assertContains(response, "WEBSITE VISITS — PARTNER SUPPLIED")
         self.assertContains(response, "5.0%")
         self.assertContains(response, "Registrations supplied from TN Game reporting.")
+
+    def test_completed_calendar_periods_and_next_run_respect_workspace_time(self):
+        self.assertEqual(
+            completed_period(TourismImpactReportSchedule.Cadence.WEEKLY, as_of=date(2026, 8, 23)),
+            (date(2026, 8, 10), date(2026, 8, 16)),
+        )
+        self.assertEqual(
+            completed_period(TourismImpactReportSchedule.Cadence.MONTHLY, as_of=date(2026, 8, 23)),
+            (date(2026, 7, 1), date(2026, 7, 31)),
+        )
+        self.assertEqual(
+            completed_period(TourismImpactReportSchedule.Cadence.QUARTERLY, as_of=date(2026, 8, 23)),
+            (date(2026, 4, 1), date(2026, 6, 30)),
+        )
+        self.workspace.timezone = "America/Chicago"
+        self.workspace.save(update_fields=["timezone", "updated_at"])
+        run_at = next_schedule_run(
+            TourismImpactReportSchedule.Cadence.MONTHLY,
+            self.workspace,
+            after=datetime(2026, 8, 23, 12, tzinfo=ZoneInfo("UTC")),
+        )
+        self.assertEqual(run_at, datetime(2026, 9, 1, 13, tzinfo=ZoneInfo("UTC")))
+
+    def test_recurring_schedule_uses_existing_target_and_is_audited(self):
+        url = reverse("ugc:create_impact_report_schedule", kwargs={"workspace_id": self.workspace.id})
+        response = self.client.post(
+            url,
+            {
+                "name": "Foster Falls Monthly Partner Update",
+                "cadence": "monthly",
+                "delivery_mode": "share",
+                "target_key": "top_sight::foster-falls",
+                "equivalent_cpm": "14.50",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        schedule = TourismImpactReportSchedule.objects.get(name="Foster Falls Monthly Partner Update")
+        self.assertEqual(schedule.target_id, "foster-falls")
+        self.assertTrue(schedule.auto_share)
+        self.assertTrue(schedule.is_active)
+        self.assertGreater(schedule.next_run_at, timezone.now())
+        self.assertTrue(
+            AuditEvent.objects.filter(action="tourism_impact.schedule_created", target_id=str(schedule.id)).exists()
+        )
+        page = self.client.get(reverse("ugc:impact_reports", kwargs={"workspace_id": self.workspace.id}))
+        self.assertContains(page, "Automate partner reports")
+        self.assertContains(page, schedule.name)
+        self.assertNotContains(page, "IntersectionObserver")
+
+    def test_run_now_is_idempotent_and_delivers_through_secure_portal_preferences(self):
+        partner, partner_client = self._partner_client()
+        schedule = TourismImpactReportSchedule.objects.create(
+            workspace=self.workspace,
+            name="Monthly Partner Impact",
+            cadence=TourismImpactReportSchedule.Cadence.MONTHLY,
+            target_type="top_sight",
+            target_id="foster-falls",
+            target_label="Foster Falls",
+            equivalent_cpm="12.00",
+            auto_share=True,
+            next_run_at=timezone.now() + timedelta(days=5),
+            created_by=self.user,
+            updated_by=self.user,
+        )
+        url = reverse(
+            "ugc:update_impact_report_schedule",
+            kwargs={"workspace_id": self.workspace.id, "schedule_id": schedule.id},
+        )
+        first = self.client.post(url, {"action": "run"})
+
+        self.assertEqual(first.status_code, 302)
+        report = TourismImpactReport.objects.get(source_schedule=schedule)
+        self.assertEqual(report.status, TourismImpactReport.Status.SHARED)
+        self.assertEqual(report.target_id, "foster-falls")
+        self.assertIsNotNone(report.shared_at)
+        self.assertTrue(
+            Notification.objects.filter(
+                user=partner,
+                event_type=EventType.REPORT_GENERATED,
+                data__report_id=str(report.id),
+            ).exists()
+        )
+        self.assertTrue(
+            NotificationDelivery.objects.filter(
+                notification__user=partner,
+                notification__data__report_id=str(report.id),
+                status=DeliveryStatus.DELIVERED,
+            ).exists()
+        )
+        self.assertContains(partner_client.get(reverse("client_portal:reports")), report.title)
+        second = self.client.post(url, {"action": "run"})
+        self.assertEqual(second.status_code, 302)
+        self.assertEqual(TourismImpactReport.objects.filter(source_schedule=schedule).count(), 1)
+        self.assertEqual(
+            Notification.objects.filter(user=partner, data__report_id=str(report.id)).count(),
+            1,
+        )
+        self.assertTrue(AuditEvent.objects.filter(action="tourism_impact.scheduled_report_shared").exists())
+
+    def test_due_worker_generates_internal_draft_but_skips_paused_schedule(self):
+        due = TourismImpactReportSchedule.objects.create(
+            workspace=self.workspace,
+            name="Weekly Review Draft",
+            cadence=TourismImpactReportSchedule.Cadence.WEEKLY,
+            auto_share=False,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+            created_by=self.user,
+        )
+        paused = TourismImpactReportSchedule.objects.create(
+            workspace=self.workspace,
+            name="Paused Monthly Report",
+            cadence=TourismImpactReportSchedule.Cadence.MONTHLY,
+            auto_share=True,
+            is_active=False,
+            next_run_at=timezone.now() - timedelta(minutes=1),
+            created_by=self.user,
+        )
+
+        run_due_impact_report_schedules.now()
+
+        report = TourismImpactReport.objects.get(source_schedule=due)
+        self.assertEqual(report.status, TourismImpactReport.Status.DRAFT)
+        self.assertFalse(TourismImpactReport.objects.filter(source_schedule=paused).exists())
+        due.refresh_from_db()
+        self.assertGreater(due.next_run_at, timezone.now())
+
+    def test_schedule_actions_are_workspace_scoped_and_archive_preserves_reports(self):
+        other_workspace = Workspace.objects.create(
+            organization=self.workspace.organization,
+            name="Other Schedule Workspace",
+        )
+        schedule = TourismImpactReportSchedule.objects.create(
+            workspace=other_workspace,
+            name="Private Other Workspace Schedule",
+            cadence=TourismImpactReportSchedule.Cadence.MONTHLY,
+            next_run_at=timezone.now() + timedelta(days=3),
+        )
+        wrong_url = reverse(
+            "ugc:update_impact_report_schedule",
+            kwargs={"workspace_id": self.workspace.id, "schedule_id": schedule.id},
+        )
+        self.assertEqual(self.client.post(wrong_url, {"action": "pause"}).status_code, 404)
+
+        own = TourismImpactReportSchedule.objects.create(
+            workspace=self.workspace,
+            name="Archive Me",
+            cadence=TourismImpactReportSchedule.Cadence.MONTHLY,
+            next_run_at=timezone.now() + timedelta(days=3),
+        )
+        own_url = reverse(
+            "ugc:update_impact_report_schedule",
+            kwargs={"workspace_id": self.workspace.id, "schedule_id": own.id},
+        )
+        self.client.post(own_url, {"action": "run"})
+        self.client.post(own_url, {"action": "archive"})
+        own.refresh_from_db()
+        self.assertFalse(own.is_active)
+        self.assertIsNotNone(own.archived_at)
+        self.assertTrue(TourismImpactReport.objects.filter(source_schedule=own).exists())
+        self.assertTrue(AuditEvent.objects.filter(action="tourism_impact.schedule_archived").exists())

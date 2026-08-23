@@ -32,6 +32,16 @@ urlpatterns = [
     path("impact-reports/", tourism_impact_views.impact_reports, name="impact_reports"),
     path("impact-reports/create/", tourism_impact_views.create_impact_report, name="create_impact_report"),
     path(
+        "impact-reports/schedules/create/",
+        tourism_impact_views.create_impact_report_schedule,
+        name="create_impact_report_schedule",
+    ),
+    path(
+        "impact-reports/schedules/<uuid:schedule_id>/update/",
+        tourism_impact_views.update_impact_report_schedule,
+        name="update_impact_report_schedule",
+    ),
+    path(
         "impact-reports/<uuid:report_id>/",
         tourism_impact_views.impact_report_detail,
         name="impact_report_detail",
