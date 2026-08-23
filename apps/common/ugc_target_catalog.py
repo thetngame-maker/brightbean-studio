@@ -10,6 +10,14 @@ def _clean(value, limit=255):
     return str(value or "").strip()[:limit]
 
 
+def _coordinate(value, *, minimum, maximum):
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if minimum <= result <= maximum else None
+
+
 def build_target_catalog(workspace, *, limit=300):
     """Merge known targets from UGC, saved discovery searches, and learned aliases.
 
@@ -36,6 +44,8 @@ def build_target_catalog(workspace, *, limit=300):
                 "discovery_count": 0,
                 "sources": set(),
                 "aliases": set(),
+                "latitude": None,
+                "longitude": None,
             },
         )
         label = _clean(target_label, 255)
@@ -74,6 +84,11 @@ def build_target_catalog(workspace, *, limit=300):
             continue
         item["discovery_count"] += 1
         item["sources"].add("discovery")
+        latitude = _coordinate(search.get("resolved_location_lat"), minimum=-90, maximum=90)
+        longitude = _coordinate(search.get("resolved_location_lng"), minimum=-180, maximum=180)
+        if latitude is not None and longitude is not None:
+            item["latitude"] = latitude
+            item["longitude"] = longitude
 
     recent = UGCSubmission.objects.for_workspace(workspace.id).only("metadata").order_by("-updated_at")[:500]
     for submission in recent:

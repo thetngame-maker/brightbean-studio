@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     ugc_bulk_permission_views,
+    ugc_coverage_views,
     ugc_creator_collaboration_views,
     ugc_creator_task_views,
     ugc_creator_views,
@@ -64,6 +65,7 @@ urlpatterns = [
         "rights/<uuid:submission_id>/update/", ugc_creator_views.update_rights_passport, name="update_rights_passport"
     ),
     path("targets/", ugc_target_catalog_views.target_catalog, name="target_catalog"),
+    path("targets/coverage/", ugc_coverage_views.coverage_map, name="coverage_map"),
     path("review/<uuid:submission_id>/", ugc_mobile_review_dispatch.mobile_review, name="mobile_review"),
     path("review/<uuid:submission_id>/retarget/", ugc_mobile_target_views.retarget_submission, name="mobile_retarget"),
     path(

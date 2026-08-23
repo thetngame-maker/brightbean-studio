@@ -37,6 +37,7 @@
     <a class="ugc-lite-tab {% if active_tab == 'approved' %}active{% endif %}" href="?tab=approved">Approved {{ queue_counts.approved }}</a>
     <a class="ugc-lite-tab {% if active_tab == 'reported' %}active{% endif %}" href="?tab=reported">Reported {{ queue_counts.reported }}</a>
     <a class="ugc-lite-tab {% if active_tab == 'removed' %}active{% endif %}" href="?tab=removed">Removed {{ queue_counts.removed }}</a>
+    <a class="ugc-lite-tab" href="{% url 'ugc:coverage_map' workspace_id=workspace.id %}">Coverage</a>
   </nav>
 
   {% if active_tab == 'discovered' %}

@@ -16,6 +16,7 @@
             <p class="text-sm text-stone-500 mt-1">Discover, review, permission, and reuse community content with a complete moderation trail.</p>
         </div>
         <div class="flex items-center gap-2">
+            <a href="{% url 'ugc:coverage_map' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 text-xs font-semibold hover:bg-violet-100">Coverage map</a>
             <a href="{% url 'ugc:creator_hub' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-stone-200 bg-white text-violet-700 text-xs font-semibold hover:bg-violet-50">Creator relationships</a>
             {% if active_tab == 'discovered' %}
             <a href="{% url 'ugc:discovered_item_form' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700">
