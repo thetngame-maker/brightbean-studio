@@ -48,7 +48,6 @@ def build_target_catalog(workspace, *, limit=300):
             item["target_url"] = url
         return item
 
-    # Community content gives us real usage counts and the latest known labels/URLs.
     rows = (
         UGCSubmission.objects.for_workspace(workspace.id)
         .exclude(target_type="")
@@ -64,7 +63,6 @@ def build_target_catalog(workspace, *, limit=300):
         item["ugc_count"] += int(row.get("use_count") or 0)
         item["sources"].add("community")
 
-    # Saved discovery searches often know a target before any UGC has been imported.
     for search in list(workspace.discovery_searches or [])[:200]:
         if not isinstance(search, dict):
             continue
@@ -79,12 +77,7 @@ def build_target_catalog(workspace, *, limit=300):
         item["discovery_count"] += 1
         item["sources"].add("discovery")
 
-    # Corrections teach aliases without silently changing historical submissions.
-    recent = (
-        UGCSubmission.objects.for_workspace(workspace.id)
-        .only("metadata")
-        .order_by("-updated_at")[:500]
-    )
+    recent = UGCSubmission.objects.for_workspace(workspace.id).only("metadata").order_by("-updated_at")[:500]
     for submission in recent:
         correction = (submission.metadata or {}).get("target_correction") or {}
         target_type = _clean(correction.get("to_target_type"), 100)
@@ -144,12 +137,11 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
     return catalog[:limit]
 
 
-def learned_target_for_text(workspace, text, *, current_label=""):
+def learned_target_for_text(workspace, text, *, current_label="", catalog=None):
     """Resolve one explicit human-taught alias from text, or return None.
 
-    This is intentionally conservative. It never guesses from canonical target
-    names and it never chooses between competing learned aliases. If the text
-    already names the current/default target, the saved discovery target wins.
+    A caller processing many rows can pass one prebuilt catalog so this remains
+    effectively free per item. Ambiguous aliases intentionally return None.
     """
     text_norm = _normalise(text)
     current_norm = _normalise(current_label)
@@ -157,7 +149,7 @@ def learned_target_for_text(workspace, text, *, current_label=""):
         return None
 
     matches = {}
-    for item in build_target_catalog(workspace, limit=500):
+    for item in catalog if catalog is not None else build_target_catalog(workspace, limit=500):
         key = (item["target_type"], item["target_id"])
         for alias in item.get("aliases", []):
             alias_norm = _normalise(alias)
@@ -166,7 +158,6 @@ def learned_target_for_text(workspace, text, *, current_label=""):
             match = matches.setdefault(key, {"target": item, "aliases": []})
             match["aliases"].append(alias)
 
-    # One unique target is required. Ambiguity is intentionally left for human review.
     if len(matches) != 1:
         return None
     match = next(iter(matches.values()))
