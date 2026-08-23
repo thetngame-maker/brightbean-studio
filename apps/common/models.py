@@ -350,6 +350,88 @@ class UGCRightsPassport(models.Model):
         return f"{self.get_status_display()} rights for {self.submission}"
 
 
+class UGCCreatorTask(models.Model):
+    """A lightweight next action in a workspace's creator relationship workflow."""
+
+    class Kind(models.TextChoices):
+        OUTREACH = "outreach", "Outreach"
+        FOLLOW_UP = "follow_up", "Follow-up"
+        THANK_YOU = "thank_you", "Thank-you"
+        COLLABORATION = "collaboration", "Collaboration"
+        RIGHTS_RENEWAL = "rights_renewal", "Rights renewal"
+        CUSTOM = "custom", "Custom"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        DONE = "done", "Done"
+        DISMISSED = "dismissed", "Dismissed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_tasks",
+    )
+    creator = models.ForeignKey(
+        UGCCreator,
+        on_delete=models.CASCADE,
+        related_name="tasks",
+    )
+    submission = models.ForeignKey(
+        UGCSubmission,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="creator_tasks",
+    )
+    kind = models.CharField(max_length=30, choices=Kind.choices, default=Kind.CUSTOM, db_index=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN, db_index=True)
+    title = models.CharField(max_length=255)
+    note = models.TextField(blank=True, default="")
+    due_at = models.DateTimeField(db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_ugc_creator_tasks",
+    )
+    completed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="completed_ugc_creator_tasks",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_task"
+        ordering = ["due_at", "created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "submission", "kind"],
+                condition=models.Q(status="open", kind="rights_renewal"),
+                name="ugc_ctask_open_renew_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "status", "due_at"], name="ugc_ctask_status_due_idx"),
+            models.Index(fields=["creator", "status", "due_at"], name="ugc_ctask_creator_due_idx"),
+        ]
+
+    @property
+    def is_overdue(self):
+        return self.status == self.Status.OPEN and self.due_at < timezone.now()
+
+    def __str__(self):
+        return self.title
+
+
 class UGCModerationEvent(models.Model):
     """Append-only history of moderator decisions for a UGC submission."""
 

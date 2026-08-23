@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     ugc_bulk_permission_views,
+    ugc_creator_task_views,
     ugc_creator_views,
     ugc_discovery_bulk_views,
     ugc_discovery_intelligence_views,
@@ -24,10 +25,19 @@ app_name = "ugc"
 urlpatterns = [
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
     path("creators/", ugc_creator_views.creator_hub, name="creator_hub"),
+    path("creators/tasks/", ugc_creator_task_views.creator_tasks, name="creator_tasks"),
+    path(
+        "creators/tasks/<uuid:task_id>/update/", ugc_creator_task_views.update_creator_task, name="update_creator_task"
+    ),
     path("creators/opportunities/", ugc_creator_views.creator_opportunities, name="creator_opportunities"),
     path("creators/<uuid:creator_id>/", ugc_creator_views.creator_detail, name="creator_detail"),
     path("creators/<uuid:creator_id>/update/", ugc_creator_views.update_creator, name="update_creator"),
     path("creators/<uuid:creator_id>/promote/", ugc_creator_views.promote_creator, name="promote_creator"),
+    path(
+        "creators/<uuid:creator_id>/tasks/create/",
+        ugc_creator_task_views.create_creator_task,
+        name="create_creator_task",
+    ),
     path("rights/<uuid:submission_id>/", ugc_creator_views.rights_passport, name="rights_passport"),
     path(
         "rights/<uuid:submission_id>/update/", ugc_creator_views.update_rights_passport, name="update_rights_passport"

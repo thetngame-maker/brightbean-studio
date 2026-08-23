@@ -7,7 +7,14 @@ from django.utils import timezone
 from apps.accounts.models import User
 from apps.composer.models import Post
 
-from ..models import AuditEvent, UGCCreator, UGCCreatorIdentity, UGCRightsPassport, UGCSubmission
+from ..models import (
+    AuditEvent,
+    UGCCreator,
+    UGCCreatorIdentity,
+    UGCCreatorTask,
+    UGCRightsPassport,
+    UGCSubmission,
+)
 from ..ugc_creator_services import rights_can_use
 from ..ugc_mobile_quality import approved_quality
 from ..ugc_permissions import get_permission
@@ -246,3 +253,135 @@ class UGCCreatorRelationshipTests(TestCase):
         submission.creator.refresh_from_db()
         self.assertEqual(submission.creator.relationship_stage, UGCCreator.RelationshipStage.PROSPECT)
         self.assertFalse(AuditEvent.objects.filter(action="ugc.creator_promoted").exists())
+
+    def test_relationship_task_queue_create_complete_and_reopen(self):
+        submission = self.create_submission(contributor_handle="task_creator")
+        creator = submission.creator
+        detail_url = reverse(
+            "ugc:creator_detail",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": creator.id},
+        )
+        create_url = reverse(
+            "ugc:create_creator_task",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": creator.id},
+        )
+        due_at = timezone.now() + timedelta(hours=2)
+        response = self.client.post(
+            create_url,
+            {
+                "kind": "follow_up",
+                "title": "Send collaboration follow-up",
+                "note": "Mention the waterfall series.",
+                "due_at": due_at.strftime("%Y-%m-%dT%H:%M"),
+                "return_to": detail_url,
+            },
+        )
+        self.assertRedirects(response, detail_url, fetch_redirect_response=False)
+        task = UGCCreatorTask.objects.get(creator=creator)
+        self.assertEqual(task.status, UGCCreatorTask.Status.OPEN)
+        self.assertEqual(task.created_by, self.user)
+
+        queue_url = reverse("ugc:creator_tasks", kwargs={"workspace_id": self.workspace.id})
+        queue = self.client.get(queue_url)
+        self.assertEqual(queue.status_code, 200)
+        self.assertContains(queue, "Creator Tasks")
+        self.assertContains(queue, "Send collaboration follow-up")
+
+        update_url = reverse(
+            "ugc:update_creator_task",
+            kwargs={"workspace_id": self.workspace.id, "task_id": task.id},
+        )
+        self.client.post(update_url, {"action": "complete", "return_to": f"{queue_url}?view=today"})
+        task.refresh_from_db()
+        self.assertEqual(task.status, UGCCreatorTask.Status.DONE)
+        self.assertEqual(task.completed_by, self.user)
+        self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_task_complete").exists())
+
+        self.client.post(update_url, {"action": "reopen", "return_to": f"{queue_url}?view=done"})
+        task.refresh_from_db()
+        self.assertEqual(task.status, UGCCreatorTask.Status.OPEN)
+        self.assertIsNone(task.completed_at)
+
+    def test_relationship_task_snooze_and_overdue_filter(self):
+        submission = self.create_submission(contributor_handle="overdue_creator")
+        task = UGCCreatorTask.objects.create(
+            workspace=self.workspace,
+            creator=submission.creator,
+            kind=UGCCreatorTask.Kind.OUTREACH,
+            title="Overdue outreach",
+            due_at=timezone.now() - timedelta(days=2),
+        )
+        queue_url = reverse("ugc:creator_tasks", kwargs={"workspace_id": self.workspace.id})
+        overdue = self.client.get(queue_url, {"view": "overdue"})
+        self.assertContains(overdue, "Overdue outreach")
+
+        update_url = reverse(
+            "ugc:update_creator_task",
+            kwargs={"workspace_id": self.workspace.id, "task_id": task.id},
+        )
+        before = timezone.now()
+        self.client.post(update_url, {"action": "snooze_7"})
+        task.refresh_from_db()
+        self.assertGreaterEqual(task.due_at, before + timedelta(days=7))
+        upcoming = self.client.get(queue_url, {"view": "upcoming"})
+        self.assertContains(upcoming, "Overdue outreach")
+
+    def test_do_not_contact_blocks_contact_relationship_tasks(self):
+        submission = self.create_submission(contributor_handle="blocked_task_creator")
+        creator = submission.creator
+        creator.relationship_stage = UGCCreator.RelationshipStage.DO_NOT_CONTACT
+        creator.save(update_fields=["relationship_stage", "updated_at"])
+        create_url = reverse(
+            "ugc:create_creator_task",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": creator.id},
+        )
+
+        self.client.post(create_url, {"kind": "outreach", "title": "Contact creator"})
+        self.assertFalse(UGCCreatorTask.objects.filter(creator=creator).exists())
+        self.client.post(create_url, {"kind": "custom", "title": "Internal review"})
+        self.assertTrue(UGCCreatorTask.objects.filter(creator=creator, title="Internal review").exists())
+
+    def test_expiring_rights_create_update_and_dismiss_renewal_task(self):
+        submission = self.create_submission(
+            contributor_handle="renewal_creator",
+            status=UGCSubmission.Status.APPROVED,
+            consent_confirmed=True,
+            consent_at=timezone.now(),
+        )
+        passport = submission.rights_passport
+        passport.expires_at = timezone.now() + timedelta(days=60)
+        passport.save(update_fields=["expires_at", "updated_at"])
+
+        task = UGCCreatorTask.objects.get(
+            submission=submission,
+            kind=UGCCreatorTask.Kind.RIGHTS_RENEWAL,
+        )
+        self.assertEqual(task.status, UGCCreatorTask.Status.OPEN)
+        self.assertAlmostEqual(
+            task.due_at,
+            passport.expires_at - timedelta(days=14),
+            delta=timedelta(seconds=1),
+        )
+        passport.save(update_fields=["updated_at"])
+        self.assertEqual(
+            UGCCreatorTask.objects.filter(
+                submission=submission,
+                kind=UGCCreatorTask.Kind.RIGHTS_RENEWAL,
+            ).count(),
+            1,
+        )
+
+        passport.expires_at = timezone.now() + timedelta(days=90)
+        passport.save(update_fields=["expires_at", "updated_at"])
+        task.refresh_from_db()
+        self.assertAlmostEqual(
+            task.due_at,
+            passport.expires_at - timedelta(days=14),
+            delta=timedelta(seconds=1),
+        )
+
+        passport.expires_at = None
+        passport.save(update_fields=["expires_at", "updated_at"])
+        task.refresh_from_db()
+        self.assertEqual(task.status, UGCCreatorTask.Status.DISMISSED)
+        self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_task_auto_created").exists())

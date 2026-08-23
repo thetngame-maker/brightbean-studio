@@ -9,7 +9,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.core.validators import URLValidator
-from django.db.models import Count, Max, Prefetch, Q
+from django.db.models import Count, Max, Min, Prefetch, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -21,7 +21,14 @@ from apps.members.decorators import require_permission
 from apps.social_accounts.models import SocialAccount
 
 from .audit import record_audit_event
-from .models import AuditEvent, UGCCreator, UGCCreatorIdentity, UGCRightsPassport, UGCSubmission
+from .models import (
+    AuditEvent,
+    UGCCreator,
+    UGCCreatorIdentity,
+    UGCCreatorTask,
+    UGCRightsPassport,
+    UGCSubmission,
+)
 from .ugc_creator_opportunities import (
     OPPORTUNITY_LABELS,
     classify_creator_opportunity,
@@ -73,6 +80,15 @@ def _creator_queryset(workspace):
                 distinct=True,
             ),
             latest_content_at=Max("submissions__submitted_at"),
+            open_task_count=Count(
+                "tasks",
+                filter=Q(tasks__status=UGCCreatorTask.Status.OPEN),
+                distinct=True,
+            ),
+            next_task_due=Min(
+                "tasks__due_at",
+                filter=Q(tasks__status=UGCCreatorTask.Status.OPEN),
+            ),
         )
         .order_by("-last_seen_at", "display_name")
     )
@@ -237,12 +253,29 @@ def creator_detail(request, workspace_id, creator_id):
         creator,
         engagement_score=creator_engagement_score([item.metadata for item in submissions]),
     )
+    open_creator_tasks = list(
+        UGCCreatorTask.objects.for_workspace(workspace.id)
+        .filter(creator=creator, status=UGCCreatorTask.Status.OPEN)
+        .select_related("submission")
+        .order_by("due_at")[:20]
+    )
+    open_creator_task_count = (
+        UGCCreatorTask.objects.for_workspace(workspace.id)
+        .filter(
+            creator=creator,
+            status=UGCCreatorTask.Status.OPEN,
+        )
+        .count()
+    )
     context = {
         "workspace": workspace,
         "creator": creator,
         "creator_submissions": submissions,
         "creator_events": events,
         "creator_opportunity": creator_opportunity,
+        "open_creator_tasks": open_creator_tasks,
+        "open_creator_task_count": open_creator_task_count,
+        "creator_task_kind_choices": UGCCreatorTask.Kind.choices,
         "creator_stage_choices": UGCCreator.RelationshipStage.choices,
         "creator_stats": {
             "content": len(submissions),
