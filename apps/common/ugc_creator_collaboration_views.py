@@ -23,6 +23,10 @@ from .models import (
     UGCCreatorTask,
     UGCSubmission,
 )
+from .ugc_creator_collaboration_deliveries import (
+    delivery_history_for,
+    latest_rights_request_for,
+)
 from .ugc_creator_collaboration_invites import close_pending_collaboration_invites, expire_collaboration_invite
 from .ugc_creator_collaboration_milestones import collaboration_milestone_summary
 from .ugc_creator_services import rights_can_use
@@ -225,11 +229,24 @@ def creator_collaboration_detail(request, workspace_id, collaboration_id):
         .order_by("-submitted_at")[:100]
     )
     rights_ready, rights_reason = _collaboration_rights_can_complete(collaboration)
+    delivery_history = delivery_history_for(collaboration)
+    latest_delivery = delivery_history[0] if delivery_history else None
+    delivery_rights_request = latest_rights_request_for(
+        latest_delivery.submission if latest_delivery else collaboration.submission
+    )
+    delivery_rights_public_url = ""
+    if delivery_rights_request and delivery_rights_request.status == delivery_rights_request.Status.PENDING:
+        delivery_rights_public_url = request.build_absolute_uri(
+            reverse(
+                "creator_rights_public:respond",
+                kwargs={"token": delivery_rights_request.request_token},
+            )
+        )
     creator_invites = list(collaboration.creator_invites.select_related("created_by").order_by("-created_at")[:8])
     for invite in creator_invites:
         expire_collaboration_invite(invite)
         invite.public_url = ""
-        if invite.is_available:
+        if invite.is_available or invite.status == invite.Status.ACCEPTED:
             invite.public_url = request.build_absolute_uri(
                 reverse("creator_collaboration_public:respond", kwargs={"token": invite.request_token})
             )
@@ -246,6 +263,14 @@ def creator_collaboration_detail(request, workspace_id, collaboration_id):
             "rights_reason": rights_reason,
             "creator_invites": creator_invites,
             "active_creator_invite": next((item for item in creator_invites if item.is_available), None),
+            "creator_portal_invite": next(
+                (item for item in creator_invites if item.status == item.Status.ACCEPTED),
+                None,
+            ),
+            "delivery_history": delivery_history,
+            "latest_delivery": latest_delivery,
+            "delivery_rights_request": delivery_rights_request,
+            "delivery_rights_public_url": delivery_rights_public_url,
             "can_create_creator_invite": collaboration.status
             in {
                 UGCCreatorCollaboration.Status.DRAFT,
@@ -357,6 +382,16 @@ def update_creator_collaboration(request, workspace_id, collaboration_id):
     before = {"status": collaboration.status, "submission_id": str(collaboration.submission_id or "")}
 
     if action == "save":
+        if collaboration.status in {
+            UGCCreatorCollaboration.Status.CONFIRMED,
+            UGCCreatorCollaboration.Status.CONTENT_RECEIVED,
+            UGCCreatorCollaboration.Status.COMPLETED,
+        }:
+            messages.error(
+                request,
+                "Accepted collaboration terms are frozen. Create a new collaboration for changed deliverables or usage.",
+            )
+            return redirect(return_to)
         target = _target_from_request(workspace, request)
         if target is None:
             messages.error(request, "Choose a TN Game target from the existing target catalog.")
@@ -406,6 +441,11 @@ def update_creator_collaboration(request, workspace_id, collaboration_id):
         collaboration.save(update_fields=["submission", "updated_at"])
         message = "Delivered content linked." if submission else "Delivered content link removed."
     else:
+        if action == "mark_received" and collaboration.deliveries.filter(
+            status="submitted",
+        ).exists():
+            messages.error(request, "Review the creator’s submitted delivery instead of bypassing its feedback history.")
+            return redirect(return_to)
         transition = {
             "mark_invited": ({UGCCreatorCollaboration.Status.DRAFT}, UGCCreatorCollaboration.Status.INVITED),
             "mark_interested": (

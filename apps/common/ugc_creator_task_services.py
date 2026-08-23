@@ -6,9 +6,68 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .audit import record_audit_event
-from .models import AuditEvent, UGCCreatorTask, UGCRightsPassport
+from .models import AuditEvent, UGCCreatorCollaboration, UGCCreatorTask, UGCRightsPassport
 
 RIGHTS_RENEWAL_NOTICE_DAYS = 14
+COLLABORATION_RIGHTS_FIELDS = {
+    "organic_social": "allow_organic_social",
+    "website": "allow_website",
+    "email": "allow_email",
+    "paid_ads": "allow_paid_ads",
+    "print": "allow_print",
+}
+
+
+def sync_collaboration_rights_task(passport):
+    """Turn a creator rights response into the collaboration's next canonical task."""
+    collaborations = UGCCreatorCollaboration.objects.filter(
+        submission_id=passport.submission_id,
+        status=UGCCreatorCollaboration.Status.CONTENT_RECEIVED,
+    ).select_related("creator", "workspace")
+    now = timezone.now()
+    for collaboration in collaborations:
+        requested = collaboration.requested_rights or ["organic_social"]
+        rights_ready = passport.is_active and all(
+            getattr(passport, COLLABORATION_RIGHTS_FIELDS.get(scope, ""), False) for scope in requested
+        )
+        if rights_ready:
+            title = f"Complete collaboration · {collaboration.title}"[:255]
+            note = "Creator usage rights are active for every scope in the accepted brief."
+        else:
+            title = f"Resolve creator usage rights · {collaboration.title}"[:255]
+            note = f"Rights are {passport.get_status_display().lower()} or do not cover every requested scope."
+        open_tasks = UGCCreatorTask.objects.filter(
+            collaboration=collaboration,
+            status=UGCCreatorTask.Status.OPEN,
+        )
+        existing = open_tasks.filter(title=title).first()
+        if existing:
+            continue
+        open_tasks.update(status=UGCCreatorTask.Status.DONE, completed_at=now, updated_at=now)
+        task = UGCCreatorTask.objects.create(
+            workspace=collaboration.workspace,
+            creator=collaboration.creator,
+            collaboration=collaboration,
+            submission=passport.submission,
+            kind=UGCCreatorTask.Kind.COLLABORATION,
+            title=title,
+            note=note,
+            due_at=now,
+        )
+        record_audit_event(
+            workspace=collaboration.workspace,
+            action="ugc.creator_task_auto_created",
+            target=collaboration.creator,
+            source=AuditEvent.Source.SYSTEM,
+            metadata={
+                "task_id": str(task.id),
+                "kind": task.kind,
+                "submission_id": str(passport.submission_id),
+                "collaboration_id": str(collaboration.id),
+                "rights_ready": rights_ready,
+            },
+        )
+    return None
 
 
 def sync_rights_renewal_task(passport):

@@ -7,6 +7,7 @@ from . import (
     ugc_bulk_permission_views,
     ugc_content_mission_views,
     ugc_coverage_views,
+    ugc_creator_collaboration_delivery_views,
     ugc_creator_collaboration_invite_views,
     ugc_creator_collaboration_views,
     ugc_creator_rights_request_views,
@@ -133,6 +134,11 @@ urlpatterns = [
         "creators/collaborations/<uuid:collaboration_id>/invite/",
         ugc_creator_collaboration_invite_views.create_collaboration_invite_view,
         name="create_creator_collaboration_invite",
+    ),
+    path(
+        "creators/collaborations/deliveries/<uuid:delivery_id>/review/",
+        ugc_creator_collaboration_delivery_views.review_creator_delivery_view,
+        name="review_creator_collaboration_delivery",
     ),
     path("creators/tasks/", ugc_creator_task_views.creator_tasks, name="creator_tasks"),
     path(

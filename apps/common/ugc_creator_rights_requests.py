@@ -13,6 +13,7 @@ from django.utils.crypto import constant_time_compare, salted_hmac
 from .audit import record_audit_event
 from .models import AuditEvent, UGCCreatorRightsRequest, UGCRightsPassport, UGCSubmission
 from .ugc_creator_services import sync_rights_passport_from_submission
+from .ugc_creator_task_services import sync_collaboration_rights_task
 from .ugc_permissions import DECLINED, GRANTED, get_permission, set_permission
 
 CONSENT_VERSION = "creator-rights-portal-v1"
@@ -224,6 +225,7 @@ def respond_to_creator_rights_request(rights_request, *, action, selected_scopes
         rights_request.granted_scopes = granted
         rights_request.responded_at = now
         rights_request.save(update_fields=["status", "granted_scopes", "responded_at", "updated_at"])
+        sync_collaboration_rights_task(passport)
         record_audit_event(
             workspace=rights_request.workspace,
             actor=None,

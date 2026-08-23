@@ -16,7 +16,13 @@ from django.views.decorators.http import require_http_methods, require_POST
 from apps.members.decorators import require_permission
 
 from .audit import record_audit_event
-from .models import UGCCreatorCollaboration
+from .models import UGCCreatorCollaboration, UGCCreatorCollaborationDelivery, UGCCreatorRightsRequest
+from .ugc_creator_collaboration_deliveries import (
+    CreatorDeliveryError,
+    latest_delivery_for,
+    latest_rights_request_for,
+    submit_creator_delivery,
+)
 from .ugc_creator_collaboration_invites import (
     ACCEPTED,
     CollaborationInviteError,
@@ -106,11 +112,24 @@ def _rate_limited(request, invite):
     return count > PUBLIC_RESPONSE_LIMIT
 
 
-def _public_response(request, invite, *, error="", status=200):
+def _public_response(request, invite, *, error="", notice="", status=200):
     snapshot = invite.terms_snapshot or {}
     identities = list(invite.collaboration.creator.identities.all())
     primary = next((identity for identity in identities if identity.is_primary), identities[0] if identities else None)
     due_at = parse_datetime(str(snapshot.get("content_due_at") or ""))
+    latest_delivery = latest_delivery_for(invite.collaboration)
+    rights_request = latest_rights_request_for(latest_delivery.submission if latest_delivery else None)
+    rights_public_url = ""
+    if rights_request and rights_request.status == UGCCreatorRightsRequest.Status.PENDING:
+        rights_public_url = reverse("creator_rights_public:respond", kwargs={"token": rights_request.request_token})
+    can_submit_delivery = bool(
+        invite.status == invite.Status.ACCEPTED
+        and invite.collaboration.status == UGCCreatorCollaboration.Status.CONFIRMED
+        and (
+            latest_delivery is None
+            or latest_delivery.status == UGCCreatorCollaborationDelivery.Status.REVISION_REQUESTED
+        )
+    )
     response = render(
         request,
         "ugc/creator_collaboration_public.html",
@@ -128,7 +147,14 @@ def _public_response(request, invite, *, error="", status=200):
             "creator_label": invite.collaboration.creator.display_name
             or (f"@{primary.handle}" if primary and primary.handle else "Creator"),
             "collaboration_error": error,
+            "collaboration_notice": notice,
             "milestones": collaboration_milestone_summary(invite.collaboration),
+            "latest_delivery": latest_delivery,
+            "can_submit_delivery": can_submit_delivery,
+            "rights_request": rights_request,
+            "rights_public_url": rights_public_url,
+            "delivery_form_source_url": str(request.POST.get("source_url") or "").strip()[:2000],
+            "delivery_form_note": str(request.POST.get("creator_note") or "").strip()[:2000],
         },
         status=status,
     )
@@ -163,4 +189,27 @@ def creator_collaboration_public_view(request, token):
             )
         except CollaborationInviteError as exc:
             return _public_response(request, invite, error=str(exc), status=400)
+    elif (
+        request.method == "POST"
+        and invite.status == invite.Status.ACCEPTED
+        and str(request.POST.get("action") or "").strip().lower() == "submit_delivery"
+    ):
+        if _rate_limited(request, invite):
+            return _public_response(request, invite, error="Too many attempts. Please try again later.", status=429)
+        try:
+            submit_creator_delivery(
+                invite,
+                source_url=request.POST.get("source_url"),
+                creator_note=request.POST.get("creator_note"),
+                uploaded_files=request.FILES.getlist("media_files"),
+                deliverables_confirmed=request.POST.get("deliverables_confirmed") == "1",
+            )
+        except CreatorDeliveryError as exc:
+            return _public_response(request, invite, error=str(exc), status=400)
+        invite.collaboration.refresh_from_db()
+        return _public_response(
+            request,
+            invite,
+            notice="Delivery received. The team can now review this exact revision.",
+        )
     return _public_response(request, invite)

@@ -576,6 +576,98 @@ class UGCCreatorCollaborationInvite(models.Model):
         return f"{self.get_status_display()} · {self.collaboration}"
 
 
+class UGCCreatorCollaborationDelivery(models.Model):
+    """One immutable creator delivery revision for an existing collaboration."""
+
+    class Status(models.TextChoices):
+        SUBMITTED = "submitted", "Awaiting review"
+        REVISION_REQUESTED = "revision_requested", "Revision requested"
+        ACCEPTED = "accepted", "Accepted"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_collaboration_deliveries",
+    )
+    collaboration = models.ForeignKey(
+        UGCCreatorCollaboration,
+        on_delete=models.CASCADE,
+        related_name="deliveries",
+    )
+    submission = models.ForeignKey(
+        UGCSubmission,
+        on_delete=models.CASCADE,
+        related_name="creator_collaboration_deliveries",
+    )
+    revision_number = models.PositiveIntegerField()
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.SUBMITTED, db_index=True)
+    source_url = models.URLField(max_length=2000, blank=True, default="")
+    creator_note = EncryptedTextField(blank=True, default="")
+    review_note = EncryptedTextField(blank=True, default="")
+    submitted_at = models.DateTimeField(default=timezone.now, db_index=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_ugc_creator_deliveries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_collaboration_delivery"
+        ordering = ["-revision_number"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["collaboration", "revision_number"],
+                name="ugc_collab_delivery_revision_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "status", "-submitted_at"], name="ugc_delivery_status_idx"),
+            models.Index(fields=["collaboration", "-revision_number"], name="ugc_delivery_collab_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.collaboration} · revision {self.revision_number}"
+
+
+class UGCCreatorCollaborationDeliveryAsset(models.Model):
+    """An ordered Media Library asset attached to a creator delivery revision."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    delivery = models.ForeignKey(
+        UGCCreatorCollaborationDelivery,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+    )
+    media_asset = models.ForeignKey(
+        "media_library.MediaAsset",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="creator_collaboration_delivery_attachments",
+    )
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "common_ugc_creator_collaboration_delivery_asset"
+        ordering = ["position", "created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["delivery", "position"], name="ugc_delivery_asset_position_uniq")
+        ]
+        indexes = [models.Index(fields=["delivery", "position"], name="ugc_delivery_asset_idx")]
+
+    def __str__(self):
+        return f"{self.delivery} · asset {self.position + 1}"
+
+
 class UGCCreatorTask(models.Model):
     """A lightweight next action in a workspace's creator relationship workflow."""
 
