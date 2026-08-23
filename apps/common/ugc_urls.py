@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     ugc_bulk_permission_views,
+    ugc_content_mission_views,
     ugc_coverage_views,
     ugc_creator_collaboration_views,
     ugc_creator_task_views,
@@ -26,6 +27,13 @@ app_name = "ugc"
 
 urlpatterns = [
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
+    path("missions/", ugc_content_mission_views.content_missions, name="content_missions"),
+    path("missions/create/", ugc_content_mission_views.create_content_mission, name="create_content_mission"),
+    path(
+        "missions/<uuid:mission_id>/update/",
+        ugc_content_mission_views.update_content_mission,
+        name="update_content_mission",
+    ),
     path("creators/", ugc_creator_views.creator_hub, name="creator_hub"),
     path(
         "creators/collaborations/",

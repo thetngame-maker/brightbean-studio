@@ -517,6 +517,64 @@ class UGCCreatorTask(models.Model):
         return self.title
 
 
+class UGCContentMission(models.Model):
+    """A focused request for new community content around one canonical target."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        ACTIVE = "active", "Active"
+        PAUSED = "paused", "Paused"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_content_missions",
+    )
+    title = models.CharField(max_length=255)
+    brief = models.TextField(blank=True, default="")
+    deliverables = models.TextField(blank=True, default="")
+    creator_prompt = models.TextField(blank=True, default="")
+    offer = models.CharField(max_length=500, blank=True, default="")
+    target_type = models.CharField(max_length=100, db_index=True)
+    target_id = models.CharField(max_length=255, db_index=True)
+    target_label = models.CharField(max_length=255)
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    goal_count = models.PositiveSmallIntegerField(default=3)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    starts_at = models.DateTimeField(default=timezone.now, db_index=True)
+    due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_ugc_content_missions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_content_mission"
+        ordering = ["due_at", "-updated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "due_at"], name="ugc_mission_status_due_idx"),
+            models.Index(fields=["workspace", "target_type", "target_id"], name="ugc_mission_target_idx"),
+        ]
+
+    @property
+    def is_overdue(self):
+        return bool(self.status == self.Status.ACTIVE and self.due_at and self.due_at < timezone.now())
+
+    def __str__(self):
+        return self.title
+
+
 class UGCModerationEvent(models.Model):
     """Append-only history of moderator decisions for a UGC submission."""
 
