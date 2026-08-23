@@ -14,6 +14,7 @@ from . import (
     ugc_mobile_queue_dispatch,
     ugc_mobile_review_dispatch,
     ugc_mobile_target_views,
+    ugc_target_catalog_views,
     ugc_views,
 )
 
@@ -21,6 +22,7 @@ app_name = "ugc"
 
 urlpatterns = [
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
+    path("targets/", ugc_target_catalog_views.target_catalog, name="target_catalog"),
     path("review/<uuid:submission_id>/", ugc_mobile_review_dispatch.mobile_review, name="mobile_review"),
     path("review/<uuid:submission_id>/retarget/", ugc_mobile_target_views.retarget_submission, name="mobile_retarget"),
     path("review/<uuid:submission_id>/quality-checked/", ugc_mobile_target_views.mark_quality_checked, name="mobile_quality_checked"),
