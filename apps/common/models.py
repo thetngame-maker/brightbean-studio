@@ -1,3 +1,5 @@
+import secrets
+import string
 import uuid
 
 from django.conf import settings
@@ -5,6 +7,11 @@ from django.db import models
 from django.utils import timezone
 
 from apps.common.managers import WorkspaceScopedManager
+
+
+def _generate_attribution_code():
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(10))
 
 
 class AuditEvent(models.Model):
@@ -820,6 +827,133 @@ class TourismImpactReportSchedule(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class CampaignAttributionLink(models.Model):
+    """A workspace-owned first-party link for campaign outcome attribution."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="campaign_attribution_links",
+    )
+    code = models.CharField(max_length=16, unique=True, default=_generate_attribution_code, editable=False)
+    name = models.CharField(max_length=255)
+    destination_url = models.URLField(max_length=2000)
+    post = models.ForeignKey(
+        "composer.Post",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="campaign_attribution_links",
+    )
+    target_type = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default="")
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    utm_source = models.CharField(max_length=100, blank=True, default="social")
+    utm_medium = models.CharField(max_length=100, blank=True, default="organic")
+    utm_campaign = models.CharField(max_length=150, blank=True, default="")
+    conversion_secret_hash = models.CharField(max_length=64)
+    conversion_secret_hint = models.CharField(max_length=12, blank=True, default="")
+    click_count = models.PositiveBigIntegerField(default=0)
+    unique_visitor_count = models.PositiveBigIntegerField(default=0)
+    registration_count = models.PositiveBigIntegerField(default=0)
+    last_clicked_at = models.DateTimeField(null=True, blank=True)
+    last_converted_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    archived_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_campaign_attribution_links",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_campaign_attribution_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_campaign_attribution_link"
+        ordering = ["-is_active", "-updated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "is_active", "-updated_at"], name="attrib_link_active_idx"),
+            models.Index(fields=["workspace", "target_type", "target_id"], name="attrib_link_target_idx"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class CampaignAttributionClick(models.Model):
+    """Privacy-preserving daily click aggregate; raw IP and user-agent are never stored."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    link = models.ForeignKey(CampaignAttributionLink, on_delete=models.CASCADE, related_name="click_days")
+    day = models.DateField(db_index=True)
+    visitor_hash = models.CharField(max_length=64)
+    clicks = models.PositiveIntegerField(default=1)
+    first_clicked_at = models.DateTimeField(default=timezone.now)
+    last_clicked_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        db_table = "common_campaign_attribution_click"
+        ordering = ["-day", "-last_clicked_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["link", "day", "visitor_hash"], name="attrib_click_daily_visitor_uniq")
+        ]
+        indexes = [models.Index(fields=["link", "day"], name="attrib_click_link_day_idx")]
+
+    def __str__(self):
+        return f"{self.link.code} · {self.day} · {self.clicks}"
+
+
+class CampaignAttributionConversion(models.Model):
+    """Immutable TN Game registration ledger entry, recorded manually or by webhook."""
+
+    class Source(models.TextChoices):
+        WEBHOOK = "webhook", "TN Game webhook"
+        MANUAL = "manual", "Manual entry"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    link = models.ForeignKey(CampaignAttributionLink, on_delete=models.CASCADE, related_name="conversions")
+    source = models.CharField(max_length=20, choices=Source.choices)
+    external_id_hash = models.CharField(max_length=64)
+    external_id_hint = models.CharField(max_length=12, blank=True, default="")
+    quantity = models.PositiveIntegerField(default=1)
+    occurred_at = models.DateTimeField(default=timezone.now, db_index=True)
+    note = models.CharField(max_length=500, blank=True, default="")
+    metadata = models.JSONField(default=dict, blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recorded_campaign_attribution_conversions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "common_campaign_attribution_conversion"
+        ordering = ["-occurred_at", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["link", "external_id_hash"], name="attrib_conversion_external_uniq")
+        ]
+        indexes = [models.Index(fields=["link", "occurred_at"], name="attrib_conv_link_time_idx")]
+
+    def __str__(self):
+        return f"{self.link.code} · {self.quantity} registration(s)"
 
 
 class ContentPerformanceProfile(models.Model):

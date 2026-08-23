@@ -455,6 +455,10 @@ def impact_csv_response(report):
         ("interactions", "Interactions"),
         ("shares_saves", "Shares and saves"),
         ("outbound_clicks", "Tracked outbound clicks"),
+        ("tracked_link_clicks", "First-party campaign link clicks"),
+        ("tracked_website_visits", "First-party unique daily website visits"),
+        ("tracked_registrations", "First-party TN Game registrations"),
+        ("tracked_conversion_rate", "First-party visit-to-registration rate (%)"),
         ("creator_participants", "Creator participants"),
         ("community_contributions", "Community contributions"),
         ("rights_cleared_assets", "Rights-cleared assets"),
@@ -466,6 +470,33 @@ def impact_csv_response(report):
     write(
         ["TN Game registrations (partner supplied)", report.registrations if report.registrations is not None else ""]
     )
+    campaigns = (report.snapshot or {}).get("campaign_attribution") or []
+    if campaigns:
+        write([])
+        write(["First-party campaign attribution"])
+        write(
+            [
+                "Campaign",
+                "Target",
+                "UTM campaign",
+                "Link clicks",
+                "Unique daily visits",
+                "Registrations",
+                "Conversion rate (%)",
+            ]
+        )
+        for row in campaigns:
+            write(
+                [
+                    row.get("name", ""),
+                    row.get("target_label", ""),
+                    row.get("utm_campaign", ""),
+                    row.get("tracked_clicks", 0),
+                    row.get("tracked_visits", 0),
+                    row.get("registrations", 0),
+                    row.get("conversion_rate", "") if row.get("conversion_rate") is not None else "",
+                ]
+            )
     write([])
     write(
         ["Destination", "Type", "Published posts", "Measured exposure", "Interactions", "Community posts", "Creators"]

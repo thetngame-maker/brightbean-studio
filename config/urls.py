@@ -10,6 +10,7 @@ from apps.oauth_server import views as oauth_views
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health_check"),
+    path("go/", include("apps.common.campaign_attribution_urls")),
     path("accounts/", include("apps.accounts.urls")),
     path("accounts/", include("allauth.urls")),
     path("organizations/", include("apps.organizations.urls")),

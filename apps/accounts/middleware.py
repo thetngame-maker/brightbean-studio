@@ -23,6 +23,7 @@ EXEMPT_PATH_PREFIXES = (
     "/accounts/google/",
     "/accounts/3rdparty/",
     "/health/",
+    "/go/",
     "/static/",
     "/admin/",
 )

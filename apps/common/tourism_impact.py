@@ -6,13 +6,16 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Q
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
 from apps.analytics.models import PostInsightsSnapshot
 from apps.composer.models import PlatformPost
 
 from .models import (
+    CampaignAttributionClick,
+    CampaignAttributionConversion,
+    CampaignAttributionLink,
     ContentPerformanceProfile,
     UGCContentMission,
     UGCCreatorCollaboration,
@@ -140,6 +143,75 @@ def _mission_snapshot(workspace, target, period_start, period_end):
             }
         )
     return rows
+
+
+def _attribution_snapshot(workspace, target, period_start, period_end, start_at, end_at):
+    links = CampaignAttributionLink.objects.for_workspace(workspace.id)
+    if target:
+        links = links.filter(target_type=target["target_type"], target_id=target["target_id"])
+    link_rows = list(
+        links.values("id", "name", "code", "target_type", "target_id", "target_label", "utm_campaign")[:500]
+    )
+    link_ids = [row["id"] for row in link_rows]
+    clicks = {
+        row["link_id"]: row
+        for row in CampaignAttributionClick.objects.filter(
+            link_id__in=link_ids,
+            day__gte=period_start,
+            day__lte=period_end,
+        )
+        .values("link_id")
+        .annotate(clicks=Sum("clicks"), unique_daily_visitors=Count("id"))
+    }
+    registrations = {
+        row["link_id"]: row
+        for row in CampaignAttributionConversion.objects.filter(
+            link_id__in=link_ids,
+            occurred_at__gte=start_at,
+            occurred_at__lt=end_at,
+        )
+        .values("link_id")
+        .annotate(registrations=Sum("quantity"))
+    }
+    campaigns = []
+    total_clicks = 0
+    total_visitors = 0
+    total_registrations = 0
+    for link in link_rows:
+        click_row = clicks.get(link["id"], {})
+        registration_row = registrations.get(link["id"], {})
+        raw_clicks = int(click_row.get("clicks") or 0)
+        visitors = int(click_row.get("unique_daily_visitors") or 0)
+        registration_count = int(registration_row.get("registrations") or 0)
+        if not (raw_clicks or registration_count):
+            continue
+        total_clicks += raw_clicks
+        total_visitors += visitors
+        total_registrations += registration_count
+        campaigns.append(
+            {
+                "name": link["name"],
+                "code": link["code"],
+                "target_type": link["target_type"],
+                "target_id": link["target_id"],
+                "target_label": link["target_label"],
+                "utm_campaign": link["utm_campaign"],
+                "tracked_clicks": raw_clicks,
+                "tracked_visits": visitors,
+                "registrations": registration_count,
+                "conversion_rate": round((registration_count / visitors) * 100, 1) if visitors else None,
+            }
+        )
+    campaigns.sort(key=lambda row: (-row["registrations"], -row["tracked_visits"], row["name"]))
+    return {
+        "tracked_link_clicks": total_clicks,
+        "tracked_website_visits": total_visitors,
+        "tracked_registrations": total_registrations,
+        "tracked_conversion_rate": round((total_registrations / total_visitors) * 100, 1)
+        if total_visitors
+        else None,
+        "campaigns": campaigns[:20],
+    }
 
 
 def build_impact_snapshot(workspace, *, period_start, period_end, target=None, equivalent_cpm=Decimal("12")):
@@ -305,6 +377,7 @@ def build_impact_snapshot(workspace, *, period_start, period_end, target=None, e
     top_posts.sort(key=lambda row: (-row["measured_exposure"], -row["interactions"], row["title"]))
 
     missions = _mission_snapshot(workspace, target, period_start, period_end)
+    attribution = _attribution_snapshot(workspace, target, period_start, period_end, start_at, end_at)
     rights_assets = _rights_assets(workspace, target)
     estimated_value = round((totals["measured_exposure"] / 1000) * float(equivalent_cpm), 2)
     highlights = []
@@ -320,9 +393,14 @@ def build_impact_snapshot(workspace, *, period_start, period_end, target=None, e
         highlights.append(
             f"Published coverage reached {destination_covered} of {destination_total} known TN Game destinations in this report scope."
         )
+    if attribution["tracked_website_visits"] or attribution["tracked_registrations"]:
+        highlights.append(
+            f"First-party campaign links recorded {attribution['tracked_website_visits']:,} unique daily visits "
+            f"and {attribution['tracked_registrations']:,} TN Game registrations."
+        )
 
     return {
-        "version": 1,
+        "version": 2,
         "generated_at": timezone.now().isoformat(),
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
@@ -339,12 +417,19 @@ def build_impact_snapshot(workspace, *, period_start, period_end, target=None, e
             "destinations_total": destination_total,
             "coverage_percent": coverage_percent,
             "estimated_organic_value": estimated_value,
+            "tracked_link_clicks": attribution["tracked_link_clicks"],
+            "tracked_website_visits": attribution["tracked_website_visits"],
+            "tracked_registrations": attribution["tracked_registrations"],
+            "tracked_conversion_rate": attribution["tracked_conversion_rate"],
         },
         "equivalent_cpm": float(equivalent_cpm),
         "methodology": (
             "Measured exposure uses the latest stored reach, impressions, views, or plays snapshot for each post "
             "on or before the report end date. Equivalent media value multiplies measured exposure by the report’s "
-            "editable CPM assumption. No live provider or TN Game API calls are made while generating this report."
+            "editable CPM assumption. First-party website visits count anonymous unique visitor-days from Studio "
+            "attribution links; TN Game registrations come from idempotent conversion-ledger entries. Known social "
+            "preview bots are excluded, and no raw visitor identifiers are retained. No live provider or TN Game API "
+            "calls are made while generating this report."
         ),
         "highlights": highlights,
         "target_breakdown": target_breakdown[:20],
@@ -352,6 +437,7 @@ def build_impact_snapshot(workspace, *, period_start, period_end, target=None, e
         "top_posts": top_posts[:8],
         "missions": missions[:8],
         "coverage_gaps": gaps,
+        "campaign_attribution": attribution["campaigns"],
         "data_freshness": {
             "posts_with_analytics": totals["posts_with_analytics"],
             "published_posts": totals["published_posts"],

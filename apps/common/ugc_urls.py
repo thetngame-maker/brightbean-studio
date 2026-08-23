@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import (
+    campaign_attribution_views,
     tourism_guard_views,
     tourism_impact_views,
     ugc_bulk_permission_views,
@@ -29,6 +30,27 @@ from . import (
 app_name = "ugc"
 
 urlpatterns = [
+    path("attribution/", campaign_attribution_views.attribution_links, name="attribution_links"),
+    path(
+        "attribution/create/",
+        campaign_attribution_views.create_attribution_link_view,
+        name="create_attribution_link",
+    ),
+    path(
+        "attribution/<uuid:link_id>/",
+        campaign_attribution_views.attribution_link_detail,
+        name="attribution_link_detail",
+    ),
+    path(
+        "attribution/<uuid:link_id>/update/",
+        campaign_attribution_views.update_attribution_link,
+        name="update_attribution_link",
+    ),
+    path(
+        "attribution/<uuid:link_id>/registrations/",
+        campaign_attribution_views.record_attribution_registration,
+        name="record_attribution_registration",
+    ),
     path("impact-reports/", tourism_impact_views.impact_reports, name="impact_reports"),
     path("impact-reports/create/", tourism_impact_views.create_impact_report, name="create_impact_report"),
     path(

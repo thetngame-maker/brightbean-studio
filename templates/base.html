@@ -652,7 +652,7 @@
                     <span class="sidebar-nav-label">Social Inbox</span>
                     {% if sidebar_unread_inbox_count %}<span class="sidebar-badge">{{ sidebar_unread_inbox_count }}</span>{% endif %}
                 </a>
-                <a href="{% url 'ugc:moderation_queue' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'ugc' and request.resolver_match.url_name != 'tourism_guard' and request.resolver_match.url_name != 'impact_reports' and request.resolver_match.url_name != 'impact_report_detail' %}active{% endif %}">
+                <a href="{% url 'ugc:moderation_queue' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'ugc' and request.resolver_match.url_name != 'tourism_guard' and request.resolver_match.url_name != 'impact_reports' and request.resolver_match.url_name != 'impact_report_detail' and request.resolver_match.url_name != 'attribution_links' and request.resolver_match.url_name != 'attribution_link_detail' %}active{% endif %}">
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg>
                     <span class="sidebar-nav-label">Community Content</span>
                 </a>
@@ -663,6 +663,10 @@
                 <a href="{% url 'ugc:impact_reports' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'impact_reports' or request.resolver_match.url_name == 'impact_report_detail' %}active{% endif %}">
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><path d="M3 5l5-3 5 4 7-4"/></svg>
                     <span class="sidebar-nav-label">Impact Reports</span>
+                </a>
+                <a href="{% url 'ugc:attribution_links' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'attribution_links' or request.resolver_match.url_name == 'attribution_link_detail' %}active{% endif %}">
+                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.07 0l2-2a5 5 0 00-7.07-7.07l-1.15 1.15"/><path d="M14 11a5 5 0 00-7.07 0l-2 2A5 5 0 0012 20.07l1.15-1.15"/></svg>
+                    <span class="sidebar-nav-label">Attribution</span>
                 </a>
                 {% endif %}
 
