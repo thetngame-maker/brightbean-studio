@@ -12,6 +12,7 @@ urlpatterns = [
     path("health/", health_check, name="health_check"),
     path("go/", include("apps.common.campaign_attribution_urls")),
     path("creator-rights/", include("apps.common.ugc_creator_rights_public_urls")),
+    path("creator-collaboration/", include("apps.common.ugc_creator_collaboration_public_urls")),
     path("accounts/", include("apps.accounts.urls")),
     path("accounts/", include("allauth.urls")),
     path("organizations/", include("apps.organizations.urls")),

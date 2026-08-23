@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-from apps.common.encryption import EncryptedTextField
+from apps.common.encryption import EncryptedJSONField, EncryptedTextField
 from apps.common.managers import WorkspaceScopedManager
 
 
@@ -515,6 +515,65 @@ class UGCCreatorCollaboration(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class UGCCreatorCollaborationInvite(models.Model):
+    """An expiring creator-facing acceptance link for a collaboration brief."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Awaiting creator"
+        ACCEPTED = "accepted", "Accepted by creator"
+        DECLINED = "declined", "Declined by creator"
+        SUPERSEDED = "superseded", "Replaced"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_collaboration_invites",
+    )
+    collaboration = models.ForeignKey(
+        UGCCreatorCollaboration,
+        on_delete=models.CASCADE,
+        related_name="creator_invites",
+    )
+    request_token = EncryptedTextField()
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    token_hint = models.CharField(max_length=8, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    terms_snapshot = EncryptedJSONField(default=dict)
+    terms_digest = models.CharField(max_length=64)
+    response_note = EncryptedTextField(blank=True, default="")
+    expires_at = models.DateTimeField(db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_ugc_creator_collaboration_invites",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_collaboration_invite"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "expires_at"], name="ugc_collab_inv_status_idx"),
+            models.Index(fields=["collaboration", "-created_at"], name="ugc_collab_inv_collab_idx"),
+        ]
+
+    @property
+    def is_available(self):
+        return self.status == self.Status.PENDING and self.expires_at > timezone.now()
+
+    def __str__(self):
+        return f"{self.get_status_display()} · {self.collaboration}"
 
 
 class UGCCreatorTask(models.Model):

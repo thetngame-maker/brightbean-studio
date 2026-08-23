@@ -18,10 +18,12 @@ from .audit import record_audit_event
 from .models import (
     UGCCreator,
     UGCCreatorCollaboration,
+    UGCCreatorCollaborationInvite,
     UGCCreatorIdentity,
     UGCCreatorTask,
     UGCSubmission,
 )
+from .ugc_creator_collaboration_invites import close_pending_collaboration_invites, expire_collaboration_invite
 from .ugc_creator_services import rights_can_use
 from .ugc_creator_views import _decorate_creator, _get_workspace, _safe_local_path
 from .ugc_target_catalog import find_catalog_target, target_choices
@@ -221,6 +223,14 @@ def creator_collaboration_detail(request, workspace_id, collaboration_id):
         .order_by("-submitted_at")[:100]
     )
     rights_ready, rights_reason = _collaboration_rights_can_complete(collaboration)
+    creator_invites = list(collaboration.creator_invites.select_related("created_by").order_by("-created_at")[:8])
+    for invite in creator_invites:
+        expire_collaboration_invite(invite)
+        invite.public_url = ""
+        if invite.is_available:
+            invite.public_url = request.build_absolute_uri(
+                reverse("creator_collaboration_public:respond", kwargs={"token": invite.request_token})
+            )
     return render(
         request,
         "ugc/creator_collaboration_detail.html",
@@ -232,6 +242,15 @@ def creator_collaboration_detail(request, workspace_id, collaboration_id):
             "rights_choices": RIGHTS_CHOICES,
             "rights_ready": rights_ready,
             "rights_reason": rights_reason,
+            "creator_invites": creator_invites,
+            "active_creator_invite": next((item for item in creator_invites if item.is_available), None),
+            "can_create_creator_invite": collaboration.status
+            in {
+                UGCCreatorCollaboration.Status.DRAFT,
+                UGCCreatorCollaboration.Status.INVITED,
+                UGCCreatorCollaboration.Status.INTERESTED,
+            }
+            and collaboration.creator.relationship_stage != UGCCreator.RelationshipStage.DO_NOT_CONTACT,
         },
     )
 
@@ -365,7 +384,13 @@ def update_creator_collaboration(request, workspace_id, collaboration_id):
         )
         collaboration.content_due_at = _parse_due_at(request.POST.get("content_due_at"))
         collaboration.save()
+        superseded_invites = close_pending_collaboration_invites(
+            collaboration,
+            status=UGCCreatorCollaborationInvite.Status.SUPERSEDED,
+        )
         message = "Collaboration brief updated."
+        if superseded_invites:
+            message += " The previous creator link was closed because its terms changed."
     elif action == "link_content":
         submission_id = str(request.POST.get("submission_id") or "").strip()
         submission = None
@@ -475,6 +500,12 @@ def update_creator_collaboration(request, workspace_id, collaboration_id):
             _complete_collaboration_tasks(collaboration, request.user)
         collaboration.completed_at = now if collaboration.status == UGCCreatorCollaboration.Status.COMPLETED else None
         collaboration.save(update_fields=["status", "invited_at", "completed_at", "updated_at"])
+        if collaboration.status not in {
+            UGCCreatorCollaboration.Status.DRAFT,
+            UGCCreatorCollaboration.Status.INVITED,
+            UGCCreatorCollaboration.Status.INTERESTED,
+        }:
+            close_pending_collaboration_invites(collaboration)
         message = f"Collaboration moved to {collaboration.get_status_display()}."
 
     record_audit_event(
