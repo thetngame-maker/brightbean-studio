@@ -575,6 +575,130 @@ class UGCContentMission(models.Model):
         return self.title
 
 
+class ContentPerformanceProfile(models.Model):
+    """Human teaching labels that turn post analytics into reusable lessons."""
+
+    class SourceType(models.TextChoices):
+        UGC = "ugc", "Community / UGC"
+        BRANDED = "branded", "Branded"
+        PARTNER = "partner", "Partner"
+        MIXED = "mixed", "Mixed"
+
+    class OpeningHook(models.TextChoices):
+        SCENIC_REVEAL = "scenic_reveal", "Scenic reveal"
+        PERSON_ON_CAMERA = "person_on_camera", "Person on camera"
+        ACTION_FIRST = "action_first", "Action first"
+        TEXT_TEASER = "text_teaser", "Text teaser"
+        QUESTION = "question", "Question"
+        DETAIL_CLOSEUP = "detail_closeup", "Detail close-up"
+        OTHER = "other", "Other"
+
+    class CaptionStyle(models.TextChoices):
+        SHORT = "short", "Short"
+        STORY = "story", "Story"
+        GUIDE = "guide", "Useful guide"
+        LIST = "list", "List"
+        QUESTION = "question", "Question-led"
+        ANNOUNCEMENT = "announcement", "Announcement"
+        OTHER = "other", "Other"
+
+    class Season(models.TextChoices):
+        SPRING = "spring", "Spring"
+        SUMMER = "summer", "Summer"
+        FALL = "fall", "Fall"
+        WINTER = "winter", "Winter"
+        EVERGREEN = "evergreen", "Evergreen"
+
+    class Subject(models.TextChoices):
+        WATERFALL = "waterfall", "Waterfall"
+        TRAIL = "trail", "Trail"
+        SCENIC = "scenic", "Scenic place"
+        EVENT = "event", "Event"
+        FOOD = "food", "Food"
+        HISTORY = "history", "History"
+        WILDLIFE = "wildlife", "Wildlife"
+        PEOPLE = "people", "People"
+        COMMUNITY = "community", "Community"
+        OTHER = "other", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="content_performance_profiles",
+    )
+    post = models.OneToOneField(
+        "composer.Post",
+        on_delete=models.CASCADE,
+        related_name="performance_profile",
+    )
+    source_submission = models.ForeignKey(
+        UGCSubmission,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="performance_profiles",
+    )
+    creator = models.ForeignKey(
+        UGCCreator,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="performance_profiles",
+    )
+    source_type = models.CharField(max_length=20, choices=SourceType.choices, blank=True, default="", db_index=True)
+    opening_hook = models.CharField(
+        max_length=30,
+        choices=OpeningHook.choices,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    caption_style = models.CharField(
+        max_length=30,
+        choices=CaptionStyle.choices,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    season = models.CharField(max_length=20, choices=Season.choices, blank=True, default="", db_index=True)
+    subject = models.CharField(max_length=30, choices=Subject.choices, blank=True, default="", db_index=True)
+    target_type = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default="")
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_content_performance_profiles",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_content_performance_profiles",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_content_performance_profile"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "source_type"], name="content_perf_source_idx"),
+            models.Index(fields=["workspace", "target_type", "target_id"], name="content_perf_target_idx"),
+        ]
+
+    def __str__(self):
+        return f"Learning profile for {self.post_id}"
+
+
 class UGCModerationEvent(models.Model):
     """Append-only history of moderator decisions for a UGC submission."""
 

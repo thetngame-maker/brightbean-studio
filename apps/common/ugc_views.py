@@ -17,7 +17,14 @@ from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
 
 from .audit import record_audit_event
-from .models import UGCCreator, UGCModerationEvent, UGCReport, UGCRightsPassport, UGCSubmission
+from .models import (
+    ContentPerformanceProfile,
+    UGCCreator,
+    UGCModerationEvent,
+    UGCReport,
+    UGCRightsPassport,
+    UGCSubmission,
+)
 from .ugc import moderate_submission, resolve_report
 from .ugc_creator_services import rights_can_use
 from .ugc_permissions import GRANTED, VALID_PERMISSION_STATUSES, set_permission
@@ -432,6 +439,19 @@ def use_in_post_view(request, workspace_id, submission_id):
         title=submission.title or submission.target_label or "Community content",
         caption=_ugc_draft_caption(submission),
         internal_notes="\n".join(source_bits),
+    )
+    ContentPerformanceProfile.objects.create(
+        workspace=workspace,
+        post=post,
+        source_submission=submission,
+        creator=submission.creator,
+        source_type=ContentPerformanceProfile.SourceType.UGC,
+        target_type=submission.target_type,
+        target_id=submission.target_id,
+        target_label=submission.target_label,
+        target_url=submission.target_url,
+        created_by=request.user,
+        updated_by=request.user,
     )
 
     if submission.media_asset_id:

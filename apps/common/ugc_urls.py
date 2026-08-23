@@ -19,6 +19,7 @@ from . import (
     ugc_mobile_queue_dispatch,
     ugc_mobile_review_dispatch,
     ugc_mobile_target_views,
+    ugc_performance_learning_views,
     ugc_target_catalog_views,
     ugc_views,
 )
@@ -33,6 +34,12 @@ urlpatterns = [
         "missions/<uuid:mission_id>/update/",
         ugc_content_mission_views.update_content_mission,
         name="update_content_mission",
+    ),
+    path("learning/", ugc_performance_learning_views.performance_learning, name="performance_learning"),
+    path(
+        "learning/<uuid:platform_post_id>/update/",
+        ugc_performance_learning_views.update_performance_profile,
+        name="update_performance_profile",
     ),
     path("creators/", ugc_creator_views.creator_hub, name="creator_hub"),
     path(
