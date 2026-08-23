@@ -79,7 +79,7 @@ def build_target_catalog(workspace, *, limit=300):
         item["discovery_count"] += 1
         item["sources"].add("discovery")
 
-    # Corrections teach aliases without silently changing future submissions.
+    # Corrections teach aliases without silently changing historical submissions.
     recent = (
         UGCSubmission.objects.for_workspace(workspace.id)
         .only("metadata")
@@ -142,6 +142,38 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
         )
     )
     return catalog[:limit]
+
+
+def learned_target_for_text(workspace, text, *, current_label=""):
+    """Resolve one explicit human-taught alias from text, or return None.
+
+    This is intentionally conservative. It never guesses from canonical target
+    names and it never chooses between competing learned aliases. If the text
+    already names the current/default target, the saved discovery target wins.
+    """
+    text_norm = _normalise(text)
+    current_norm = _normalise(current_label)
+    if not text_norm or (current_norm and current_norm in text_norm):
+        return None
+
+    matches = {}
+    for item in build_target_catalog(workspace, limit=500):
+        key = (item["target_type"], item["target_id"])
+        for alias in item.get("aliases", []):
+            alias_norm = _normalise(alias)
+            if not alias_norm or alias_norm not in text_norm:
+                continue
+            match = matches.setdefault(key, {"target": item, "aliases": []})
+            match["aliases"].append(alias)
+
+    # One unique target is required. Ambiguity is intentionally left for human review.
+    if len(matches) != 1:
+        return None
+    match = next(iter(matches.values()))
+    return {
+        "target": match["target"],
+        "alias": sorted(match["aliases"], key=lambda value: (-len(value), value.lower()))[0],
+    }
 
 
 def find_catalog_target(workspace, target_type, target_id):
