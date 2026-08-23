@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from apps.members.decorators import require_permission
@@ -14,13 +15,27 @@ from apps.members.decorators import require_permission
 from .audit import record_audit_event
 from .models import UGCSubmission
 from .ugc_mobile_quality import _normalise, approved_quality, decorate_approved_quality
-from .ugc_target_catalog import find_catalog_target, target_choices
+from .ugc_mobile_queue_views import _decorate_submission
+from .ugc_target_catalog import find_catalog_target
 from .ugc_views import _get_workspace
+
+
+def _is_safe_local_path(request, value):
+    value = (value or "").strip()
+    return (
+        value.startswith("/")
+        and not value.startswith("//")
+        and url_has_allowed_host_and_scheme(
+            value,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        )
+    )
 
 
 def _safe_return(request, workspace):
     return_to = request.POST.get("return_to", "").strip()
-    if return_to.startswith("/"):
+    if _is_safe_local_path(request, return_to):
         return redirect(return_to)
     return redirect("ugc:moderation_queue", workspace_id=workspace.id)
 
@@ -36,7 +51,7 @@ def _next_quality_check_url(workspace, *, return_to=""):
     for candidate in candidates:
         if (candidate.metadata or {}).get("studio_post_ids"):
             continue
-        decorate_approved_quality(candidate)
+        decorate_approved_quality(_decorate_submission(candidate))
         if not candidate.mobile_needs_quality_check:
             continue
         review_url = reverse(
@@ -56,8 +71,14 @@ def _next_quality_check_url(workspace, *, return_to=""):
 def retarget_submission(request, workspace_id, submission_id):
     """Move one UGC item to a known workspace target without weakening its audit trail."""
     workspace = _get_workspace(request, workspace_id)
-    submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
-    return_to = request.POST.get("return_to", "").strip()
+    submission = get_object_or_404(
+        UGCSubmission,
+        id=submission_id,
+        workspace=workspace,
+        status=UGCSubmission.Status.APPROVED,
+    )
+    posted_return_to = request.POST.get("return_to", "").strip()
+    return_to = posted_return_to if _is_safe_local_path(request, posted_return_to) else ""
     was_check_queue = "draft_state=check" in return_to
 
     target_key = request.POST.get("target_key", "").strip()
@@ -74,6 +95,7 @@ def retarget_submission(request, workspace_id, submission_id):
         messages.error(request, "Choose a known TN Game target.")
         return _safe_return(request, workspace)
 
+    _decorate_submission(submission)
     quality_before = approved_quality(submission)
     learned_alias = (quality_before.get("suggested_target_label") or "").strip()
 
@@ -105,9 +127,9 @@ def retarget_submission(request, workspace_id, submission_id):
             "corrected_by": str(request.user.id),
         }
     submission.metadata = metadata
-    submission.save(
-        update_fields=["target_type", "target_id", "target_label", "target_url", "metadata", "updated_at"]
-    )
+    submission.save(update_fields=["target_type", "target_id", "target_label", "target_url", "metadata", "updated_at"])
+    _decorate_submission(submission)
+    quality_after = approved_quality(submission)
 
     record_audit_event(
         workspace=workspace,
@@ -124,15 +146,40 @@ def retarget_submission(request, workspace_id, submission_id):
                 "target_url": submission.target_url,
             },
             "learned_alias": learned_alias,
+            "quality_before": {
+                "needs_check": quality_before.get("needs_check", False),
+                "kind": quality_before.get("kind", ""),
+                "reason": quality_before.get("reason", ""),
+            },
+            "quality_after": {
+                "needs_check": quality_after.get("needs_check", False),
+                "kind": quality_after.get("kind", ""),
+                "reason": quality_after.get("reason", ""),
+            },
         },
         request=request,
     )
-    messages.success(request, f"Target changed to {submission.target_label}.")
+    if quality_before.get("needs_check") and not quality_after.get("needs_check"):
+        messages.success(
+            request,
+            f"Target changed to {submission.target_label}. The mismatch is resolved and the item moved to Ready.",
+        )
+    elif quality_after.get("needs_check"):
+        messages.warning(request, f"Target changed to {submission.target_label}, but this item still needs a check.")
+    else:
+        messages.success(request, f"Target changed to {submission.target_label}.")
 
-    if was_check_queue:
+    if was_check_queue and not quality_after.get("needs_check"):
         next_url = _next_quality_check_url(workspace, return_to=return_to)
         if next_url:
             return redirect(next_url)
+    elif was_check_queue and quality_after.get("needs_check"):
+        review_url = reverse(
+            "ugc:mobile_review",
+            kwargs={"workspace_id": workspace.id, "submission_id": submission.id},
+        )
+        query = {"tab": "approved", "draft_state": "check", "return_to": return_to}
+        return redirect(f"{review_url}?{urlencode(query)}")
     return _safe_return(request, workspace)
 
 
@@ -142,7 +189,12 @@ def retarget_submission(request, workspace_id, submission_id):
 def mark_quality_checked(request, workspace_id, submission_id):
     """Explicitly clear the current conservative quality warning after human review."""
     workspace = _get_workspace(request, workspace_id)
-    submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
+    submission = get_object_or_404(
+        UGCSubmission,
+        id=submission_id,
+        workspace=workspace,
+        status=UGCSubmission.Status.APPROVED,
+    )
     quality = approved_quality(submission)
 
     if not quality.get("needs_check"):

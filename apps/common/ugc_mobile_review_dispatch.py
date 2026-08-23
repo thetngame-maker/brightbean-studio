@@ -16,7 +16,7 @@ from apps.members.decorators import require_permission
 
 from . import ugc_mobile_queue_views
 from .ugc_mobile_quality import decorate_approved_quality
-from .ugc_mobile_target_views import target_choices
+from .ugc_target_catalog import target_choices
 from .ugc_views import _get_workspace, _queue_counts
 
 
@@ -37,12 +37,14 @@ def _focused_context(request, workspace, submission_id, tab):
         if draft_state in {"ready", "check", "drafted"}:
             if draft_state == "ready":
                 decorated = [
-                    item for item in decorated
+                    item
+                    for item in decorated
                     if not (item.metadata or {}).get("studio_post_ids") and not item.mobile_needs_quality_check
                 ]
             elif draft_state == "check":
                 decorated = [
-                    item for item in decorated
+                    item
+                    for item in decorated
                     if not (item.metadata or {}).get("studio_post_ids") and item.mobile_needs_quality_check
                 ]
             else:

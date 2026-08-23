@@ -1,7 +1,5 @@
 """Reusable TN Game target catalog for UGC discovery and correction workflows."""
 
-from collections import defaultdict
-
 from django.db.models import Count
 
 from .models import UGCSubmission
@@ -102,7 +100,7 @@ def build_target_catalog(workspace, *, limit=300):
         item["aliases"] = sorted(item["aliases"], key=str.lower)
         item["sources"] = sorted(item["sources"])
         item["usage_count"] = item["ugc_count"] + item["discovery_count"]
-        item["picker_value"] = f'{item["target_type"]}::{item["target_id"]}'
+        item["picker_value"] = f"{item['target_type']}::{item['target_id']}"
         result.append(item)
 
     result.sort(key=lambda x: (-x["usage_count"], x["target_label"].lower(), x["target_type"]))
