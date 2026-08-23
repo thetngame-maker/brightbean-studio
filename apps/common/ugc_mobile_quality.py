@@ -1,5 +1,6 @@
 """Small, deterministic quality checks for the lightweight mobile UGC workflow."""
 
+import hashlib
 import re
 
 
@@ -10,6 +11,19 @@ def _normalise(value):
     return " ".join(re.sub(r"[^a-z0-9]+", " ", (value or "").lower()).split())
 
 
+def _quality_fingerprint(submission):
+    """Fingerprint the fields that can change the current quality decision."""
+    relevance = getattr(submission, "mobile_relevance_status", "") or ""
+    payload = "|".join(
+        [
+            _normalise(submission.target_label or submission.title or ""),
+            _normalise(submission.body or ""),
+            _normalise(relevance),
+        ]
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:20]
+
+
 def approved_quality(submission):
     """Return a conservative pre-draft quality warning for an approved item.
 
@@ -17,7 +31,23 @@ def approved_quality(submission):
     itself a Falls target, the caption does not mention that target, and the
     caption explicitly names a different Falls location. Low relevance is also
     surfaced, but we deliberately avoid guessing from images or generic text.
+
+    A moderator can explicitly mark the *current* warning as reviewed. The
+    override is fingerprinted, so changing the caption, target, or relevance
+    automatically invalidates it and allows the warning to return.
     """
+    fingerprint = _quality_fingerprint(submission)
+    override = (submission.metadata or {}).get("approved_quality_override") or {}
+    if override.get("fingerprint") == fingerprint:
+        return {
+            "needs_check": False,
+            "reason": "",
+            "kind": "",
+            "suggested_target_label": "",
+            "reviewed_override": True,
+            "fingerprint": fingerprint,
+        }
+
     target = (submission.target_label or submission.title or "").strip()
     body = (submission.body or "").strip()
     target_norm = _normalise(target)
@@ -37,6 +67,8 @@ def approved_quality(submission):
                 "reason": f"Caption mentions {named}, but this item is attached to {target}.",
                 "kind": "target_mismatch",
                 "suggested_target_label": named,
+                "reviewed_override": False,
+                "fingerprint": fingerprint,
             }
 
     if getattr(submission, "mobile_relevance_status", "") == "low":
@@ -45,9 +77,18 @@ def approved_quality(submission):
             "reason": "This approved item has a low relevance score. Double-check it before creating a draft.",
             "kind": "low_relevance",
             "suggested_target_label": "",
+            "reviewed_override": False,
+            "fingerprint": fingerprint,
         }
 
-    return {"needs_check": False, "reason": "", "kind": "", "suggested_target_label": ""}
+    return {
+        "needs_check": False,
+        "reason": "",
+        "kind": "",
+        "suggested_target_label": "",
+        "reviewed_override": False,
+        "fingerprint": fingerprint,
+    }
 
 
 def decorate_approved_quality(submission):
@@ -56,4 +97,6 @@ def decorate_approved_quality(submission):
     submission.mobile_quality_reason = quality["reason"]
     submission.mobile_quality_kind = quality["kind"]
     submission.mobile_suggested_target_label = quality.get("suggested_target_label", "")
+    submission.mobile_quality_reviewed_override = quality.get("reviewed_override", False)
+    submission.mobile_quality_fingerprint = quality.get("fingerprint", "")
     return submission
