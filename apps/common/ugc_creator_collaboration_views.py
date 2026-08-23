@@ -24,6 +24,7 @@ from .models import (
     UGCSubmission,
 )
 from .ugc_creator_collaboration_invites import close_pending_collaboration_invites, expire_collaboration_invite
+from .ugc_creator_collaboration_milestones import collaboration_milestone_summary
 from .ugc_creator_services import rights_can_use
 from .ugc_creator_views import _decorate_creator, _get_workspace, _safe_local_path
 from .ugc_target_catalog import find_catalog_target, target_choices
@@ -154,6 +155,7 @@ def _decorate_collaboration(collaboration):
     collaboration.requested_rights_labels = [
         RIGHTS_LABELS[value] for value in collaboration.requested_rights if value in RIGHTS_LABELS
     ]
+    collaboration.milestones = collaboration_milestone_summary(collaboration)
     return collaboration
 
 

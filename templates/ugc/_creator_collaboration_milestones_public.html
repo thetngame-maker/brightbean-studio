@@ -1,0 +1,7 @@
+<section class="ccp-miles">
+  <div class="ccp-miles-head"><strong>Project milestones</strong><span>{{ milestones.completed_count }} / {{ milestones.total_count }}</span></div>
+  <div class="ccp-miles-progress"><i style="width:{{ milestones.progress_percent }}%"></i></div>
+  <div class="ccp-miles-list">
+    {% for milestone in milestones.items %}<div class="ccp-mile {{ milestone.state }}"><i>{% if milestone.complete %}✓{% elif milestone.state == 'blocked' %}!{% else %}{{ forloop.counter }}{% endif %}</i><div><strong>{{ milestone.label }}</strong><span>{{ milestone.description }}{% if milestone.due_at and not milestone.complete %} · Due {{ milestone.due_at|date:"M j" }}{% endif %}</span></div></div>{% endfor %}
+  </div>
+</section>

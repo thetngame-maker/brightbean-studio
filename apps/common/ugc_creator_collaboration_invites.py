@@ -216,4 +216,5 @@ def respond_to_collaboration_invite(invite, *, action, response_note=""):
                 "has_response_note": bool(invite.response_note),
             },
         )
+        invite.collaboration = collaboration
     return invite, True

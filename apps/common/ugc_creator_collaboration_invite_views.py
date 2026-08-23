@@ -25,6 +25,7 @@ from .ugc_creator_collaboration_invites import (
     find_collaboration_invite,
     respond_to_collaboration_invite,
 )
+from .ugc_creator_collaboration_milestones import collaboration_milestone_summary
 from .ugc_creator_views import _get_workspace, _safe_local_path
 
 PUBLIC_RESPONSE_LIMIT = 30
@@ -127,6 +128,7 @@ def _public_response(request, invite, *, error="", status=200):
             "creator_label": invite.collaboration.creator.display_name
             or (f"@{primary.handle}" if primary and primary.handle else "Creator"),
             "collaboration_error": error,
+            "milestones": collaboration_milestone_summary(invite.collaboration),
         },
         status=status,
     )
