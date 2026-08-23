@@ -17,8 +17,34 @@ from .ugc_mobile_quality import _normalise, approved_quality, decorate_approved_
 from .ugc_views import _get_workspace
 
 
+def _learned_target_key(workspace, suggested_label):
+    """Return a recently learned target for a caption alias, if one exists.
+
+    Corrections live on the submission metadata so this remains migration-free.
+    We intentionally keep the lookup bounded and treat the result as a suggestion
+    only; nothing is silently retargeted.
+    """
+    alias_norm = _normalise(suggested_label)
+    if not alias_norm:
+        return None
+    recent = (
+        UGCSubmission.objects.for_workspace(workspace.id)
+        .only("metadata")
+        .order_by("-updated_at")[:250]
+    )
+    for submission in recent:
+        correction = (submission.metadata or {}).get("target_correction") or {}
+        if correction.get("alias_norm") != alias_norm:
+            continue
+        target_type = (correction.get("to_target_type") or "").strip()
+        target_id = (correction.get("to_target_id") or "").strip()
+        if target_type and target_id:
+            return target_type, target_id
+    return None
+
+
 def target_choices(workspace, *, suggested_label="", current_submission=None, limit=80):
-    """Return known workspace UGC targets, with a caption-suggested match first."""
+    """Return known workspace UGC targets, with learned/caption suggestions first."""
     rows = (
         UGCSubmission.objects.for_workspace(workspace.id)
         .exclude(target_id="")
@@ -28,6 +54,7 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
         .distinct()
     )
     suggested_norm = _normalise(suggested_label)
+    learned_key = _learned_target_key(workspace, suggested_label)
     current_key = None
     if current_submission is not None:
         current_key = (current_submission.target_type, current_submission.target_id)
@@ -40,8 +67,11 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
             continue
         seen.add(key)
         row = dict(row)
+        exact_match = bool(suggested_norm and _normalise(row["target_label"]) == suggested_norm)
+        learned_match = bool(learned_key and key == learned_key)
         row["is_current"] = key == current_key
-        row["is_suggested"] = bool(suggested_norm and _normalise(row["target_label"]) == suggested_norm)
+        row["is_suggested"] = exact_match or learned_match
+        row["suggestion_source"] = "learned" if learned_match and not exact_match else ("caption" if exact_match else "")
         row["picker_value"] = f'{row["target_type"]}::{row["target_id"]}'
         choices.append(row)
         if len(choices) >= limit:
@@ -112,6 +142,9 @@ def retarget_submission(request, workspace_id, submission_id):
         messages.error(request, "Choose a known TN Game target.")
         return _safe_return(request, workspace)
 
+    quality_before = approved_quality(submission)
+    learned_alias = (quality_before.get("suggested_target_label") or "").strip()
+
     old_target = {
         "target_type": submission.target_type,
         "target_id": submission.target_id,
@@ -125,6 +158,19 @@ def retarget_submission(request, workspace_id, submission_id):
 
     metadata = dict(submission.metadata or {})
     metadata.pop("approved_quality_override", None)
+    if learned_alias and _normalise(learned_alias) != _normalise(candidate["target_label"]):
+        metadata["target_correction"] = {
+            "alias": learned_alias,
+            "alias_norm": _normalise(learned_alias),
+            "from_target_type": old_target["target_type"],
+            "from_target_id": old_target["target_id"],
+            "from_target_label": old_target["target_label"],
+            "to_target_type": candidate["target_type"],
+            "to_target_id": candidate["target_id"],
+            "to_target_label": candidate["target_label"],
+            "corrected_at": timezone.now().isoformat(),
+            "corrected_by": str(request.user.id),
+        }
     submission.metadata = metadata
     submission.save(
         update_fields=["target_type", "target_id", "target_label", "target_url", "metadata", "updated_at"]
@@ -144,6 +190,7 @@ def retarget_submission(request, workspace_id, submission_id):
                 "target_label": submission.target_label,
                 "target_url": submission.target_url,
             },
+            "learned_alias": learned_alias,
         },
         request=request,
     )
