@@ -175,3 +175,74 @@ class UGCCreatorRelationshipTests(TestCase):
         allowed, reason = rights_can_use(submission)
         self.assertFalse(allowed)
         self.assertIn("expired", reason)
+
+    def test_opportunity_radar_identifies_and_promotes_trusted_candidate(self):
+        self.create_submission(
+            consent_confirmed=True,
+            consent_at=timezone.now(),
+            contributor_handle="trusted_candidate",
+            title="First granted post",
+        )
+        second = self.create_submission(
+            consent_confirmed=True,
+            consent_at=timezone.now(),
+            contributor_handle="trusted_candidate",
+            title="Second granted post",
+        )
+        creator = second.creator
+
+        radar_url = reverse("ugc:creator_opportunities", kwargs={"workspace_id": self.workspace.id})
+        response = self.client.get(radar_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Opportunity Radar")
+        self.assertContains(response, "Ready for trusted")
+        self.assertContains(response, "@trusted_candidate")
+        searched = self.client.get(radar_url, {"q": "trusted_candidate"})
+        self.assertEqual(searched.status_code, 200)
+        self.assertContains(searched, "@trusted_candidate")
+
+        promote_url = reverse(
+            "ugc:promote_creator",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": creator.id},
+        )
+        response = self.client.post(
+            promote_url,
+            {"target_stage": "trusted", "return_to": f"{radar_url}?queue=trusted"},
+        )
+        self.assertRedirects(response, f"{radar_url}?queue=trusted", fetch_redirect_response=False)
+        creator.refresh_from_db()
+        self.assertEqual(creator.relationship_stage, UGCCreator.RelationshipStage.TRUSTED)
+        self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_promoted", target_id=str(creator.id)).exists())
+
+    def test_opportunity_radar_finds_rising_prospect_from_stored_metrics(self):
+        metadata = {
+            "provenance": {
+                "platform": "instagram",
+                "discovery_source": "saved_search",
+                "source_url": "https://www.instagram.com/p/rising/",
+            },
+            "permission": {"status": "not_contacted"},
+            "discovery_import": {"like_count": 400, "comment_count": 20, "view_count": 10000},
+        }
+        self.create_submission(contributor_handle="rising_hiker", metadata=metadata, title="Rising post one")
+        self.create_submission(contributor_handle="rising_hiker", metadata=metadata, title="Rising post two")
+
+        response = self.client.get(
+            reverse("ugc:creator_opportunities", kwargs={"workspace_id": self.workspace.id}),
+            {"queue": "rising"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Rising prospect")
+        self.assertContains(response, "1,400 engagement signal")
+
+    def test_opportunity_promotion_rejects_skipping_relationship_stages(self):
+        submission = self.create_submission(contributor_handle="new_prospect")
+        promote_url = reverse(
+            "ugc:promote_creator",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": submission.creator_id},
+        )
+
+        self.client.post(promote_url, {"target_stage": "partner"})
+        submission.creator.refresh_from_db()
+        self.assertEqual(submission.creator.relationship_stage, UGCCreator.RelationshipStage.PROSPECT)
+        self.assertFalse(AuditEvent.objects.filter(action="ugc.creator_promoted").exists())

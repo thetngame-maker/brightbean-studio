@@ -24,8 +24,10 @@ app_name = "ugc"
 urlpatterns = [
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
     path("creators/", ugc_creator_views.creator_hub, name="creator_hub"),
+    path("creators/opportunities/", ugc_creator_views.creator_opportunities, name="creator_opportunities"),
     path("creators/<uuid:creator_id>/", ugc_creator_views.creator_detail, name="creator_detail"),
     path("creators/<uuid:creator_id>/update/", ugc_creator_views.update_creator, name="update_creator"),
+    path("creators/<uuid:creator_id>/promote/", ugc_creator_views.promote_creator, name="promote_creator"),
     path("rights/<uuid:submission_id>/", ugc_creator_views.rights_passport, name="rights_passport"),
     path(
         "rights/<uuid:submission_id>/update/", ugc_creator_views.update_rights_passport, name="update_rights_passport"

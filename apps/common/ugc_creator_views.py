@@ -22,11 +22,17 @@ from apps.social_accounts.models import SocialAccount
 
 from .audit import record_audit_event
 from .models import AuditEvent, UGCCreator, UGCCreatorIdentity, UGCRightsPassport, UGCSubmission
+from .ugc_creator_opportunities import (
+    OPPORTUNITY_LABELS,
+    classify_creator_opportunity,
+    creator_engagement_score,
+)
 from .ugc_creator_services import sync_rights_passport_from_submission
 from .ugc_permissions import DECLINED, GRANTED, NOT_CONTACTED, REQUESTED, set_permission
 from .ugc_views import _get_workspace
 
 CREATOR_PAGE_SIZE = 12
+CREATOR_RADAR_LIMIT = 500
 
 
 def _safe_local_path(request, value, fallback):
@@ -49,18 +55,9 @@ def _primary_identity(creator):
     return next((item for item in identities if item.is_primary), identities[0] if identities else None)
 
 
-@login_required
-@require_permission("manage_workspace_settings")
-def creator_hub(request, workspace_id):
-    workspace = _get_workspace(request, workspace_id)
-    query = str(request.GET.get("q") or "").strip()[:120]
-    stage = str(request.GET.get("stage") or "all").strip().lower()
-    valid_stages = {value for value, _label in UGCCreator.RelationshipStage.choices}
-    if stage not in valid_stages | {"all"}:
-        stage = "all"
-
+def _creator_queryset(workspace):
     identities = UGCCreatorIdentity.objects.order_by("-is_primary", "platform", "normalized_handle")
-    creators = (
+    return (
         UGCCreator.objects.for_workspace(workspace.id)
         .prefetch_related(Prefetch("identities", queryset=identities))
         .annotate(
@@ -79,6 +76,25 @@ def creator_hub(request, workspace_id):
         )
         .order_by("-last_seen_at", "display_name")
     )
+
+
+def _decorate_creator(creator):
+    creator.primary_identity = _primary_identity(creator)
+    creator.tag_list = [str(tag) for tag in creator.tags if str(tag).strip()] if isinstance(creator.tags, list) else []
+    return creator
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+def creator_hub(request, workspace_id):
+    workspace = _get_workspace(request, workspace_id)
+    query = str(request.GET.get("q") or "").strip()[:120]
+    stage = str(request.GET.get("stage") or "all").strip().lower()
+    valid_stages = {value for value, _label in UGCCreator.RelationshipStage.choices}
+    if stage not in valid_stages | {"all"}:
+        stage = "all"
+
+    creators = _creator_queryset(workspace)
     if stage != "all":
         creators = creators.filter(relationship_stage=stage)
     if query:
@@ -93,10 +109,7 @@ def creator_hub(request, workspace_id):
     paginator = Paginator(creators, CREATOR_PAGE_SIZE)
     page = paginator.get_page(request.GET.get("page") or 1)
     for creator in page.object_list:
-        creator.primary_identity = _primary_identity(creator)
-        creator.tag_list = (
-            [str(tag) for tag in creator.tags if str(tag).strip()] if isinstance(creator.tags, list) else []
-        )
+        _decorate_creator(creator)
 
     all_creators = UGCCreator.objects.for_workspace(workspace.id)
     context = {
@@ -108,16 +121,9 @@ def creator_hub(request, workspace_id):
         "creator_stage_choices": UGCCreator.RelationshipStage.choices,
         "creator_counts": {
             "all": all_creators.count(),
-            "permissioned": all_creators.filter(
-                relationship_stage__in=[
-                    UGCCreator.RelationshipStage.PERMISSIONED,
-                    UGCCreator.RelationshipStage.TRUSTED,
-                    UGCCreator.RelationshipStage.PARTNER,
-                ]
-            ).count(),
-            "trusted": all_creators.filter(
-                relationship_stage__in=[UGCCreator.RelationshipStage.TRUSTED, UGCCreator.RelationshipStage.PARTNER]
-            ).count(),
+            "permissioned": all_creators.filter(relationship_stage=UGCCreator.RelationshipStage.PERMISSIONED).count(),
+            "trusted": all_creators.filter(relationship_stage=UGCCreator.RelationshipStage.TRUSTED).count(),
+            "partner": all_creators.filter(relationship_stage=UGCCreator.RelationshipStage.PARTNER).count(),
             "do_not_contact": all_creators.filter(
                 relationship_stage=UGCCreator.RelationshipStage.DO_NOT_CONTACT
             ).count(),
@@ -128,14 +134,77 @@ def creator_hub(request, workspace_id):
 
 @login_required
 @require_permission("manage_workspace_settings")
+def creator_opportunities(request, workspace_id):
+    workspace = _get_workspace(request, workspace_id)
+    queue = str(request.GET.get("queue") or "all").strip().lower()
+    if queue not in set(OPPORTUNITY_LABELS) | {"all"}:
+        queue = "all"
+    query = str(request.GET.get("q") or "").strip()[:120]
+    creators = _creator_queryset(workspace).exclude(relationship_stage=UGCCreator.RelationshipStage.DO_NOT_CONTACT)
+    if query:
+        creators = creators.filter(
+            Q(display_name__icontains=query)
+            | Q(preferred_credit__icontains=query)
+            | Q(notes__icontains=query)
+            | Q(identities__handle__icontains=query)
+        ).distinct()
+    creators = list(creators[:CREATOR_RADAR_LIMIT])
+
+    metadata_by_creator = {creator.id: [] for creator in creators}
+    creator_ids = list(metadata_by_creator)
+    if creator_ids:
+        rows = (
+            UGCSubmission.objects.for_workspace(workspace.id)
+            .filter(creator_id__in=creator_ids)
+            .order_by("-submitted_at")
+            .values_list("creator_id", "metadata")[:5000]
+        )
+        for creator_id, metadata in rows:
+            metadata_by_creator.setdefault(creator_id, []).append(metadata)
+
+    opportunities = []
+    counts = {key: 0 for key in OPPORTUNITY_LABELS}
+    for creator in creators:
+        _decorate_creator(creator)
+        creator.radar_engagement_score = creator_engagement_score(metadata_by_creator.get(creator.id, []))
+        creator.opportunity = classify_creator_opportunity(
+            creator,
+            engagement_score=creator.radar_engagement_score,
+        )
+        if creator.opportunity is None:
+            continue
+        counts[creator.opportunity.key] += 1
+        if queue == "all" or creator.opportunity.key == queue:
+            opportunities.append(creator)
+    opportunities.sort(key=lambda item: (item.opportunity.score, item.last_seen_at), reverse=True)
+
+    paginator = Paginator(opportunities, CREATOR_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get("page") or 1)
+    return render(
+        request,
+        "ugc/creator_opportunities.html",
+        {
+            "workspace": workspace,
+            "opportunity_creators": page.object_list,
+            "opportunity_page": page,
+            "opportunity_queue": queue,
+            "opportunity_query": query,
+            "opportunity_labels": OPPORTUNITY_LABELS,
+            "opportunity_counts": {"all": sum(counts.values()), **counts},
+            "radar_limit_reached": len(creators) == CREATOR_RADAR_LIMIT,
+        },
+    )
+
+
+@login_required
+@require_permission("manage_workspace_settings")
 def creator_detail(request, workspace_id, creator_id):
     workspace = _get_workspace(request, workspace_id)
     creator = get_object_or_404(
         UGCCreator.objects.for_workspace(workspace.id).prefetch_related("identities"),
         id=creator_id,
     )
-    creator.primary_identity = _primary_identity(creator)
-    creator.tag_list = [str(tag) for tag in creator.tags if str(tag).strip()] if isinstance(creator.tags, list) else []
+    _decorate_creator(creator)
     submissions = list(
         UGCSubmission.objects.for_workspace(workspace.id)
         .filter(creator=creator)
@@ -160,11 +229,20 @@ def creator_detail(request, workspace_id, creator_id):
         if hasattr(item, "rights_passport") and item.rights_passport.status == UGCRightsPassport.Status.GRANTED
     ]
     drafted_count = sum(1 for item in submissions if (item.metadata or {}).get("studio_post_ids"))
+    creator.content_count = len(submissions)
+    creator.granted_count = len(granted)
+    creator.drafted_count = drafted_count
+    creator.latest_content_at = submissions[0].submitted_at if submissions else None
+    creator_opportunity = classify_creator_opportunity(
+        creator,
+        engagement_score=creator_engagement_score([item.metadata for item in submissions]),
+    )
     context = {
         "workspace": workspace,
         "creator": creator,
         "creator_submissions": submissions,
         "creator_events": events,
+        "creator_opportunity": creator_opportunity,
         "creator_stage_choices": UGCCreator.RelationshipStage.choices,
         "creator_stats": {
             "content": len(submissions),
@@ -174,6 +252,38 @@ def creator_detail(request, workspace_id, creator_id):
         },
     }
     return render(request, "ugc/creator_detail.html", context)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def promote_creator(request, workspace_id, creator_id):
+    workspace = _get_workspace(request, workspace_id)
+    creator = get_object_or_404(UGCCreator.objects.for_workspace(workspace.id), id=creator_id)
+    target_stage = str(request.POST.get("target_stage") or "").strip().lower()
+    allowed_transition = {
+        UGCCreator.RelationshipStage.PERMISSIONED: UGCCreator.RelationshipStage.TRUSTED,
+        UGCCreator.RelationshipStage.TRUSTED: UGCCreator.RelationshipStage.PARTNER,
+    }.get(creator.relationship_stage)
+    fallback = reverse("ugc:creator_detail", kwargs={"workspace_id": workspace.id, "creator_id": creator.id})
+    return_to = _safe_local_path(request, request.POST.get("return_to"), fallback)
+    if target_stage != allowed_transition:
+        messages.error(request, "That creator relationship promotion is no longer available.")
+        return redirect(return_to)
+
+    before = creator.relationship_stage
+    creator.relationship_stage = target_stage
+    creator.save(update_fields=["relationship_stage", "updated_at"])
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="ugc.creator_promoted",
+        target=creator,
+        metadata={"before": before, "after": target_stage, "source": "opportunity_radar"},
+        request=request,
+    )
+    messages.success(request, f"Creator promoted to {creator.get_relationship_stage_display()}.")
+    return redirect(return_to)
 
 
 @login_required
