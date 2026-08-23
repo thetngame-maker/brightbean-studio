@@ -6,6 +6,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from apps.common.encryption import EncryptedTextField
 from apps.common.managers import WorkspaceScopedManager
 
 
@@ -355,6 +356,87 @@ class UGCRightsPassport(models.Model):
 
     def __str__(self):
         return f"{self.get_status_display()} rights for {self.submission}"
+
+
+class UGCCreatorRightsRequest(models.Model):
+    """A secure creator-facing consent request backed by the existing Rights Passport."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Awaiting creator"
+        GRANTED = "granted", "Granted by creator"
+        DECLINED = "declined", "Declined by creator"
+        SUPERSEDED = "superseded", "Replaced"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_rights_requests",
+    )
+    submission = models.ForeignKey(
+        UGCSubmission,
+        on_delete=models.CASCADE,
+        related_name="creator_rights_requests",
+    )
+    # The encrypted token lets authorized staff copy the same outreach link
+    # again. Public lookup uses the indexed HMAC and never decrypts every row.
+    request_token = EncryptedTextField()
+    token_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    token_hint = models.CharField(max_length=8, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    consent_version = models.CharField(max_length=50, default="creator-rights-portal-v1")
+    allow_organic_social = models.BooleanField(default=True)
+    allow_website = models.BooleanField(default=True)
+    allow_email = models.BooleanField(default=False)
+    allow_paid_ads = models.BooleanField(default=False)
+    allow_print = models.BooleanField(default=False)
+    credit_required = models.BooleanField(default=True)
+    credit_text = models.CharField(max_length=500, blank=True, default="")
+    granted_scopes = models.JSONField(default=list, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
+    responded_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_ugc_creator_rights_requests",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_rights_request"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "expires_at"], name="ugc_rights_req_status_idx"),
+            models.Index(fields=["submission", "-created_at"], name="ugc_rights_req_sub_idx"),
+        ]
+
+    @property
+    def is_available(self):
+        return self.status == self.Status.PENDING and self.expires_at > timezone.now()
+
+    @property
+    def requested_scope_labels(self):
+        return [
+            label
+            for field, label in (
+                ("allow_organic_social", "Organic social"),
+                ("allow_website", "TN Game website"),
+                ("allow_email", "Email/newsletters"),
+                ("allow_paid_ads", "Paid advertising"),
+                ("allow_print", "Print materials"),
+            )
+            if getattr(self, field)
+        ]
+
+    def __str__(self):
+        return f"{self.get_status_display()} · {self.submission}"
 
 
 class UGCCreatorCollaboration(models.Model):

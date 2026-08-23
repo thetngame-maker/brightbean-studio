@@ -8,6 +8,7 @@ from . import (
     ugc_content_mission_views,
     ugc_coverage_views,
     ugc_creator_collaboration_views,
+    ugc_creator_rights_request_views,
     ugc_creator_task_views,
     ugc_creator_views,
     ugc_discovery_bulk_views,
@@ -30,6 +31,11 @@ from . import (
 app_name = "ugc"
 
 urlpatterns = [
+    path(
+        "rights/<uuid:submission_id>/request/",
+        ugc_creator_rights_request_views.create_creator_rights_request_view,
+        name="create_creator_rights_request",
+    ),
     path("attribution/", campaign_attribution_views.attribution_links, name="attribution_links"),
     path(
         "attribution/create/",

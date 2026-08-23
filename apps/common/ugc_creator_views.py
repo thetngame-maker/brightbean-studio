@@ -26,6 +26,7 @@ from .models import (
     UGCCreator,
     UGCCreatorCollaboration,
     UGCCreatorIdentity,
+    UGCCreatorRightsRequest,
     UGCCreatorTask,
     UGCRightsPassport,
     UGCSubmission,
@@ -35,10 +36,11 @@ from .ugc_creator_opportunities import (
     classify_creator_opportunity,
     creator_engagement_score,
 )
+from .ugc_creator_rights_requests import expire_creator_rights_request
 from .ugc_creator_services import sync_rights_passport_from_submission
-from .ugc_permissions import DECLINED, GRANTED, NOT_CONTACTED, REQUESTED, set_permission
+from .ugc_permissions import DECLINED, GRANTED, NOT_CONTACTED, REQUESTED, get_permission, set_permission
 from .ugc_target_catalog import target_choices
-from .ugc_views import _get_workspace
+from .ugc_views import _discovered_q, _get_workspace
 
 CREATOR_PAGE_SIZE = 12
 CREATOR_RADAR_LIMIT = 500
@@ -442,6 +444,29 @@ def rights_passport(request, workspace_id, submission_id):
     selected_account_ids = {str(value) for value in passport.allowed_account_ids}
     for account in accounts:
         account.rights_selected = str(account.id) in selected_account_ids
+    rights_requests = list(
+        UGCCreatorRightsRequest.objects.for_workspace(workspace.id)
+        .filter(submission=submission)
+        .select_related("created_by")[:12]
+    )
+    for rights_request in rights_requests:
+        expire_creator_rights_request(rights_request)
+        rights_request.public_url = ""
+        if rights_request.is_available:
+            rights_request.public_url = request.build_absolute_uri(
+                reverse("creator_rights_public:respond", kwargs={"token": rights_request.request_token})
+            )
+    permission = get_permission(submission.metadata)
+    creator_allows_contact = not submission.creator_id or (
+        submission.creator.relationship_stage != UGCCreator.RelationshipStage.DO_NOT_CONTACT
+    )
+    can_request_creator_rights = (
+        submission.status == UGCSubmission.Status.PENDING
+        and permission["status"] != GRANTED
+        and not submission.consent_confirmed
+        and creator_allows_contact
+        and UGCSubmission.objects.filter(id=submission.id).filter(_discovered_q()).exists()
+    )
     return_to = _safe_local_path(
         request,
         request.GET.get("return_to"),
@@ -458,6 +483,8 @@ def rights_passport(request, workspace_id, submission_id):
             "passport": passport,
             "rights_status_choices": UGCRightsPassport.Status.choices,
             "social_accounts": accounts,
+            "creator_rights_requests": rights_requests,
+            "can_request_creator_rights": can_request_creator_rights,
             "return_to": return_to,
         },
     )

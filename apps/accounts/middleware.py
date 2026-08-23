@@ -24,6 +24,7 @@ EXEMPT_PATH_PREFIXES = (
     "/accounts/3rdparty/",
     "/health/",
     "/go/",
+    "/creator-rights/",
     "/static/",
     "/admin/",
 )

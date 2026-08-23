@@ -10,7 +10,7 @@ from datetime import timedelta
 from urllib.parse import urlencode
 
 from django.contrib.auth.decorators import login_required
-from django.db.models import Count, Q
+from django.db.models import Count, Prefetch, Q
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -20,7 +20,7 @@ from django.utils.dateparse import parse_datetime
 from apps.members.decorators import require_permission
 
 from . import ugc_views
-from .models import UGCReport, UGCSubmission
+from .models import UGCCreatorRightsRequest, UGCReport, UGCSubmission
 from .ugc_permissions import get_permission
 from .ugc_provenance import get_provenance
 from .ugc_relevance import score_relevance
@@ -76,7 +76,7 @@ def _as_datetime(value):
     return parsed
 
 
-def _permission_message(submission):
+def _permission_message(submission, rights_url=""):
     handle = (submission.contributor_handle or "").strip().lstrip("@")
     title = (submission.title or submission.target_label or "your post").strip()
     greeting = f"Hi @{handle}!" if handle else "Hi!"
@@ -85,21 +85,27 @@ def _permission_message(submission):
         if handle
         else " We’ll credit you and link back to your original post."
     )
-    return (
+    message = (
         f"{greeting} We came across your {title} post and would love to feature it on "
         f"The TN Game’s social media and website.{credit} If you’re okay with us sharing it, "
         "please reply YES to this message. Thank you!"
     )
+    if rights_url:
+        message += f" You can also review and choose the exact permissions here: {rights_url}"
+    return message
 
 
-def _followup_message(submission):
+def _followup_message(submission, rights_url=""):
     handle = (submission.contributor_handle or "").strip().lstrip("@")
     greeting = f"Hi @{handle}!" if handle else "Hi!"
-    return (
+    message = (
         f"{greeting} Just following up on our earlier message — we’d still love to feature your post "
         "on The TN Game’s social media and website, with full credit and a link back to your original post. "
         "If you’re okay with us sharing it, please reply YES. Thank you!"
     )
+    if rights_url:
+        message += f" You can review the exact permissions here: {rights_url}"
+    return message
 
 
 def _followup_state(metadata, permission):
@@ -137,7 +143,7 @@ def _followup_state(metadata, permission):
     }
 
 
-def _decorate_submission(submission):
+def _decorate_submission(submission, request=None):
     metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
     provenance = get_provenance(metadata)
     discovery = metadata.get("discovery_import") if isinstance(metadata.get("discovery_import"), dict) else {}
@@ -162,8 +168,17 @@ def _decorate_submission(submission):
 
     permission = get_permission(metadata)
     submission.mobile_permission_status = permission.get("status") or "not_contacted"
-    submission.mobile_permission_message = _permission_message(submission)
-    submission.mobile_followup_message = _followup_message(submission)
+    pending_requests = getattr(submission, "_pending_creator_rights_requests", [])
+    rights_request = next((item for item in pending_requests if item.is_available), None)
+    rights_url = ""
+    if rights_request and request is not None:
+        rights_url = request.build_absolute_uri(
+            reverse("creator_rights_public:respond", kwargs={"token": rights_request.request_token})
+        )
+    submission.mobile_creator_rights_request = rights_request
+    submission.mobile_creator_rights_url = rights_url
+    submission.mobile_permission_message = _permission_message(submission, rights_url)
+    submission.mobile_followup_message = _followup_message(submission, rights_url)
     followup = _followup_state(metadata, permission)
     submission.mobile_requested_at = followup["requested_at"]
     submission.mobile_last_followup_at = followup["last_followup_at"]
@@ -352,9 +367,19 @@ def _filters_from_request(request):
 
 
 def _filtered_queue(request, workspace, tab):
+    pending_rights_requests = UGCCreatorRightsRequest.objects.filter(
+        status=UGCCreatorRightsRequest.Status.PENDING,
+    ).order_by("-created_at")
     qs = (
         UGCSubmission.objects.for_workspace(workspace.id)
         .select_related("contributor", "creator", "media_asset", "moderated_by", "rights_passport")
+        .prefetch_related(
+            Prefetch(
+                "creator_rights_requests",
+                queryset=pending_rights_requests,
+                to_attr="_pending_creator_rights_requests",
+            )
+        )
         .annotate(
             open_report_count=Count(
                 "reports",
@@ -391,7 +416,7 @@ def _filtered_queue(request, workspace, tab):
         )
 
     relevance, media, sort_mode, permission = _filters_from_request(request)
-    decorated = [_decorate_submission(submission) for submission in qs[:500]]
+    decorated = [_decorate_submission(submission, request=request) for submission in qs[:500]]
     workflow_counts = _workflow_counts(decorated) if tab == "discovered" else {}
     if tab == "discovered":
         decorated = [item for item in decorated if _matches_relevance(item, relevance)]
