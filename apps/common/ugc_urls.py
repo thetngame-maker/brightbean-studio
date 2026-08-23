@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     tourism_guard_views,
+    tourism_impact_views,
     ugc_bulk_permission_views,
     ugc_content_mission_views,
     ugc_coverage_views,
@@ -28,6 +29,23 @@ from . import (
 app_name = "ugc"
 
 urlpatterns = [
+    path("impact-reports/", tourism_impact_views.impact_reports, name="impact_reports"),
+    path("impact-reports/create/", tourism_impact_views.create_impact_report, name="create_impact_report"),
+    path(
+        "impact-reports/<uuid:report_id>/",
+        tourism_impact_views.impact_report_detail,
+        name="impact_report_detail",
+    ),
+    path(
+        "impact-reports/<uuid:report_id>/update/",
+        tourism_impact_views.update_impact_report,
+        name="update_impact_report",
+    ),
+    path(
+        "impact-reports/<uuid:report_id>/export.csv",
+        tourism_impact_views.export_impact_report_csv,
+        name="export_impact_report_csv",
+    ),
     path("tourism-guard/", tourism_guard_views.tourism_guard, name="tourism_guard"),
     path(
         "tourism-guard/rules/create/", tourism_guard_views.create_tourism_guard_rule, name="create_tourism_guard_rule"

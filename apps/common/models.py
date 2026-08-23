@@ -690,6 +690,66 @@ class TourismGuardReview(models.Model):
         return f"{self.post_id}: {self.rule_key}"
 
 
+class TourismImpactReport(models.Model):
+    """A stable, shareable snapshot of partner-facing tourism impact."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Internal draft"
+        SHARED = "shared", "Shared with partners"
+        ARCHIVED = "archived", "Archived"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="tourism_impact_reports",
+    )
+    title = models.CharField(max_length=255)
+    period_start = models.DateField(db_index=True)
+    period_end = models.DateField(db_index=True)
+    target_type = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default="")
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    snapshot = models.JSONField(default=dict)
+    partner_notes = models.TextField(blank=True, default="")
+    website_visits = models.PositiveIntegerField(null=True, blank=True)
+    registrations = models.PositiveIntegerField(null=True, blank=True)
+    equivalent_cpm = models.DecimalField(max_digits=8, decimal_places=2, default=12)
+    generated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_tourism_impact_reports",
+    )
+    generated_at = models.DateTimeField(default=timezone.now, db_index=True)
+    shared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="shared_tourism_impact_reports",
+    )
+    shared_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_tourism_impact_report"
+        ordering = ["-period_end", "-generated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "-period_end"], name="impact_report_status_idx"),
+            models.Index(fields=["workspace", "target_type", "target_id"], name="impact_report_target_idx"),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
 class ContentPerformanceProfile(models.Model):
     """Human teaching labels that turn post analytics into reusable lessons."""
 

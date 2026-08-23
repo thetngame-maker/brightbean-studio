@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 
+from django.core.paginator import Paginator
 from django.db.models import F, Prefetch
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -9,7 +10,10 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from apps.approvals import services as approval_services
 from apps.approvals.models import ApprovalAction, PostComment
+from apps.common.audit import record_audit_event
 from apps.common.htmx import toast_response
+from apps.common.models import TourismImpactReport
+from apps.common.tourism_impact_views import _conversion_rate, impact_csv_response
 from apps.composer.models import Post
 from apps.members.models import WorkspaceMembership
 
@@ -341,13 +345,64 @@ def portal_activity(request):
 @portal_auth_required
 @require_GET
 def portal_reports(request):
-    """Placeholder reports page."""
+    """Partner-visible impact reports explicitly shared by the workspace."""
     workspace = request.portal_workspace
+    reports = (
+        TourismImpactReport.objects.for_workspace(workspace.id)
+        .filter(status=TourismImpactReport.Status.SHARED)
+        .select_related("shared_by")
+    )
+    page = Paginator(reports, 12).get_page(request.GET.get("page") or 1)
 
     return render(
         request,
         "client_portal/reports.html",
         {
             "workspace": workspace,
+            "reports": page.object_list,
+            "report_page": page,
         },
     )
+
+
+@portal_auth_required
+@require_GET
+def portal_report_detail(request, report_id):
+    workspace = request.portal_workspace
+    report = get_object_or_404(
+        TourismImpactReport.objects.for_workspace(workspace.id),
+        id=report_id,
+        status=TourismImpactReport.Status.SHARED,
+    )
+    return render(
+        request,
+        "ugc/impact_report_detail.html",
+        {
+            "workspace": workspace,
+            "report": report,
+            "impact": report.snapshot or {},
+            "impact_is_partner_view": True,
+            "impact_base_template": "client_portal/portal_base.html",
+            "impact_conversion_rate": _conversion_rate(report),
+        },
+    )
+
+
+@portal_auth_required
+@require_GET
+def portal_report_csv(request, report_id):
+    workspace = request.portal_workspace
+    report = get_object_or_404(
+        TourismImpactReport.objects.for_workspace(workspace.id),
+        id=report_id,
+        status=TourismImpactReport.Status.SHARED,
+    )
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="tourism_impact.partner_exported",
+        target=report,
+        metadata={"format": "csv"},
+        request=request,
+    )
+    return impact_csv_response(report)
