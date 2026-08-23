@@ -16,6 +16,7 @@ from .models import UGCSubmission
 from .ugc_permissions import NOT_CONTACTED, set_permission
 from .ugc_provenance import build_provenance, normalize_platform, set_provenance
 from .ugc_remote_media import capture_discovered_media
+from .ugc_target_catalog import learned_target_for_text
 
 
 MAX_BATCH_ITEMS = 500
@@ -210,6 +211,7 @@ def ingest_discovered_items(
     duplicates = []
     invalid = []
     upgraded_count = 0
+    learned_target_count = 0
 
     rows = list(items)[:MAX_BATCH_ITEMS]
     for index, raw in enumerate(rows, start=1):
@@ -224,11 +226,28 @@ def ingest_discovered_items(
         source_url = _text(raw.get("source_url") or raw.get("url"), 2000)
         external_id = _text(raw.get("external_id") or raw.get("shortcode") or raw.get("id"), 255)
         discovery_query = _text(raw.get("discovery_query"), 500)
+        caption = _text(raw.get("caption") or raw.get("body"), 10000)
 
+        explicit_target = bool(raw.get("target_type") or raw.get("target_id") or raw.get("target_label"))
         target_type = _text(raw.get("target_type") or default_target_type, 100)
         target_id = _text(raw.get("target_id") or default_target_id, 255)
         target_label = _text(raw.get("target_label") or default_target_label, 255)
         target_url = _text(raw.get("target_url") or default_target_url, 2000)
+        original_target = {
+            "target_type": target_type,
+            "target_id": target_id,
+            "target_label": target_label,
+            "target_url": target_url,
+        }
+        learned_match = None
+        if not explicit_target and caption:
+            learned_match = learned_target_for_text(workspace, caption, current_label=target_label)
+            if learned_match:
+                learned = learned_match["target"]
+                target_type = _text(learned.get("target_type"), 100)
+                target_id = _text(learned.get("target_id"), 255)
+                target_label = _text(learned.get("target_label"), 255)
+                target_url = _text(learned.get("target_url"), 2000)
 
         if not creator_handle:
             invalid.append({"index": index, "reason": "creator_handle is required."})
@@ -271,6 +290,19 @@ def ingest_discovered_items(
         metadata = set_permission(metadata, status=NOT_CONTACTED)
         discovery = _discovery_metadata(raw, media_asset=media_asset)
         metadata["discovery_import"] = discovery
+        if learned_match:
+            metadata["target_match"] = {
+                "method": "learned_alias",
+                "alias": learned_match["alias"],
+                "from": original_target,
+                "to": {
+                    "target_type": target_type,
+                    "target_id": target_id,
+                    "target_label": target_label,
+                    "target_url": target_url,
+                },
+            }
+            learned_target_count += 1
         media_url = discovery.get("media_url") or ""
         is_video = discovery.get("media_type") == "video"
 
@@ -290,7 +322,7 @@ def ingest_discovered_items(
                 target_url=target_url,
                 media_asset=media_asset,
                 title=_text(raw.get("title"), 255) or target_label or "Discovered post",
-                body=_text(raw.get("caption") or raw.get("body"), 10000),
+                body=caption,
                 consent_confirmed=False,
                 metadata=metadata,
             )
@@ -304,6 +336,7 @@ def ingest_discovered_items(
         "duplicate_count": len(duplicates),
         "invalid_count": len(invalid),
         "upgraded_count": upgraded_count,
+        "learned_target_count": learned_target_count,
         "duplicates": duplicates,
         "invalid": invalid,
         "total_received": len(rows),
