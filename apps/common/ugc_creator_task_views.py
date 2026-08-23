@@ -67,7 +67,7 @@ def creator_tasks(request, workspace_id):
     identities = UGCCreatorIdentity.objects.order_by("-is_primary", "platform", "normalized_handle")
     tasks = (
         UGCCreatorTask.objects.for_workspace(workspace.id)
-        .select_related("creator", "submission")
+        .select_related("creator", "submission", "collaboration")
         .prefetch_related(Prefetch("creator__identities", queryset=identities))
     )
     if task_filter == "today":
@@ -84,6 +84,7 @@ def creator_tasks(request, workspace_id):
         tasks = tasks.filter(
             Q(title__icontains=query)
             | Q(note__icontains=query)
+            | Q(collaboration__title__icontains=query)
             | Q(creator__display_name__icontains=query)
             | Q(creator__identities__handle__icontains=query)
         ).distinct()

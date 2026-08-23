@@ -10,6 +10,7 @@ from apps.composer.models import Post
 from ..models import (
     AuditEvent,
     UGCCreator,
+    UGCCreatorCollaboration,
     UGCCreatorIdentity,
     UGCCreatorTask,
     UGCRightsPassport,
@@ -385,3 +386,154 @@ class UGCCreatorRelationshipTests(TestCase):
         task.refresh_from_db()
         self.assertEqual(task.status, UGCCreatorTask.Status.DISMISSED)
         self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_task_auto_created").exists())
+
+    def test_collaboration_brief_uses_canonical_target_and_creates_invite_task(self):
+        submission = self.create_submission(contributor_handle="collab_creator")
+        create_url = reverse(
+            "ugc:create_creator_collaboration",
+            kwargs={"workspace_id": self.workspace.id, "creator_id": submission.creator_id},
+        )
+        response = self.client.post(
+            create_url,
+            {
+                "title": "Machine Falls summer Reel",
+                "target_key": "top_sight::machine-falls",
+                "deliverables": "1 vertical Reel and 3 story frames",
+                "offer": "a featured creator spotlight",
+                "requested_rights": ["organic_social", "website"],
+            },
+        )
+
+        collaboration = UGCCreatorCollaboration.objects.get(creator=submission.creator)
+        self.assertRedirects(
+            response,
+            reverse(
+                "ugc:creator_collaboration_detail",
+                kwargs={"workspace_id": self.workspace.id, "collaboration_id": collaboration.id},
+            ),
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(collaboration.target_label, "Machine Falls")
+        self.assertEqual(collaboration.requested_rights, ["organic_social", "website"])
+        self.assertIn("Machine Falls", collaboration.invite_message)
+        task = UGCCreatorTask.objects.get(collaboration=collaboration, status=UGCCreatorTask.Status.OPEN)
+        self.assertEqual(task.kind, UGCCreatorTask.Kind.COLLABORATION)
+        self.assertIn("Send collaboration invite", task.title)
+        self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_collaboration_created").exists())
+
+        detail = self.client.get(
+            reverse(
+                "ugc:creator_collaboration_detail",
+                kwargs={"workspace_id": self.workspace.id, "collaboration_id": collaboration.id},
+            )
+        )
+        self.assertEqual(detail.status_code, 200)
+        self.assertContains(detail, "Invitation")
+        self.assertContains(detail, "Passport enforced")
+
+        queue = self.client.get(reverse("ugc:creator_collaborations", kwargs={"workspace_id": self.workspace.id}))
+        self.assertEqual(queue.status_code, 200)
+        self.assertContains(queue, "Machine Falls summer Reel")
+        self.assertContains(queue, "Draft")
+
+    def test_do_not_contact_blocks_collaboration_brief(self):
+        submission = self.create_submission(contributor_handle="no_collabs")
+        creator = submission.creator
+        creator.relationship_stage = UGCCreator.RelationshipStage.DO_NOT_CONTACT
+        creator.save(update_fields=["relationship_stage", "updated_at"])
+
+        self.client.post(
+            reverse(
+                "ugc:create_creator_collaboration",
+                kwargs={"workspace_id": self.workspace.id, "creator_id": creator.id},
+            ),
+            {"title": "Blocked brief", "deliverables": "1 Reel"},
+        )
+
+        self.assertFalse(UGCCreatorCollaboration.objects.filter(creator=creator).exists())
+
+    def test_collaboration_statuses_automate_relationship_tasks(self):
+        submission = self.create_submission(contributor_handle="collab_status")
+        collaboration = UGCCreatorCollaboration.objects.create(
+            workspace=self.workspace,
+            creator=submission.creator,
+            title="Waterfall weekend",
+            deliverables="1 Reel",
+            invite_message="Would you like to collaborate?",
+            created_by=self.user,
+        )
+        UGCCreatorTask.objects.create(
+            workspace=self.workspace,
+            creator=submission.creator,
+            collaboration=collaboration,
+            kind=UGCCreatorTask.Kind.COLLABORATION,
+            title="Send invitation",
+            due_at=timezone.now(),
+        )
+        update_url = reverse(
+            "ugc:update_creator_collaboration",
+            kwargs={"workspace_id": self.workspace.id, "collaboration_id": collaboration.id},
+        )
+
+        before = timezone.now()
+        self.client.post(update_url, {"action": "mark_invited"})
+        collaboration.refresh_from_db()
+        submission.creator.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.INVITED)
+        self.assertEqual(submission.creator.relationship_stage, UGCCreator.RelationshipStage.CONTACTED)
+        follow_up = UGCCreatorTask.objects.get(collaboration=collaboration, status=UGCCreatorTask.Status.OPEN)
+        self.assertIn("Follow up", follow_up.title)
+        self.assertGreaterEqual(follow_up.due_at, before + timedelta(days=3))
+
+        self.client.post(update_url, {"action": "mark_interested"})
+        self.assertIn(
+            "Confirm collaboration details",
+            UGCCreatorTask.objects.get(collaboration=collaboration, status=UGCCreatorTask.Status.OPEN).title,
+        )
+        self.client.post(update_url, {"action": "mark_confirmed"})
+        collaboration.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.CONFIRMED)
+        self.assertIn(
+            "Check in on deliverables",
+            UGCCreatorTask.objects.get(collaboration=collaboration, status=UGCCreatorTask.Status.OPEN).title,
+        )
+
+    def test_collaboration_completion_requires_linked_content_with_active_rights(self):
+        submission = self.create_submission(contributor_handle="rights_collab")
+        collaboration = UGCCreatorCollaboration.objects.create(
+            workspace=self.workspace,
+            creator=submission.creator,
+            title="Rights-safe collaboration",
+            deliverables="1 Reel",
+            requested_rights=["organic_social", "website"],
+            status=UGCCreatorCollaboration.Status.CONTENT_RECEIVED,
+        )
+        update_url = reverse(
+            "ugc:update_creator_collaboration",
+            kwargs={"workspace_id": self.workspace.id, "collaboration_id": collaboration.id},
+        )
+
+        self.client.post(update_url, {"action": "mark_completed"})
+        collaboration.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.CONTENT_RECEIVED)
+
+        self.client.post(update_url, {"action": "link_content", "submission_id": str(submission.id)})
+        self.client.post(update_url, {"action": "mark_completed"})
+        collaboration.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.CONTENT_RECEIVED)
+
+        passport = submission.rights_passport
+        passport.status = UGCRightsPassport.Status.GRANTED
+        passport.allow_organic_social = True
+        passport.save(update_fields=["status", "allow_organic_social", "updated_at"])
+        self.client.post(update_url, {"action": "mark_completed"})
+        collaboration.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.CONTENT_RECEIVED)
+
+        passport.allow_website = True
+        passport.save(update_fields=["allow_website", "updated_at"])
+        self.client.post(update_url, {"action": "mark_completed"})
+        collaboration.refresh_from_db()
+        self.assertEqual(collaboration.status, UGCCreatorCollaboration.Status.COMPLETED)
+        self.assertIsNotNone(collaboration.completed_at)
+        self.assertTrue(AuditEvent.objects.filter(action="ugc.creator_collaboration_mark_completed").exists())

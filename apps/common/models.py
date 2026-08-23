@@ -350,6 +350,84 @@ class UGCRightsPassport(models.Model):
         return f"{self.get_status_display()} rights for {self.submission}"
 
 
+class UGCCreatorCollaboration(models.Model):
+    """A lightweight creator brief from invitation through rights-safe completion."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        INVITED = "invited", "Invited"
+        INTERESTED = "interested", "Interested"
+        CONFIRMED = "confirmed", "Confirmed"
+        CONTENT_RECEIVED = "content_received", "Content received"
+        COMPLETED = "completed", "Completed"
+        DECLINED = "declined", "Declined"
+        CANCELLED = "cancelled", "Cancelled"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_collaborations",
+    )
+    creator = models.ForeignKey(
+        UGCCreator,
+        on_delete=models.CASCADE,
+        related_name="collaborations",
+    )
+    submission = models.ForeignKey(
+        UGCSubmission,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="creator_collaborations",
+    )
+    title = models.CharField(max_length=255)
+    brief = models.TextField(blank=True, default="")
+    deliverables = models.TextField(blank=True, default="")
+    offer = models.CharField(max_length=500, blank=True, default="")
+    target_type = models.CharField(max_length=100, blank=True, default="", db_index=True)
+    target_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    target_label = models.CharField(max_length=255, blank=True, default="")
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    requested_rights = models.JSONField(default=list, blank=True)
+    invite_message = models.TextField(blank=True, default="")
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT, db_index=True)
+    content_due_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    invited_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_ugc_creator_collaborations",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_collaboration"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "-updated_at"], name="ugc_collab_status_idx"),
+            models.Index(fields=["creator", "status", "-updated_at"], name="ugc_collab_creator_idx"),
+            models.Index(fields=["workspace", "content_due_at"], name="ugc_collab_due_idx"),
+        ]
+
+    @property
+    def is_active(self):
+        return self.status not in {self.Status.COMPLETED, self.Status.DECLINED, self.Status.CANCELLED}
+
+    @property
+    def is_overdue(self):
+        return bool(self.is_active and self.content_due_at and self.content_due_at < timezone.now())
+
+    def __str__(self):
+        return self.title
+
+
 class UGCCreatorTask(models.Model):
     """A lightweight next action in a workspace's creator relationship workflow."""
 
@@ -383,6 +461,13 @@ class UGCCreatorTask(models.Model):
         null=True,
         blank=True,
         related_name="creator_tasks",
+    )
+    collaboration = models.ForeignKey(
+        UGCCreatorCollaboration,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tasks",
     )
     kind = models.CharField(max_length=30, choices=Kind.choices, default=Kind.CUSTOM, db_index=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN, db_index=True)

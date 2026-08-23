@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import (
     ugc_bulk_permission_views,
+    ugc_creator_collaboration_views,
     ugc_creator_task_views,
     ugc_creator_views,
     ugc_discovery_bulk_views,
@@ -25,6 +26,21 @@ app_name = "ugc"
 urlpatterns = [
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
     path("creators/", ugc_creator_views.creator_hub, name="creator_hub"),
+    path(
+        "creators/collaborations/",
+        ugc_creator_collaboration_views.creator_collaborations,
+        name="creator_collaborations",
+    ),
+    path(
+        "creators/collaborations/<uuid:collaboration_id>/",
+        ugc_creator_collaboration_views.creator_collaboration_detail,
+        name="creator_collaboration_detail",
+    ),
+    path(
+        "creators/collaborations/<uuid:collaboration_id>/update/",
+        ugc_creator_collaboration_views.update_creator_collaboration,
+        name="update_creator_collaboration",
+    ),
     path("creators/tasks/", ugc_creator_task_views.creator_tasks, name="creator_tasks"),
     path(
         "creators/tasks/<uuid:task_id>/update/", ugc_creator_task_views.update_creator_task, name="update_creator_task"
@@ -37,6 +53,11 @@ urlpatterns = [
         "creators/<uuid:creator_id>/tasks/create/",
         ugc_creator_task_views.create_creator_task,
         name="create_creator_task",
+    ),
+    path(
+        "creators/<uuid:creator_id>/collaborations/create/",
+        ugc_creator_collaboration_views.create_creator_collaboration,
+        name="create_creator_collaboration",
     ),
     path("rights/<uuid:submission_id>/", ugc_creator_views.rights_passport, name="rights_passport"),
     path(

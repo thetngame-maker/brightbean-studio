@@ -24,6 +24,7 @@ from .audit import record_audit_event
 from .models import (
     AuditEvent,
     UGCCreator,
+    UGCCreatorCollaboration,
     UGCCreatorIdentity,
     UGCCreatorTask,
     UGCRightsPassport,
@@ -36,10 +37,18 @@ from .ugc_creator_opportunities import (
 )
 from .ugc_creator_services import sync_rights_passport_from_submission
 from .ugc_permissions import DECLINED, GRANTED, NOT_CONTACTED, REQUESTED, set_permission
+from .ugc_target_catalog import target_choices
 from .ugc_views import _get_workspace
 
 CREATOR_PAGE_SIZE = 12
 CREATOR_RADAR_LIMIT = 500
+COLLABORATION_RIGHTS_CHOICES = (
+    ("organic_social", "Organic social"),
+    ("website", "Website"),
+    ("email", "Email"),
+    ("paid_ads", "Paid ads"),
+    ("print", "Print"),
+)
 
 
 def _safe_local_path(request, value, fallback):
@@ -267,6 +276,12 @@ def creator_detail(request, workspace_id, creator_id):
         )
         .count()
     )
+    creator_collaborations = list(
+        UGCCreatorCollaboration.objects.for_workspace(workspace.id)
+        .filter(creator=creator)
+        .select_related("submission", "submission__rights_passport")
+        .order_by("-updated_at")[:20]
+    )
     context = {
         "workspace": workspace,
         "creator": creator,
@@ -276,6 +291,9 @@ def creator_detail(request, workspace_id, creator_id):
         "open_creator_tasks": open_creator_tasks,
         "open_creator_task_count": open_creator_task_count,
         "creator_task_kind_choices": UGCCreatorTask.Kind.choices,
+        "creator_collaborations": creator_collaborations,
+        "collaboration_target_choices": target_choices(workspace, limit=80),
+        "collaboration_rights_choices": COLLABORATION_RIGHTS_CHOICES,
         "creator_stage_choices": UGCCreator.RelationshipStage.choices,
         "creator_stats": {
             "content": len(submissions),
