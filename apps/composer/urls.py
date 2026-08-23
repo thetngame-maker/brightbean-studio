@@ -1,10 +1,21 @@
 from django.urls import path
 
-from . import views
+from . import orchestration_views, views
 
 app_name = "composer"
 
 urlpatterns = [
+    path("orchestration/", orchestration_views.orchestration, name="orchestration"),
+    path(
+        "orchestration/<uuid:post_id>/add-variant/",
+        orchestration_views.add_orchestration_variant,
+        name="add_orchestration_variant",
+    ),
+    path(
+        "orchestration/<uuid:post_id>/stagger/",
+        orchestration_views.stagger_orchestration,
+        name="stagger_orchestration",
+    ),
     # Create landing page
     path("create/", views.create_landing, name="create_landing"),
     # Idea CRUD (HTMX endpoints)
