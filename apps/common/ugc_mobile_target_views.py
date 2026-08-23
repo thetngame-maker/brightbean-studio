@@ -3,13 +3,14 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
+from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from apps.members.decorators import require_permission
 
 from .audit import record_audit_event
 from .models import UGCSubmission
-from .ugc_mobile_quality import _normalise
+from .ugc_mobile_quality import _normalise, approved_quality
 from .ugc_views import _get_workspace
 
 
@@ -46,6 +47,13 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
     return choices
 
 
+def _safe_return(request, workspace):
+    return_to = request.POST.get("return_to", "").strip()
+    if return_to.startswith("/"):
+        return redirect(return_to)
+    return redirect("ugc:moderation_queue", workspace_id=workspace.id)
+
+
 @login_required
 @require_permission("manage_workspace_settings")
 @require_POST
@@ -62,7 +70,6 @@ def retarget_submission(request, workspace_id, submission_id):
         target_id = request.POST.get("target_id", "").strip()
     target_type = target_type[:100]
     target_id = target_id[:255]
-    return_to = request.POST.get("return_to", "").strip()
 
     candidate = (
         UGCSubmission.objects.for_workspace(workspace.id)
@@ -73,7 +80,7 @@ def retarget_submission(request, workspace_id, submission_id):
     )
     if not candidate:
         messages.error(request, "Choose a known TN Game target.")
-        return redirect(return_to) if return_to.startswith("/") else redirect("ugc:moderation_queue", workspace_id=workspace.id)
+        return _safe_return(request, workspace)
 
     old_target = {
         "target_type": submission.target_type,
@@ -85,7 +92,13 @@ def retarget_submission(request, workspace_id, submission_id):
     submission.target_id = candidate["target_id"]
     submission.target_label = candidate["target_label"]
     submission.target_url = candidate["target_url"] or ""
-    submission.save(update_fields=["target_type", "target_id", "target_label", "target_url", "updated_at"])
+
+    metadata = dict(submission.metadata or {})
+    metadata.pop("approved_quality_override", None)
+    submission.metadata = metadata
+    submission.save(
+        update_fields=["target_type", "target_id", "target_label", "target_url", "metadata", "updated_at"]
+    )
 
     record_audit_event(
         workspace=workspace,
@@ -105,4 +118,45 @@ def retarget_submission(request, workspace_id, submission_id):
         request=request,
     )
     messages.success(request, f"Target changed to {submission.target_label}.")
-    return redirect(return_to) if return_to.startswith("/") else redirect("ugc:moderation_queue", workspace_id=workspace.id)
+    return _safe_return(request, workspace)
+
+
+@login_required
+@require_permission("manage_workspace_settings")
+@require_POST
+def mark_quality_checked(request, workspace_id, submission_id):
+    """Explicitly clear the current conservative quality warning after human review."""
+    workspace = _get_workspace(request, workspace_id)
+    submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
+    quality = approved_quality(submission)
+
+    if not quality.get("needs_check"):
+        messages.info(request, "This item no longer needs a quality check.")
+        return _safe_return(request, workspace)
+
+    metadata = dict(submission.metadata or {})
+    metadata["approved_quality_override"] = {
+        "fingerprint": quality.get("fingerprint", ""),
+        "kind": quality.get("kind", ""),
+        "reason": quality.get("reason", ""),
+        "reviewed_at": timezone.now().isoformat(),
+        "reviewed_by": str(request.user.id),
+    }
+    submission.metadata = metadata
+    submission.save(update_fields=["metadata", "updated_at"])
+
+    record_audit_event(
+        workspace=workspace,
+        actor=request.user,
+        action="ugc.quality_check_cleared",
+        target=submission,
+        target_label=str(submission),
+        metadata={
+            "kind": quality.get("kind", ""),
+            "reason": quality.get("reason", ""),
+            "fingerprint": quality.get("fingerprint", ""),
+        },
+        request=request,
+    )
+    messages.success(request, "Quality check cleared. The item is ready to use.")
+    return _safe_return(request, workspace)
