@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}TN Game Targets · TN Social Studio{% endblock %}
+{% block page_header %}{% endblock %}
+
+{% block content %}
+<style>
+@media (max-width:767px){
+  div.flex.lg\:hidden.items-center.justify-between.px-4.py-3{padding-top:6px!important;padding-bottom:6px!important;min-height:50px}
+  main{padding-top:7px!important}
+  .tc{margin:-.1rem -.25rem 0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#1c1c1e;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+  .tc-head{display:flex;align-items:center;gap:10px;padding:4px 2px 9px}.tc-back{width:36px;height:36px;border-radius:11px;border:1px solid #e5e5ea;background:#fff;color:#6d28d9;text-decoration:none;display:flex;align-items:center;justify-content:center;font-size:20px}.tc-title{min-width:0}.tc-title strong{display:block;font-size:23px;line-height:1.05;font-weight:780;letter-spacing:-.03em}.tc-title span{display:block;margin-top:2px;color:#8e8e93;font-size:11px}
+  .tc-search{display:grid;grid-template-columns:1fr auto;gap:7px;margin-bottom:8px}.tc-search input{min-width:0;height:42px;border:1px solid #e5e5ea;border-radius:12px;background:#fff;padding:0 12px;font-size:14px}.tc-search button{height:42px;border:0;border-radius:12px;background:#1c1c1e;color:#fff;padding:0 15px;font-size:12px;font-weight:760}
+  .tc-types{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-bottom:10px;padding-bottom:1px}.tc-types::-webkit-scrollbar{display:none}.tc-type{flex:0 0 auto;min-height:34px;padding:0 11px;border-radius:999px;border:1px solid #e5e5ea;background:#fff;color:#636366;text-decoration:none;display:flex;align-items:center;font-size:11px;font-weight:700}.tc-type.active{background:#ede9fe;border-color:#d9c9fb;color:#6d28d9}
+  .tc-list{display:grid;gap:8px}.tc-card{background:#fff;border:1px solid #ededf0;border-radius:15px;padding:11px 12px;box-shadow:0 1px 3px rgba(0,0,0,.04)}.tc-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.tc-name{font-size:16px;line-height:1.2;font-weight:760;letter-spacing:-.015em}.tc-count{flex:0 0 auto;min-width:28px;height:24px;padding:0 7px;border-radius:999px;background:#f2f2f7;color:#636366;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800}.tc-meta{margin-top:4px;color:#8e8e93;font-size:10px;word-break:break-word}.tc-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.tc-badge{min-height:22px;padding:0 7px;border-radius:999px;background:#f2f2f7;color:#636366;display:flex;align-items:center;font-size:9px;font-weight:720}.tc-badge.community{background:#eef2ff;color:#4338ca}.tc-badge.discovery{background:#e9f9ef;color:#08783e}.tc-badge.learned{background:#fff2d8;color:#9a5b00}.tc-alias{margin-top:7px;font-size:10px;color:#8e8e93}.tc-alias strong{color:#3a3a3c}.tc-empty{padding:42px 18px;text-align:center;color:#8e8e93;background:#fff;border-radius:16px}
+}
+</style>
+
+<div class="tc">
+  <div class="tc-head">
+    <a class="tc-back" href="{% url 'ugc:moderation_queue' workspace_id=workspace.id %}?tab=approved&draft_state=check">‹</a>
+    <div class="tc-title"><strong>TN Game Targets</strong><span>{{ target_catalog_total }} known targets · built from Community + Discovery</span></div>
+  </div>
+
+  <form class="tc-search" method="get">
+    {% if target_catalog_type %}<input type="hidden" name="type" value="{{ target_catalog_type }}">{% endif %}
+    <input type="search" name="q" value="{{ target_catalog_query }}" placeholder="Search targets or aliases…" autocapitalize="none">
+    <button type="submit">Search</button>
+  </form>
+
+  <div class="tc-types">
+    <a class="tc-type {% if not target_catalog_type %}active{% endif %}" href="?{% if target_catalog_query %}q={{ target_catalog_query|urlencode }}{% endif %}">All</a>
+    {% for type in target_catalog_types %}<a class="tc-type {% if target_catalog_type == type %}active{% endif %}" href="?type={{ type|urlencode }}{% if target_catalog_query %}&q={{ target_catalog_query|urlencode }}{% endif %}">{{ type|cut:"_"|title }}</a>{% endfor %}
+  </div>
+
+  <div class="tc-list">
+    {% for target in targets %}
+    <article class="tc-card">
+      <div class="tc-top"><div class="tc-name">{{ target.target_label }}</div><span class="tc-count">{{ target.usage_count }}</span></div>
+      <div class="tc-meta">{{ target.target_type }} · {{ target.target_id }}</div>
+      <div class="tc-badges">
+        {% for source in target.sources %}<span class="tc-badge {{ source }}">{% if source == 'community' %}Community {{ target.ugc_count }}{% elif source == 'discovery' %}Discovery {{ target.discovery_count }}{% else %}Learned{% endif %}</span>{% endfor %}
+      </div>
+      {% if target.aliases %}<div class="tc-alias">Aliases: <strong>{{ target.aliases|join:", " }}</strong></div>{% endif %}
+    </article>
+    {% empty %}<div class="tc-empty">No targets match this search yet.</div>{% endfor %}
+  </div>
+</div>
+{% endblock %}
