@@ -575,6 +575,121 @@ class UGCContentMission(models.Model):
         return self.title
 
 
+class TourismGuardRule(models.Model):
+    """Source-backed safety or accuracy guidance linked to a canonical TN target."""
+
+    class Kind(models.TextChoices):
+        SAFETY = "safety", "Safety"
+        ACCESS = "access", "Access / closure"
+        ACCURACY = "accuracy", "Fact accuracy"
+        SEASONAL = "seasonal", "Seasonal conditions"
+        ACCESSIBILITY = "accessibility", "Accessibility"
+        SENSITIVE_LOCATION = "sensitive_location", "Sensitive location"
+
+    class Severity(models.TextChoices):
+        BLOCKER = "blocker", "Block publication"
+        WARNING = "warning", "Warning"
+        REMINDER = "reminder", "Reminder"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="tourism_guard_rules",
+    )
+    target_type = models.CharField(max_length=100, db_index=True)
+    target_id = models.CharField(max_length=255, db_index=True)
+    target_label = models.CharField(max_length=255)
+    target_url = models.URLField(max_length=2000, blank=True, default="")
+    kind = models.CharField(max_length=30, choices=Kind.choices, default=Kind.SAFETY, db_index=True)
+    severity = models.CharField(max_length=20, choices=Severity.choices, default=Severity.WARNING, db_index=True)
+    title = models.CharField(max_length=255)
+    guidance = models.TextField()
+    trigger_phrases = models.JSONField(default=list, blank=True)
+    safe_context_phrases = models.JSONField(default=list, blank=True)
+    source_url = models.URLField(max_length=2000)
+    source_label = models.CharField(max_length=255, blank=True, default="")
+    verified_at = models.DateTimeField(default=timezone.now, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_tourism_guard_rules",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_tourism_guard_rules",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_tourism_guard_rule"
+        ordering = ["target_label", "-severity", "title"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "target_type", "target_id", "title"],
+                name="tour_guard_target_title_uniq",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["workspace", "is_active", "severity"], name="tour_guard_active_idx"),
+            models.Index(fields=["workspace", "target_type", "target_id"], name="tour_guard_target_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.target_label}: {self.title}"
+
+
+class TourismGuardReview(models.Model):
+    """Current human verification for one rule finding on one exact Post revision."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="tourism_guard_reviews",
+    )
+    post = models.ForeignKey(
+        "composer.Post",
+        on_delete=models.CASCADE,
+        related_name="tourism_guard_reviews",
+    )
+    rule_key = models.CharField(max_length=100, db_index=True)
+    finding_fingerprint = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    note = models.TextField(blank=True, default="")
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="tourism_guard_reviews",
+    )
+    reviewed_at = models.DateTimeField(default=timezone.now, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_tourism_guard_review"
+        ordering = ["-reviewed_at"]
+        constraints = [models.UniqueConstraint(fields=["workspace", "post", "rule_key"], name="tour_guard_review_uniq")]
+        indexes = [
+            models.Index(fields=["workspace", "post", "rule_key"], name="tour_guard_review_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.post_id}: {self.rule_key}"
+
+
 class ContentPerformanceProfile(models.Model):
     """Human teaching labels that turn post analytics into reusable lessons."""
 

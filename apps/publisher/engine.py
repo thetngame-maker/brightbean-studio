@@ -242,6 +242,37 @@ class PublishEngine:
             if not platform_posts:
                 return
 
+            # This is the last safe point before any provider API can be
+            # called. Tourism Guard scans the exact, locked post revision and
+            # honors a human verification only while its content fingerprint
+            # still matches. An unresolved blocker parks every due child and
+            # leaves an audit trail instead of risking a partial publish.
+            from apps.common.audit import record_audit_event
+            from apps.common.models import AuditEvent
+            from apps.common.tourism_guard import blocking_findings_for_post
+
+            blockers = blocking_findings_for_post(post.workspace, post.id)
+            if blockers:
+                titles = [finding["rule"]["title"] for finding in blockers]
+                message = f"Publication held by Tourism Guard: {', '.join(titles[:3])}"[:1000]
+                PlatformPost.objects.filter(id__in=[pp.id for pp in platform_posts]).update(
+                    status=PlatformPost.Status.ON_HOLD,
+                    publish_error=message,
+                )
+                record_audit_event(
+                    workspace=post.workspace,
+                    action="tourism_guard.publish_blocked",
+                    target=post,
+                    source=AuditEvent.Source.SYSTEM,
+                    metadata={
+                        "platform_post_ids": [str(pp.id) for pp in platform_posts],
+                        "rule_keys": [finding["rule_key"] for finding in blockers],
+                        "finding_fingerprints": [finding["fingerprint"] for finding in blockers],
+                    },
+                )
+                logger.warning("Tourism Guard held post %s before provider dispatch", post.id)
+                return
+
             PlatformPost.objects.filter(id__in=[pp.id for pp in platform_posts]).update(
                 status=PlatformPost.Status.PUBLISHING
             )

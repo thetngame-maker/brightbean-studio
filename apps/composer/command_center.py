@@ -12,6 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.common.models import UGCContentMission, UGCCreatorTask, UGCSubmission
+from apps.common.tourism_guard import build_tourism_guard
 from apps.common.ugc_mobile_queue_views import discovered_workflow_snapshot
 from apps.common.ugc_views import _pending_submission_q
 from apps.inbox.models import InboxMessage
@@ -83,6 +84,26 @@ def build_command_center(workspace, *, permissions=None):
             url=f"{_url('composer:compose_edit', workspace, post_id=variant.post_id)}?account={variant.social_account_id}",
             minutes=2,
             tone="red",
+        )
+
+    guard = build_tourism_guard(workspace)
+    guard_blockers = guard["counts"]["blockers"]
+    guard_warnings = guard["counts"]["warnings"] + guard["counts"]["reminders"]
+    if guard_blockers or guard_warnings:
+        detail = []
+        if guard_blockers:
+            detail.append(f"{guard_blockers} publication blocker{'s' if guard_blockers != 1 else ''}")
+        if guard_warnings:
+            detail.append(f"{guard_warnings} warning{'s' if guard_warnings != 1 else ''}")
+        _add(
+            actions,
+            kind="Tourism Guard",
+            title=f"Verify {guard['counts']['posts']} post{'s' if guard['counts']['posts'] != 1 else ''}",
+            detail=" · ".join(detail),
+            url=_url("ugc:tourism_guard", workspace),
+            minutes=1,
+            tone="red" if guard_blockers else "orange",
+            count=guard["counts"]["posts"],
         )
 
     pending_review = []
@@ -250,6 +271,8 @@ def build_command_center(workspace, *, permissions=None):
             "missions_due": due_mission_count,
             "scheduled_today": scheduled_today,
             "published_today": published_today,
+            "guard": guard["counts"]["posts"],
+            "guard_blockers": guard_blockers,
         },
         "links": {
             "community": _url("ugc:moderation_queue", workspace) + "?tab=discovered&permission=today&sort=today",
@@ -258,5 +281,6 @@ def build_command_center(workspace, *, permissions=None):
             "orchestration": _url("composer:orchestration", workspace),
             "tasks": task_queue_url,
             "missions": _url("ugc:content_missions", workspace),
+            "guard": _url("ugc:tourism_guard", workspace),
         },
     }

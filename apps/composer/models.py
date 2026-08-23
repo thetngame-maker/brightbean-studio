@@ -382,7 +382,7 @@ class PlatformPost(models.Model):
         "pending_client": {"approved", "changes_requested", "rejected"},
         "changes_requested": {"pending_review", "draft"},
         "rejected": {"draft", "pending_review"},
-        "scheduled": {"publishing", "draft"},
+        "scheduled": {"publishing", "draft", "on_hold"},
         "publishing": {"published", "failed", "scheduled"},  # scheduled = retry
         "failed": {"publishing", "draft", "scheduled"},
         # Client-requested hold: parked out of the publish path. The team resolves

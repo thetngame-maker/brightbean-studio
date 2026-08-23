@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import (
+    tourism_guard_views,
     ugc_bulk_permission_views,
     ugc_content_mission_views,
     ugc_coverage_views,
@@ -27,6 +28,20 @@ from . import (
 app_name = "ugc"
 
 urlpatterns = [
+    path("tourism-guard/", tourism_guard_views.tourism_guard, name="tourism_guard"),
+    path(
+        "tourism-guard/rules/create/", tourism_guard_views.create_tourism_guard_rule, name="create_tourism_guard_rule"
+    ),
+    path(
+        "tourism-guard/rules/<uuid:rule_id>/update/",
+        tourism_guard_views.update_tourism_guard_rule,
+        name="update_tourism_guard_rule",
+    ),
+    path(
+        "tourism-guard/posts/<uuid:post_id>/verify/",
+        tourism_guard_views.verify_tourism_guard_finding,
+        name="verify_tourism_guard_finding",
+    ),
     path("", ugc_mobile_queue_dispatch.moderation_queue, name="moderation_queue"),
     path("missions/", ugc_content_mission_views.content_missions, name="content_missions"),
     path("missions/create/", ugc_content_mission_views.create_content_mission, name="create_content_mission"),
