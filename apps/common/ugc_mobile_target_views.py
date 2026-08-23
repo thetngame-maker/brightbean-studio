@@ -14,70 +14,8 @@ from apps.members.decorators import require_permission
 from .audit import record_audit_event
 from .models import UGCSubmission
 from .ugc_mobile_quality import _normalise, approved_quality, decorate_approved_quality
+from .ugc_target_catalog import find_catalog_target, target_choices
 from .ugc_views import _get_workspace
-
-
-def _learned_target_key(workspace, suggested_label):
-    """Return a recently learned target for a caption alias, if one exists.
-
-    Corrections live on the submission metadata so this remains migration-free.
-    We intentionally keep the lookup bounded and treat the result as a suggestion
-    only; nothing is silently retargeted.
-    """
-    alias_norm = _normalise(suggested_label)
-    if not alias_norm:
-        return None
-    recent = (
-        UGCSubmission.objects.for_workspace(workspace.id)
-        .only("metadata")
-        .order_by("-updated_at")[:250]
-    )
-    for submission in recent:
-        correction = (submission.metadata or {}).get("target_correction") or {}
-        if correction.get("alias_norm") != alias_norm:
-            continue
-        target_type = (correction.get("to_target_type") or "").strip()
-        target_id = (correction.get("to_target_id") or "").strip()
-        if target_type and target_id:
-            return target_type, target_id
-    return None
-
-
-def target_choices(workspace, *, suggested_label="", current_submission=None, limit=80):
-    """Return known workspace UGC targets, with learned/caption suggestions first."""
-    rows = (
-        UGCSubmission.objects.for_workspace(workspace.id)
-        .exclude(target_id="")
-        .exclude(target_label="")
-        .values("target_type", "target_id", "target_label", "target_url")
-        .order_by("target_label")
-        .distinct()
-    )
-    suggested_norm = _normalise(suggested_label)
-    learned_key = _learned_target_key(workspace, suggested_label)
-    current_key = None
-    if current_submission is not None:
-        current_key = (current_submission.target_type, current_submission.target_id)
-
-    seen = set()
-    choices = []
-    for row in rows:
-        key = (row["target_type"], row["target_id"])
-        if key in seen:
-            continue
-        seen.add(key)
-        row = dict(row)
-        exact_match = bool(suggested_norm and _normalise(row["target_label"]) == suggested_norm)
-        learned_match = bool(learned_key and key == learned_key)
-        row["is_current"] = key == current_key
-        row["is_suggested"] = exact_match or learned_match
-        row["suggestion_source"] = "learned" if learned_match and not exact_match else ("caption" if exact_match else "")
-        row["picker_value"] = f'{row["target_type"]}::{row["target_id"]}'
-        choices.append(row)
-        if len(choices) >= limit:
-            break
-    choices.sort(key=lambda item: (not item["is_suggested"], item["is_current"], item["target_label"].lower()))
-    return choices
 
 
 def _safe_return(request, workspace):
@@ -131,13 +69,7 @@ def retarget_submission(request, workspace_id, submission_id):
     target_type = target_type[:100]
     target_id = target_id[:255]
 
-    candidate = (
-        UGCSubmission.objects.for_workspace(workspace.id)
-        .filter(target_type=target_type, target_id=target_id)
-        .exclude(target_label="")
-        .values("target_type", "target_id", "target_label", "target_url")
-        .first()
-    )
+    candidate = find_catalog_target(workspace, target_type, target_id)
     if not candidate:
         messages.error(request, "Choose a known TN Game target.")
         return _safe_return(request, workspace)
@@ -154,7 +86,7 @@ def retarget_submission(request, workspace_id, submission_id):
     submission.target_type = candidate["target_type"]
     submission.target_id = candidate["target_id"]
     submission.target_label = candidate["target_label"]
-    submission.target_url = candidate["target_url"] or ""
+    submission.target_url = candidate.get("target_url") or ""
 
     metadata = dict(submission.metadata or {})
     metadata.pop("approved_quality_override", None)
@@ -168,6 +100,7 @@ def retarget_submission(request, workspace_id, submission_id):
             "to_target_type": candidate["target_type"],
             "to_target_id": candidate["target_id"],
             "to_target_label": candidate["target_label"],
+            "to_target_url": candidate.get("target_url") or "",
             "corrected_at": timezone.now().isoformat(),
             "corrected_by": str(request.user.id),
         }
