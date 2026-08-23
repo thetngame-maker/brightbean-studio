@@ -1,8 +1,11 @@
 """Lightweight target correction helpers for mobile Approved UGC review."""
 
+from urllib.parse import urlencode
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -10,7 +13,7 @@ from apps.members.decorators import require_permission
 
 from .audit import record_audit_event
 from .models import UGCSubmission
-from .ugc_mobile_quality import _normalise, approved_quality
+from .ugc_mobile_quality import _normalise, approved_quality, decorate_approved_quality
 from .ugc_views import _get_workspace
 
 
@@ -54,6 +57,31 @@ def _safe_return(request, workspace):
     return redirect("ugc:moderation_queue", workspace_id=workspace.id)
 
 
+def _next_quality_check_url(workspace, *, return_to=""):
+    """Return the next undrafted approved item that still needs a check."""
+    candidates = list(
+        UGCSubmission.objects.for_workspace(workspace.id)
+        .filter(status=UGCSubmission.Status.APPROVED)
+        .select_related("media_asset")
+        .order_by("-submitted_at")[:250]
+    )
+    for candidate in candidates:
+        if (candidate.metadata or {}).get("studio_post_ids"):
+            continue
+        decorate_approved_quality(candidate)
+        if not candidate.mobile_needs_quality_check:
+            continue
+        review_url = reverse(
+            "ugc:mobile_review",
+            kwargs={"workspace_id": workspace.id, "submission_id": candidate.id},
+        )
+        query = {"tab": "approved", "draft_state": "check"}
+        if return_to.startswith("/"):
+            query["return_to"] = return_to
+        return f"{review_url}?{urlencode(query)}"
+    return ""
+
+
 @login_required
 @require_permission("manage_workspace_settings")
 @require_POST
@@ -61,6 +89,8 @@ def retarget_submission(request, workspace_id, submission_id):
     """Move one UGC item to a known workspace target without weakening its audit trail."""
     workspace = _get_workspace(request, workspace_id)
     submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
+    return_to = request.POST.get("return_to", "").strip()
+    was_check_queue = "draft_state=check" in return_to
 
     target_key = request.POST.get("target_key", "").strip()
     if "::" in target_key:
@@ -118,6 +148,11 @@ def retarget_submission(request, workspace_id, submission_id):
         request=request,
     )
     messages.success(request, f"Target changed to {submission.target_label}.")
+
+    if was_check_queue:
+        next_url = _next_quality_check_url(workspace, return_to=return_to)
+        if next_url:
+            return redirect(next_url)
     return _safe_return(request, workspace)
 
 
