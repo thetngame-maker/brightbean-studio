@@ -67,10 +67,16 @@ def _focused_context(request, workspace, submission_id, tab):
     action_return_to = _review_url(workspace, next_item, params, return_to) if next_item else return_to
 
     review_query = ugc_mobile_queue_views._queue_query(params)
+    approved_draft_session = False
     if tab == "approved" and draft_state:
         review_query += f"&draft_state={draft_state}"
+        approved_draft_session = draft_state == "ready" and request.GET.get("draft_session") == "1"
+        if approved_draft_session:
+            review_query += "&draft_session=1"
         if next_item:
             action_return_to = _review_url(workspace, next_item, params, return_to) + f"&draft_state={draft_state}"
+            if approved_draft_session:
+                action_return_to += "&draft_session=1"
 
     context = {
         "workspace": workspace,
@@ -86,6 +92,7 @@ def _focused_context(request, workspace, submission_id, tab):
         "review_action_return_to": action_return_to,
         "review_current_url": request.get_full_path(),
         "approved_draft_state": draft_state,
+        "approved_draft_session": approved_draft_session,
     }
     if tab == "approved" and getattr(submission, "mobile_quality_kind", "") == "target_mismatch":
         context["approved_target_choices"] = target_choices(
