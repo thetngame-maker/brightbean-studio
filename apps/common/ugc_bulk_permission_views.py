@@ -9,8 +9,8 @@ from django.views.decorators.http import require_POST
 from apps.members.decorators import require_permission
 
 from .audit import record_audit_event
-from .models import UGCSubmission
-from .ugc_permissions import GRANTED, VALID_PERMISSION_STATUSES, set_permission
+from .models import UGCCreator, UGCSubmission
+from .ugc_permissions import GRANTED, REQUESTED, VALID_PERMISSION_STATUSES, set_permission
 from .ugc_provenance import get_provenance
 from .ugc_views import _discovered_q, _get_workspace
 
@@ -43,6 +43,7 @@ def bulk_permission_update(request, workspace_id):
         UGCSubmission.objects.for_workspace(workspace.id)
         .filter(id__in=ids, status=UGCSubmission.Status.PENDING)
         .filter(_discovered_q())
+        .select_related("creator")
     )
     if not submissions:
         messages.error(request, "None of the selected items are still eligible for this action.")
@@ -51,12 +52,19 @@ def bulk_permission_update(request, workspace_id):
     now = timezone.now()
     channel = request.POST.get("channel", "bulk").strip()[:50] or "bulk"
     consent_version = (
-        request.POST.get("consent_version", "creator-permission-v1").strip()[:50]
-        or "creator-permission-v1"
+        request.POST.get("consent_version", "creator-permission-v1").strip()[:50] or "creator-permission-v1"
     )
 
     updated = 0
+    skipped_do_not_contact = 0
     for submission in submissions:
+        if (
+            status == REQUESTED
+            and submission.creator_id
+            and submission.creator.relationship_stage == UGCCreator.RelationshipStage.DO_NOT_CONTACT
+        ):
+            skipped_do_not_contact += 1
+            continue
         provenance = get_provenance(submission.metadata)
         submission.metadata = set_permission(
             submission.metadata,
@@ -90,6 +98,11 @@ def bulk_permission_update(request, workspace_id):
             request=request,
         )
 
+    if skipped_do_not_contact:
+        messages.warning(
+            request,
+            f"Skipped {skipped_do_not_contact} item{'s' if skipped_do_not_contact != 1 else ''} from creators marked Do not contact.",
+        )
     if status == GRANTED:
         messages.success(
             request,

@@ -2,6 +2,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from apps.common.managers import WorkspaceScopedManager
 
@@ -58,6 +59,99 @@ class AuditEvent(models.Model):
         return f"{self.action} by {actor}"
 
 
+class UGCCreator(models.Model):
+    """One workspace-owned relationship record for a community creator."""
+
+    class RelationshipStage(models.TextChoices):
+        PROSPECT = "prospect", "Prospect"
+        CONTACTED = "contacted", "Contacted"
+        PERMISSIONED = "permissioned", "Permissioned"
+        TRUSTED = "trusted", "Trusted creator"
+        PARTNER = "partner", "Creator partner"
+        DO_NOT_CONTACT = "do_not_contact", "Do not contact"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creators",
+    )
+    display_name = models.CharField(max_length=255, blank=True, default="")
+    relationship_stage = models.CharField(
+        max_length=30,
+        choices=RelationshipStage.choices,
+        default=RelationshipStage.PROSPECT,
+        db_index=True,
+    )
+    preferred_credit = models.CharField(max_length=255, blank=True, default="")
+    tags = models.JSONField(default=list, blank=True)
+    notes = models.TextField(blank=True, default="")
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    last_contacted_at = models.DateTimeField(null=True, blank=True)
+    last_permission_granted_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator"
+        ordering = ["-last_seen_at", "display_name"]
+        indexes = [
+            models.Index(fields=["workspace", "relationship_stage", "-last_seen_at"], name="ugc_creator_stage_idx"),
+            models.Index(fields=["workspace", "-last_seen_at"], name="ugc_creator_seen_idx"),
+        ]
+
+    def __str__(self):
+        primary = self.identities.filter(is_primary=True).first() or self.identities.first()
+        return self.display_name or (f"@{primary.handle}" if primary and primary.handle else "Community creator")
+
+
+class UGCCreatorIdentity(models.Model):
+    """A platform identity attached to one canonical creator relationship."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_creator_identities",
+    )
+    creator = models.ForeignKey(UGCCreator, on_delete=models.CASCADE, related_name="identities")
+    platform = models.CharField(max_length=30, db_index=True)
+    external_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    handle = models.CharField(max_length=255, blank=True, default="")
+    normalized_handle = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    profile_url = models.URLField(max_length=2000, blank=True, default="")
+    is_primary = models.BooleanField(default=True)
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_creator_identity"
+        ordering = ["-is_primary", "platform", "normalized_handle"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["workspace", "platform", "normalized_handle"],
+                condition=~models.Q(normalized_handle=""),
+                name="ugc_identity_handle_uniq",
+            ),
+            models.UniqueConstraint(
+                fields=["workspace", "platform", "external_id"],
+                condition=~models.Q(external_id=""),
+                name="ugc_identity_external_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["workspace", "platform", "normalized_handle"], name="ugc_identity_lookup_idx")]
+
+    def __str__(self):
+        return f"{self.platform}:@{self.handle or self.external_id}"
+
+
 class UGCSubmission(models.Model):
     """One piece of community-contributed content awaiting or past moderation.
 
@@ -112,6 +206,13 @@ class UGCSubmission(models.Model):
     contributor_name = models.CharField(max_length=255, blank=True, default="")
     contributor_handle = models.CharField(max_length=255, blank=True, default="")
     attribution = models.CharField(max_length=20, choices=Attribution.choices, default=Attribution.NAME)
+    creator = models.ForeignKey(
+        UGCCreator,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="submissions",
+    )
 
     target_type = models.CharField(max_length=100, db_index=True)
     target_id = models.CharField(max_length=255, db_index=True)
@@ -166,6 +267,87 @@ class UGCSubmission(models.Model):
 
     def __str__(self):
         return self.title or self.target_label or f"{self.get_kind_display()} {self.id}"
+
+
+class UGCRightsPassport(models.Model):
+    """The current, auditable usage-rights state for one UGC asset."""
+
+    class Status(models.TextChoices):
+        NOT_REQUESTED = "not_requested", "Not requested"
+        REQUESTED = "requested", "Requested"
+        GRANTED = "granted", "Granted"
+        DECLINED = "declined", "Declined"
+        REVOKED = "revoked", "Revoked"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    workspace = models.ForeignKey(
+        "workspaces.Workspace",
+        on_delete=models.CASCADE,
+        related_name="ugc_rights_passports",
+    )
+    submission = models.OneToOneField(
+        UGCSubmission,
+        on_delete=models.CASCADE,
+        related_name="rights_passport",
+    )
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.NOT_REQUESTED, db_index=True)
+    allow_organic_social = models.BooleanField(default=False)
+    allow_website = models.BooleanField(default=False)
+    allow_email = models.BooleanField(default=False)
+    allow_paid_ads = models.BooleanField(default=False)
+    allow_print = models.BooleanField(default=False)
+    allowed_account_ids = models.JSONField(default=list, blank=True)
+    credit_required = models.BooleanField(default=True)
+    credit_text = models.CharField(max_length=500, blank=True, default="")
+    evidence_url = models.URLField(max_length=2000, blank=True, default="")
+    evidence_note = models.TextField(blank=True, default="")
+    consent_version = models.CharField(max_length=50, blank=True, default="")
+    granted_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="recorded_ugc_rights_passports",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = WorkspaceScopedManager()
+
+    class Meta:
+        db_table = "common_ugc_rights_passport"
+        ordering = ["-updated_at"]
+        indexes = [
+            models.Index(fields=["workspace", "status", "-updated_at"], name="ugc_rights_status_idx"),
+            models.Index(fields=["workspace", "expires_at"], name="ugc_rights_expiry_idx"),
+        ]
+
+    @property
+    def is_active(self):
+        if self.status != self.Status.GRANTED:
+            return False
+        return not self.expires_at or self.expires_at > timezone.now()
+
+    @property
+    def scope_labels(self):
+        scopes = []
+        for field, label in (
+            ("allow_organic_social", "Organic social"),
+            ("allow_website", "Website"),
+            ("allow_email", "Email"),
+            ("allow_paid_ads", "Paid ads"),
+            ("allow_print", "Print"),
+        ):
+            if getattr(self, field):
+                scopes.append(label)
+        return scopes
+
+    def __str__(self):
+        return f"{self.get_status_display()} rights for {self.submission}"
 
 
 class UGCModerationEvent(models.Model):

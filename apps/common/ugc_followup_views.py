@@ -9,7 +9,7 @@ from django.views.decorators.http import require_POST
 from apps.members.decorators import require_permission
 
 from .audit import record_audit_event
-from .models import UGCSubmission
+from .models import UGCCreator, UGCSubmission
 from .ugc_permissions import REQUESTED, get_permission
 from .ugc_provenance import get_provenance
 from .ugc_views import _discovered_q, _get_workspace
@@ -36,12 +36,16 @@ def log_followup(request, workspace_id, submission_id):
     submission = get_object_or_404(
         UGCSubmission.objects.for_workspace(workspace.id)
         .filter(status=UGCSubmission.Status.PENDING)
-        .filter(_discovered_q()),
+        .filter(_discovered_q())
+        .select_related("creator"),
         id=submission_id,
     )
 
     return_to = _return_to(request, workspace.id)
     permission = get_permission(submission.metadata)
+    if submission.creator_id and submission.creator.relationship_stage == UGCCreator.RelationshipStage.DO_NOT_CONTACT:
+        messages.error(request, "This creator is marked Do not contact. Update the creator relationship first.")
+        return redirect(return_to)
     if permission.get("status") != REQUESTED:
         messages.error(request, "Follow-ups can only be logged after permission has been requested.")
         return redirect(return_to)
@@ -53,7 +57,9 @@ def log_followup(request, workspace_id, submission_id):
     outreach["requested_at"] = outreach.get("requested_at") or permission.get("updated_at") or now.isoformat()
     outreach["last_followup_at"] = now.isoformat()
     outreach["followup_count"] = max(0, int(outreach.get("followup_count") or 0)) + 1
-    outreach["last_followup_channel"] = str(request.POST.get("channel") or permission.get("channel") or "manual").strip()[:50]
+    outreach["last_followup_channel"] = str(
+        request.POST.get("channel") or permission.get("channel") or "manual"
+    ).strip()[:50]
     metadata["outreach"] = outreach
 
     submission.metadata = metadata

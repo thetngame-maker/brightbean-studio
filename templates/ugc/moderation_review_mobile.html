@@ -19,7 +19,7 @@
   .review-media{background:#111;border-radius:18px;overflow:hidden;position:relative}.review-media img,.review-media video{display:block;width:100%;max-height:68vh;object-fit:contain;background:#111}.review-media video{aspect-ratio:9/12}
   .review-body{background:#fff;border-radius:18px;margin-top:9px;padding:13px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
   .review-pills{display:flex;flex-wrap:wrap;gap:6px}.review-pill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border-radius:999px;background:#f2f2f7;color:#636366;font-size:11px;font-weight:650}.review-pill.violet{background:#f1eafe;color:#6d28d9}.review-pill.good{background:#e9f9ef;color:#08783e}.review-pill.warn{background:#fff3e6;color:#b45309}
-  .review-name{font-size:23px;line-height:1.12;font-weight:760;letter-spacing:-.025em;margin:10px 0 3px}.review-creator{font-size:13px;color:#8e8e93}
+  .review-name{font-size:23px;line-height:1.12;font-weight:760;letter-spacing:-.025em;margin:10px 0 3px}.review-creator{font-size:13px;color:#8e8e93}.review-creator a{color:#6d28d9;text-decoration:none;font-weight:700}
   .review-metrics{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.review-metric{display:inline-flex;align-items:center;gap:4px;padding:6px 9px;border-radius:999px;background:#f7f7f9;color:#636366;font-size:12px}
   .review-caption{margin:12px 0 0;font-size:15px;line-height:1.48;color:#3a3a3c;white-space:pre-line}
   .review-source{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px}.review-link{min-height:42px;border-radius:11px;border:1px solid #e5e5ea;background:#fff;display:flex;align-items:center;justify-content:center;text-decoration:none;color:#6d28d9;font-size:12px;font-weight:720}
@@ -64,7 +64,7 @@
     </div>
 
     <h1 class="review-name">{{ submission.title|default:submission.target_label|default:"Community content" }}</h1>
-    <div class="review-creator">{% if submission.attribution == 'anonymous' %}Anonymous contributor{% elif submission.contributor_handle %}@{{ submission.contributor_handle }}{% elif submission.contributor_name %}{{ submission.contributor_name }}{% else %}Community contributor{% endif %} · {{ submission.submitted_at|naturaltime }}</div>
+    <div class="review-creator">{% if submission.attribution == 'anonymous' %}Anonymous contributor{% elif submission.creator_id %}<a href="{% url 'ugc:creator_detail' workspace_id=workspace.id creator_id=submission.creator_id %}">{% if submission.contributor_handle %}@{{ submission.contributor_handle }}{% else %}{{ submission.contributor_name|default:"Community creator" }}{% endif %}</a>{% elif submission.contributor_handle %}@{{ submission.contributor_handle }}{% elif submission.contributor_name %}{{ submission.contributor_name }}{% else %}Community contributor{% endif %} · {{ submission.submitted_at|naturaltime }}</div>
 
     {% if submission.mobile_like_count != None or submission.mobile_comment_count != None or submission.mobile_view_count != None %}
     <div class="review-metrics">{% if submission.mobile_like_count != None %}<span class="review-metric">♥ {{ submission.mobile_like_count|intcomma }}</span>{% endif %}{% if submission.mobile_comment_count != None %}<span class="review-metric">💬 {{ submission.mobile_comment_count|intcomma }}</span>{% endif %}{% if submission.mobile_view_count != None %}<span class="review-metric">◉ {{ submission.mobile_view_count|intcomma }}</span>{% endif %}</div>

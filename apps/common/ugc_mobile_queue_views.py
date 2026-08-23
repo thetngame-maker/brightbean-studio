@@ -32,7 +32,6 @@ from .ugc_views import (
     _queue_counts,
 )
 
-
 MOBILE_PAGE_SIZE = 12
 FOLLOWUP_AFTER_DAYS = 3
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
@@ -69,10 +68,7 @@ def _metric(value):
 def _as_datetime(value):
     if not value:
         return None
-    if hasattr(value, "tzinfo"):
-        parsed = value
-    else:
-        parsed = parse_datetime(str(value))
+    parsed = value if hasattr(value, "tzinfo") else parse_datetime(str(value))
     if parsed is None:
         return None
     if timezone.is_naive(parsed):
@@ -177,7 +173,9 @@ def _decorate_submission(submission):
     submission.mobile_followup_label = followup["label"]
 
     handle = (submission.contributor_handle or provenance.get("source_handle") or "").strip().lstrip("@")
-    submission.mobile_creator_profile_url = f"https://www.instagram.com/{handle}/" if handle else submission.mobile_source_url
+    submission.mobile_creator_profile_url = (
+        f"https://www.instagram.com/{handle}/" if handle else submission.mobile_source_url
+    )
 
     stored_media_type = str(discovery.get("media_type") or "").strip().lower()
     if submission.media_asset and submission.media_asset.is_video:
@@ -205,9 +203,8 @@ def _is_top_prospect(submission):
 
 
 def _is_followup_due(submission):
-    return (
-        getattr(submission, "mobile_permission_status", "not_contacted") == "requested"
-        and bool(getattr(submission, "mobile_followup_due", False))
+    return getattr(submission, "mobile_permission_status", "not_contacted") == "requested" and bool(
+        getattr(submission, "mobile_followup_due", False)
     )
 
 
@@ -275,11 +272,21 @@ def _matches_permission(submission, permission_filter):
 
 def _sort_mobile(submissions, sort_mode):
     if sort_mode == "liked":
-        return sorted(submissions, key=lambda item: (_metric(getattr(item, "mobile_like_count", 0)), item.submitted_at), reverse=True)
+        return sorted(
+            submissions,
+            key=lambda item: (_metric(getattr(item, "mobile_like_count", 0)), item.submitted_at),
+            reverse=True,
+        )
     if sort_mode == "viewed":
-        return sorted(submissions, key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at), reverse=True)
+        return sorted(
+            submissions,
+            key=lambda item: (_metric(getattr(item, "mobile_view_count", 0)), item.submitted_at),
+            reverse=True,
+        )
     if sort_mode == "engaged":
-        return sorted(submissions, key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at), reverse=True)
+        return sorted(
+            submissions, key=lambda item: (getattr(item, "mobile_engagement_score", 0), item.submitted_at), reverse=True
+        )
     if sort_mode == "followup":
         return sorted(
             submissions,
@@ -325,7 +332,7 @@ def _filters_from_request(request):
 def _filtered_queue(request, workspace, tab):
     qs = (
         UGCSubmission.objects.for_workspace(workspace.id)
-        .select_related("contributor", "media_asset", "moderated_by")
+        .select_related("contributor", "creator", "media_asset", "moderated_by", "rights_passport")
         .annotate(
             open_report_count=Count(
                 "reports",
@@ -369,14 +376,18 @@ def _filtered_queue(request, workspace, tab):
         decorated = [item for item in decorated if _matches_permission(item, permission)]
     decorated = [item for item in decorated if _matches_media(item, media)]
     decorated = _sort_mobile(decorated, sort_mode)
-    return decorated, {
-        "kind": kind,
-        "search": search_query,
-        "relevance": relevance,
-        "media": media,
-        "sort": sort_mode,
-        "permission": permission,
-    }, workflow_counts
+    return (
+        decorated,
+        {
+            "kind": kind,
+            "search": search_query,
+            "relevance": relevance,
+            "media": media,
+            "sort": sort_mode,
+            "permission": permission,
+        },
+        workflow_counts,
+    )
 
 
 def _queue_query(params, *, page=None, list_mode=False):
@@ -433,7 +444,9 @@ def moderation_queue(request, workspace_id):
     start = (page - 1) * MOBILE_PAGE_SIZE
     submissions = decorated[start : start + MOBILE_PAGE_SIZE]
     current_return_to = f"{queue_url}?{_queue_query(params, page=page if page > 1 else None, list_mode=today_session)}"
-    start_review_url = _review_url(workspace, decorated[0], params, current_return_to) if today_session and decorated else ""
+    start_review_url = (
+        _review_url(workspace, decorated[0], params, current_return_to) if today_session and decorated else ""
+    )
 
     context = {
         "workspace": workspace,
@@ -488,10 +501,7 @@ def mobile_review(request, workspace_id, submission_id):
     next_item = decorated[index + 1] if index + 1 < len(decorated) else None
     review_query = _queue_query(params)
 
-    if next_item:
-        action_return_to = _review_url(workspace, next_item, params, return_to)
-    else:
-        action_return_to = return_to
+    action_return_to = _review_url(workspace, next_item, params, return_to) if next_item else return_to
 
     context = {
         "workspace": workspace,

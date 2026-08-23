@@ -17,11 +17,11 @@ from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
 
 from .audit import record_audit_event
-from .models import UGCModerationEvent, UGCReport, UGCSubmission
+from .models import UGCCreator, UGCModerationEvent, UGCReport, UGCRightsPassport, UGCSubmission
 from .ugc import moderate_submission, resolve_report
+from .ugc_creator_services import rights_can_use
 from .ugc_permissions import GRANTED, VALID_PERMISSION_STATUSES, set_permission
 from .ugc_provenance import build_provenance, get_provenance, set_provenance
-
 
 VALID_TABS = {"discovered", "pending", "approved", "reported", "removed"}
 
@@ -36,9 +36,7 @@ def _get_workspace(request, workspace_id):
 
 
 def _external_discovery_q():
-    return Q(metadata__provenance__discovery_source__isnull=False) & ~Q(
-        metadata__provenance__discovery_source="manual"
-    )
+    return Q(metadata__provenance__discovery_source__isnull=False) & ~Q(metadata__provenance__discovery_source="manual")
 
 
 def _discovered_q():
@@ -62,7 +60,9 @@ def _queue_counts(workspace):
         "discovered": pending_base.filter(_discovered_q()).count(),
         "pending": pending_base.filter(_pending_submission_q()).count(),
         "approved": base.filter(status=UGCSubmission.Status.APPROVED).count(),
-        "reported": base.filter(reports__status__in=[UGCReport.Status.OPEN, UGCReport.Status.REVIEWING]).distinct().count(),
+        "reported": base.filter(reports__status__in=[UGCReport.Status.OPEN, UGCReport.Status.REVIEWING])
+        .distinct()
+        .count(),
         "removed": base.filter(status=UGCSubmission.Status.REMOVED).count(),
     }
 
@@ -83,6 +83,12 @@ def _render_manual_errors(request, workspace, errors):
 def _ugc_attribution_line(submission):
     if submission.attribution == UGCSubmission.Attribution.ANONYMOUS:
         return ""
+    try:
+        passport = submission.rights_passport
+    except (AttributeError, UGCRightsPassport.DoesNotExist):
+        passport = None
+    if passport and passport.credit_required and passport.credit_text:
+        return f"Community content by {passport.credit_text}"
     if submission.attribution == UGCSubmission.Attribution.HANDLE and submission.contributor_handle:
         return f"Community content by @{submission.contributor_handle.lstrip('@')}"
     if submission.contributor_name:
@@ -117,7 +123,7 @@ def moderation_queue(request, workspace_id):
 
     qs = (
         UGCSubmission.objects.for_workspace(workspace.id)
-        .select_related("contributor", "media_asset", "moderated_by")
+        .select_related("contributor", "creator", "media_asset", "moderated_by", "rights_passport")
         .annotate(
             open_report_count=Count(
                 "reports",
@@ -306,7 +312,11 @@ def create_manual_submission_view(request, workspace_id):
 def update_permission_view(request, workspace_id, submission_id):
     """Record creator outreach/permission for externally discovered UGC."""
     workspace = _get_workspace(request, workspace_id)
-    submission = get_object_or_404(UGCSubmission, id=submission_id, workspace=workspace)
+    submission = get_object_or_404(
+        UGCSubmission.objects.select_related("creator"),
+        id=submission_id,
+        workspace=workspace,
+    )
     provenance = get_provenance(submission.metadata)
     if provenance.get("discovery_source") == "manual":
         messages.error(request, "Permission workflow is only for externally discovered content.")
@@ -315,6 +325,13 @@ def update_permission_view(request, workspace_id, submission_id):
     status = request.POST.get("permission_status", "").strip().lower()
     if status not in VALID_PERMISSION_STATUSES:
         messages.error(request, "Choose a valid permission status.")
+        return _return_to_queue(request, workspace)
+    if (
+        status == "requested"
+        and submission.creator_id
+        and submission.creator.relationship_stage == UGCCreator.RelationshipStage.DO_NOT_CONTACT
+    ):
+        messages.error(request, "This creator is marked Do not contact. Update the creator relationship first.")
         return _return_to_queue(request, workspace)
 
     now = timezone.now()
@@ -330,7 +347,9 @@ def update_permission_view(request, workspace_id, submission_id):
 
     if status == GRANTED:
         submission.consent_confirmed = True
-        submission.consent_version = request.POST.get("consent_version", "creator-permission-v1").strip()[:50] or "creator-permission-v1"
+        submission.consent_version = (
+            request.POST.get("consent_version", "creator-permission-v1").strip()[:50] or "creator-permission-v1"
+        )
         submission.consent_at = now
         update_fields.extend(["consent_confirmed", "consent_version", "consent_at"])
 
@@ -363,7 +382,7 @@ def update_permission_view(request, workspace_id, submission_id):
 def use_in_post_view(request, workspace_id, submission_id):
     workspace = _get_workspace(request, workspace_id)
     submission = get_object_or_404(
-        UGCSubmission.objects.select_related("media_asset"),
+        UGCSubmission.objects.select_related("creator", "media_asset", "rights_passport"),
         id=submission_id,
         workspace=workspace,
     )
@@ -373,6 +392,10 @@ def use_in_post_view(request, workspace_id, submission_id):
         return _return_to_queue(request, workspace)
     if not submission.consent_confirmed:
         messages.error(request, "Contributor consent is required before community content can be reused.")
+        return _return_to_queue(request, workspace)
+    rights_allowed, rights_error = rights_can_use(submission, "organic_social")
+    if not rights_allowed:
+        messages.error(request, rights_error)
         return _return_to_queue(request, workspace)
 
     metadata = dict(submission.metadata or {})
@@ -397,6 +420,11 @@ def use_in_post_view(request, workspace_id, submission_id):
         source_bits.append(f"Original source URL: {provenance['source_url']}")
     if provenance["external_id"]:
         source_bits.append(f"Original source ID: {provenance['external_id']}")
+    passport = submission.rights_passport
+    source_bits.append(f"Rights passport: {passport.id}")
+    source_bits.append(f"Rights scopes: {', '.join(passport.scope_labels) or 'None'}")
+    if passport.credit_required and passport.credit_text:
+        source_bits.append(f"Required credit: {passport.credit_text}")
 
     post = Post.objects.create(
         workspace=workspace,
@@ -426,7 +454,13 @@ def use_in_post_view(request, workspace_id, submission_id):
         action="ugc.used_in_post",
         target=submission,
         target_label=str(submission),
-        metadata={"post_id": str(post.id), "media_asset_id": str(submission.media_asset_id or "")},
+        metadata={
+            "post_id": str(post.id),
+            "media_asset_id": str(submission.media_asset_id or ""),
+            "rights_passport_id": str(passport.id),
+            "rights_status": passport.status,
+            "rights_scopes": passport.scope_labels,
+        },
         request=request,
     )
     messages.success(request, "Draft created from approved community content.")

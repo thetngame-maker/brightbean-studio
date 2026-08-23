@@ -9,6 +9,8 @@ class CommonConfig(AppConfig):
     def ready(self):
         from django.db.models.signals import post_migrate
 
+        from apps.common import ugc_creator_signals  # noqa: F401
+
         post_migrate.connect(self._register_tasks, sender=self)
 
     @staticmethod

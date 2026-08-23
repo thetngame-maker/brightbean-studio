@@ -3,6 +3,8 @@
 import hashlib
 import re
 
+from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 
 _NAMED_FALL_RE = re.compile(r"\b([A-Z][A-Za-z'’.-]*(?:\s+[A-Z][A-Za-z'’.-]*){0,2}\s+Falls?)\b")
 
@@ -14,11 +16,25 @@ def _normalise(value):
 def _quality_fingerprint(submission):
     """Fingerprint the fields that can change the current quality decision."""
     relevance = getattr(submission, "mobile_relevance_status", "") or ""
+    rights = ""
+    try:
+        passport = submission.rights_passport
+    except (AttributeError, ObjectDoesNotExist):
+        passport = None
+    if passport is not None:
+        rights = "|".join(
+            [
+                str(passport.status),
+                str(bool(passport.allow_organic_social)),
+                passport.expires_at.isoformat() if passport.expires_at else "",
+            ]
+        )
     payload = "|".join(
         [
             _normalise(submission.target_label or submission.title or ""),
             _normalise(submission.body or ""),
             _normalise(relevance),
+            rights,
         ]
     )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:20]
@@ -37,6 +53,35 @@ def approved_quality(submission):
     automatically invalidates it and allows the warning to return.
     """
     fingerprint = _quality_fingerprint(submission)
+    try:
+        passport = submission.rights_passport
+    except (AttributeError, ObjectDoesNotExist):
+        passport = None
+    if passport is not None:
+        rights_expired = bool(passport.expires_at and passport.expires_at <= timezone.now())
+        if rights_expired:
+            return {
+                "needs_check": True,
+                "reason": "Creator permission has expired. Update the rights passport before creating a draft.",
+                "kind": "rights",
+                "suggested_target_label": "",
+                "reviewed_override": False,
+                "fingerprint": fingerprint,
+            }
+        if passport.status != "granted" or not passport.allow_organic_social:
+            detail = (
+                f"Rights are {passport.get_status_display().lower()}."
+                if passport.status != "granted"
+                else "Organic social use is not included in the granted rights."
+            )
+            return {
+                "needs_check": True,
+                "reason": f"{detail} Update the rights passport before creating a draft.",
+                "kind": "rights",
+                "suggested_target_label": "",
+                "reviewed_override": False,
+                "fingerprint": fingerprint,
+            }
     override = (submission.metadata or {}).get("approved_quality_override") or {}
     if override.get("fingerprint") == fingerprint:
         return {
