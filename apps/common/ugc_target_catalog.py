@@ -140,16 +140,23 @@ def target_choices(workspace, *, suggested_label="", current_submission=None, li
 def learned_target_for_text(workspace, text, *, current_label="", catalog=None):
     """Resolve one explicit human-taught alias from text, or return None.
 
-    A caller processing many rows can pass one prebuilt catalog so this remains
-    effectively free per item. Ambiguous aliases intentionally return None.
+    A caller processing many rows can pass one prebuilt catalog. When it does
+    not, the catalog is cached on the in-memory workspace object so one discovery
+    batch still performs the catalog queries only once. Ambiguous aliases return None.
     """
     text_norm = _normalise(text)
     current_norm = _normalise(current_label)
     if not text_norm or (current_norm and current_norm in text_norm):
         return None
 
+    if catalog is None:
+        catalog = getattr(workspace, "_ugc_learned_target_catalog", None)
+        if catalog is None:
+            catalog = build_target_catalog(workspace, limit=500)
+            workspace._ugc_learned_target_catalog = catalog
+
     matches = {}
-    for item in catalog if catalog is not None else build_target_catalog(workspace, limit=500):
+    for item in catalog:
         key = (item["target_type"], item["target_id"])
         for alias in item.get("aliases", []):
             alias_norm = _normalise(alias)
