@@ -27,6 +27,7 @@ from . import (
     ugc_mobile_target_views,
     ugc_performance_learning_views,
     ugc_smart_planning_views,
+    ugc_smart_selection_views,
     ugc_target_catalog_views,
     ugc_views,
 )
@@ -176,6 +177,7 @@ urlpatterns = [
     path("mobile/bulk-remove/", ugc_mobile_bulk_views.bulk_remove, name="mobile_bulk_remove"),
     path("mobile/bulk-grant/", ugc_mobile_bulk_views.bulk_grant, name="mobile_bulk_grant"),
     path("mobile/bulk-approve/", ugc_mobile_bulk_views.bulk_approve, name="mobile_bulk_approve"),
+    path("mobile/smart-rules/", ugc_smart_selection_views.update_smart_rules, name="mobile_smart_rules"),
     path("new/", ugc_intake_views.manual_submission_form, name="manual_submission_form"),
     path("new/create/", ugc_views.create_manual_submission_view, name="create_manual_submission"),
     path("discovered/searches/", ugc_discovery_search_views.discovery_searches, name="discovery_searches"),

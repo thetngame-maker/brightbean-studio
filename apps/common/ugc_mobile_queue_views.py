@@ -24,6 +24,7 @@ from .models import UGCCreatorRightsRequest, UGCReport, UGCSubmission
 from .ugc_permissions import get_permission
 from .ugc_provenance import get_provenance
 from .ugc_relevance import score_relevance
+from .ugc_smart_selection import smart_selection_for, workspace_smart_rules
 from .ugc_views import (
     VALID_TABS,
     _discovered_q,
@@ -143,7 +144,7 @@ def _followup_state(metadata, permission):
     }
 
 
-def _decorate_submission(submission, request=None):
+def _decorate_submission(submission, request=None, smart_rules=None):
     metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
     provenance = get_provenance(metadata)
     discovery = metadata.get("discovery_import") if isinstance(metadata.get("discovery_import"), dict) else {}
@@ -206,6 +207,9 @@ def _decorate_submission(submission, request=None):
     comments = _metric(submission.mobile_comment_count)
     views = _metric(submission.mobile_view_count)
     submission.mobile_engagement_score = likes + (comments * 10) + (views / 100)
+    suggestion = smart_selection_for(submission, smart_rules) if smart_rules else None
+    submission.mobile_smart_decision = suggestion["decision"] if suggestion else "review"
+    submission.mobile_smart_reason = suggestion["reason"] if suggestion else ""
     return submission
 
 
@@ -268,7 +272,8 @@ def discovered_workflow_snapshot(workspace, *, limit=500):
         .filter(_discovered_q())
         .select_related("contributor", "creator", "media_asset", "moderated_by", "rights_passport")[:limit]
     )
-    decorated = [_decorate_submission(submission) for submission in submissions]
+    smart_rules = workspace_smart_rules(workspace)
+    decorated = [_decorate_submission(submission, smart_rules=smart_rules) for submission in submissions]
     counts = _workflow_counts(decorated)
     today = _sort_mobile(
         [item for item in decorated if _is_followup_due(item) or _is_top_prospect(item)],
@@ -416,7 +421,8 @@ def _filtered_queue(request, workspace, tab):
         )
 
     relevance, media, sort_mode, permission = _filters_from_request(request)
-    decorated = [_decorate_submission(submission, request=request) for submission in qs[:500]]
+    smart_rules = workspace_smart_rules(workspace)
+    decorated = [_decorate_submission(submission, request=request, smart_rules=smart_rules) for submission in qs[:500]]
     workflow_counts = _workflow_counts(decorated) if tab == "discovered" else {}
     if tab == "discovered":
         decorated = [item for item in decorated if _matches_relevance(item, relevance)]
@@ -515,6 +521,7 @@ def moderation_queue(request, workspace_id):
         "ugc_mobile_permission": filters["permission"],
         "ugc_mobile_today_session": today_session,
         "ugc_mobile_start_review_url": start_review_url,
+        "ugc_mobile_smart_rules": workspace_smart_rules(workspace),
     }
     response = render(request, "ugc/moderation_queue_mobile.html", context)
     response["X-UGC-Mobile-Lite"] = "1"

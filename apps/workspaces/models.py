@@ -28,6 +28,7 @@ class Workspace(models.Model):
     default_hashtags = models.JSONField(default=list, blank=True)
     default_first_comment = models.TextField(blank=True, default="")
     discovery_searches = models.JSONField(default=list, blank=True)
+    community_smart_rules = models.JSONField(default=dict, blank=True)
     approval_workflow_mode = models.CharField(
         max_length=40,
         choices=ApprovalWorkflowMode.choices,
