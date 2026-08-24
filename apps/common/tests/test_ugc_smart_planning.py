@@ -1,7 +1,10 @@
 from datetime import time, timedelta
+from unittest.mock import patch
 
+import httpx
+from django.conf import settings
 from django.core.files.base import ContentFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -292,3 +295,106 @@ class ApprovedSmartPlanningTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Smart plan approved posts")
         self.assertContains(response, reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id}))
+
+    def test_posts_and_days_are_independent_and_fourteen_updates_the_plan(self):
+        for index in range(16):
+            self.create_submission(
+                title=f"Plan option {index}",
+                target=f"Tennessee stop {index}",
+                likes=1000 - index,
+            )
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+
+        response = self.client.get(
+            url,
+            {
+                "count": "14",
+                "days": "30",
+                "account_filter": "1",
+                "accounts": [str(self.waterfalls.id), str(self.general.id)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_count"], 14)
+        self.assertEqual(response.context["selected_days"], 30)
+        self.assertEqual(response.context["plan"]["requested_count"], 14)
+        self.assertEqual(response.context["plan"]["requested_days"], 30)
+        self.assertContains(response, "14 posts")
+        self.assertContains(response, "planned over 30 days")
+        self.assertContains(response, 'data-plan-name="count" data-plan-value="14"')
+        self.assertContains(response, 'nonce="')
+        self.assertNotContains(response, "onclick=")
+        self.assertTrue(
+            all(item["scheduled_at"] < timezone.now() + timedelta(days=31) for item in response.context["plan"]["items"])
+        )
+
+    def test_edited_caption_and_hashtags_are_used_while_required_credit_is_preserved(self):
+        submission = self.create_submission(
+            title="Editable Burgess Falls",
+            target="Burgess Falls",
+            likes=1000,
+            handle="waterfallcreator",
+        )
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+        preview = self.client.get(url, {"count": "1", "days": "30"})
+
+        response = self.client.post(
+            url,
+            {
+                "action": "commit",
+                "plan_token": preview.context["plan_token"],
+                f"caption_{submission.id}": "Would you hike here after a summer rain?\n\n#BurgessFalls #TennesseeWaterfalls",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        caption = ContentPerformanceProfile.objects.get(source_submission=submission).post.caption
+        self.assertIn("Would you hike here", caption)
+        self.assertIn("#BurgessFalls", caption)
+        self.assertIn("@waterfallcreator", caption)
+        self.assertIn("📍 Burgess Falls", caption)
+
+    @override_settings(OPENAI_API_KEY="test-key", OPENAI_CAPTION_MODEL="test-model")
+    @patch("apps.common.ugc_smart_captions.httpx.post")
+    def test_smart_captions_use_structured_ai_output_and_stay_editable(self, mocked_post):
+        submission = self.create_submission(
+            title="AI Foster Falls",
+            target="Foster Falls",
+            likes=5000,
+            handle="smartcreator",
+        )
+        mocked_post.return_value = httpx.Response(
+            200,
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+            json={
+                "output_text": (
+                    '{"captions":[{"id":"'
+                    + str(submission.id)
+                    + '","caption":"Save this Tennessee waterfall for your next free Saturday. '
+                    'Would you take the overlook or the trail first?","hashtags":["#FosterFalls",'
+                    '"#TennesseeWaterfalls","#ExploreTennessee"]}]}'
+                )
+            },
+        )
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+
+        response = self.client.get(
+            url,
+            {
+                "count": "1",
+                "days": "14",
+                "smart_captions": "1",
+                "account_filter": "1",
+                "accounts": str(self.waterfalls.id),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["caption_status"]["used_ai"])
+        self.assertContains(response, "Save this Tennessee waterfall")
+        self.assertContains(response, "#FosterFalls")
+        self.assertContains(response, f'name="caption_{submission.id}"')
+        request_json = mocked_post.call_args.kwargs["json"]
+        self.assertEqual(request_json["model"], settings.OPENAI_CAPTION_MODEL)
+        self.assertEqual(request_json["text"]["format"]["type"], "json_schema")

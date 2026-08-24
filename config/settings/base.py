@@ -13,6 +13,8 @@ env = environ.Env(
     EMAIL_BACKEND_TYPE=(str, "smtp"),
     SENTRY_DSN=(str, ""),
     REDIS_URL=(str, ""),
+    OPENAI_API_KEY=(str, ""),
+    OPENAI_CAPTION_MODEL=(str, "gpt-5-mini"),
 )
 
 environ.Env.read_env(BASE_DIR / ".env", overwrite=False)
@@ -124,6 +126,8 @@ WSGI_APPLICATION = "config.wsgi.application"
 
 # Cache (used by rate limiting, session fallback)
 REDIS_URL = env("REDIS_URL")
+OPENAI_API_KEY = env("OPENAI_API_KEY")
+OPENAI_CAPTION_MODEL = env("OPENAI_CAPTION_MODEL")
 if REDIS_URL:
     CACHES = {
         "default": {

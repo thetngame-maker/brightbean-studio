@@ -26,9 +26,12 @@ from .ugc_performance_learning import build_performance_learning
 from .ugc_provenance import get_provenance
 from .ugc_relevance import score_relevance
 
-PLAN_COUNTS = (3, 7, 14)
 DEFAULT_PLAN_COUNT = 7
-MAX_PLAN_COUNT = 14
+DEFAULT_PLAN_DAYS = 14
+MIN_PLAN_COUNT = 1
+MAX_PLAN_COUNT = 30
+MIN_PLAN_DAYS = 1
+MAX_PLAN_DAYS = 60
 PLAN_LOOKAHEAD_DAYS = 60
 DIRECT_SCHEDULE_BLOCKED_MODES = {"required_internal", "required_internal_and_client"}
 GENERIC_ACCOUNT_WORDS = {
@@ -239,7 +242,7 @@ def _account_insight(account, history, workspace_tz):
     }
 
 
-def _available_times(account, insight, workspace_tz, *, count):
+def _available_times(account, insight, workspace_tz, *, count, days):
     now = timezone.now()
     floor = now + timedelta(hours=2)
     existing = list(
@@ -252,7 +255,7 @@ def _available_times(account, insight, workspace_tz, *, count):
     )
     candidates = []
     local_floor = floor.astimezone(workspace_tz)
-    for offset in range(PLAN_LOOKAHEAD_DAYS + 1):
+    for offset in range(min(days, PLAN_LOOKAHEAD_DAYS)):
         date = local_floor.date() + timedelta(days=offset)
         for pattern in insight["patterns"]:
             if date.weekday() != pattern["day"]:
@@ -343,8 +346,9 @@ def _engagement_label(metrics):
     return " · ".join(bits) or "No imported engagement yet"
 
 
-def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, account_ids=None):
-    count = count if count in PLAN_COUNTS else DEFAULT_PLAN_COUNT
+def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_DAYS, account_ids=None):
+    count = max(MIN_PLAN_COUNT, min(MAX_PLAN_COUNT, int(count)))
+    days = max(MIN_PLAN_DAYS, min(MAX_PLAN_DAYS, int(days)))
     accounts = _connected_accounts(workspace, account_ids)
     if not accounts:
         return {
@@ -352,6 +356,7 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, account_ids=None):
             "accounts": [],
             "candidate_count": 0,
             "requested_count": count,
+            "requested_days": days,
             "direct_schedule": False,
             "empty_reason": "Connect or select at least one social account before planning.",
         }
@@ -365,7 +370,9 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, account_ids=None):
         _account_insight(account, history_by_account.get(account.id, []), workspace_tz) for account in accounts
     ]
     slots_by_account = {
-        insight["account"].id: _available_times(insight["account"], insight, workspace_tz, count=count)
+        insight["account"].id: _available_times(
+            insight["account"], insight, workspace_tz, count=count, days=days
+        )
         for insight in insights
     }
     insight_by_account = {insight["account"].id: insight for insight in insights}
@@ -426,6 +433,11 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, account_ids=None):
                 "engagement_rank": candidate["engagement_rank"],
                 "reason": " · ".join(dict.fromkeys(reasons)),
                 "format_key": candidate["format_key"],
+                "winner_examples": [
+                    row["caption"]
+                    for row in history_by_account.get(account.id, [])
+                    if row.get("caption") and row.get("relative_index") is not None
+                ][:3],
             }
         )
     items.sort(key=lambda item: item["scheduled_at"])
@@ -438,6 +450,7 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, account_ids=None):
         "accounts": insights,
         "candidate_count": len(candidates),
         "requested_count": count,
+        "requested_days": days,
         "direct_schedule": direct_schedule,
         "empty_reason": empty_reason,
     }
@@ -469,11 +482,16 @@ def _credit_line(submission):
     return "Community content"
 
 
-def _caption_for_account(submission, account):
-    lead = (submission.body or "").strip()
+def _caption_for_account(submission, account, *, lead_override=None):
+    lead = str(lead_override).strip() if lead_override is not None else (submission.body or "").strip()
     if not lead and submission.title and submission.title != submission.target_label:
         lead = submission.title.strip()
-    tail = [part for part in (_credit_line(submission), f"📍 {submission.target_label}" if submission.target_label else "") if part]
+    credit = _credit_line(submission)
+    location = f"📍 {submission.target_label}" if submission.target_label else ""
+    lead = re.sub(re.escape(credit), "", lead, flags=re.IGNORECASE).strip()
+    if location:
+        lead = re.sub(re.escape(location), "", lead, flags=re.IGNORECASE).strip()
+    tail = [part for part in (credit, location) if part]
     suffix = "\n\n".join(tail)
     caption = "\n\n".join(part for part in (lead, suffix) if part)
     if account.caption_wire_length(caption) <= account.char_limit:
@@ -502,7 +520,7 @@ def _parse_slot(value):
     return parsed
 
 
-def commit_smart_plan(workspace, payload, *, actor):
+def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
     if str(payload.get("workspace_id")) != str(workspace.id):
         raise SmartPlanError("This plan belongs to another workspace.")
     raw_items = list(payload.get("items") or [])
@@ -551,7 +569,8 @@ def commit_smart_plan(workspace, payload, *, actor):
                 scheduled_at__lte=slot_at + timedelta(minutes=29),
             ).exists():
                 raise SmartPlanError("A planned time was just filled. Refresh the plan to use the next opening.")
-            caption = _caption_for_account(submission, account)
+            override = (caption_overrides or {}).get(str(submission.id))
+            caption = _caption_for_account(submission, account, lead_override=override)
             provenance = get_provenance(submission.metadata)
             passport = submission.rights_passport
             reason = str(row.get("reason") or "Smart Plan recommendation")[:500]
