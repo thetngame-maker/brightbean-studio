@@ -15,6 +15,9 @@ env = environ.Env(
     REDIS_URL=(str, ""),
     OPENAI_API_KEY=(str, ""),
     OPENAI_CAPTION_MODEL=(str, "gpt-5-mini"),
+    OPENAI_CAPTION_BATCH_SIZE=(int, 2),
+    OPENAI_CAPTION_MAX_WORKERS=(int, 4),
+    OPENAI_CAPTION_TIMEOUT=(int, 60),
 )
 
 environ.Env.read_env(BASE_DIR / ".env", overwrite=False)
@@ -128,6 +131,9 @@ WSGI_APPLICATION = "config.wsgi.application"
 REDIS_URL = env("REDIS_URL")
 OPENAI_API_KEY = env("OPENAI_API_KEY")
 OPENAI_CAPTION_MODEL = env("OPENAI_CAPTION_MODEL")
+OPENAI_CAPTION_BATCH_SIZE = env("OPENAI_CAPTION_BATCH_SIZE")
+OPENAI_CAPTION_MAX_WORKERS = env("OPENAI_CAPTION_MAX_WORKERS")
+OPENAI_CAPTION_TIMEOUT = env("OPENAI_CAPTION_TIMEOUT")
 if REDIS_URL:
     CACHES = {
         "default": {

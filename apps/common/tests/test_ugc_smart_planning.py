@@ -1,3 +1,4 @@
+import json
 from datetime import time, timedelta
 from unittest.mock import patch
 
@@ -398,3 +399,53 @@ class ApprovedSmartPlanningTests(TestCase):
         request_json = mocked_post.call_args.kwargs["json"]
         self.assertEqual(request_json["model"], settings.OPENAI_CAPTION_MODEL)
         self.assertEqual(request_json["text"]["format"]["type"], "json_schema")
+
+    @override_settings(
+        OPENAI_API_KEY="test-key",
+        OPENAI_CAPTION_MODEL="test-model",
+        OPENAI_CAPTION_BATCH_SIZE=1,
+        OPENAI_CAPTION_MAX_WORKERS=1,
+    )
+    @patch("apps.common.ugc_smart_captions.httpx.post")
+    def test_smart_captions_keep_successful_batches_when_one_batch_fails(self, mocked_post):
+        first = self.create_submission(title="AI Burgess Falls", target="Burgess Falls", likes=9000)
+        self.create_submission(title="AI Foster Falls", target="Foster Falls", likes=8000)
+
+        def response_for_request(*args, **kwargs):
+            request_payload = json.loads(kwargs["json"]["input"])
+            submission_id = request_payload["posts"][0]["id"]
+            if submission_id != str(first.id):
+                return httpx.Response(
+                    500,
+                    request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+                )
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", "https://api.openai.com/v1/responses"),
+                json={
+                    "output_text": json.dumps(
+                        {
+                            "captions": [
+                                {
+                                    "id": submission_id,
+                                    "caption": "Save Burgess Falls for your next Tennessee day trip.",
+                                    "hashtags": ["#BurgessFalls", "#ExploreTennessee"],
+                                }
+                            ]
+                        }
+                    )
+                },
+            )
+
+        mocked_post.side_effect = response_for_request
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+        response = self.client.get(
+            url,
+            {"count": "2", "smart_captions": "1", "account_filter": "1", "accounts": str(self.waterfalls.id)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["caption_status"]["used_ai"])
+        self.assertEqual(response.context["caption_status"]["generated_count"], 1)
+        self.assertContains(response, "AI drafted 1 of 2 captions")
+        self.assertContains(response, "Save Burgess Falls")

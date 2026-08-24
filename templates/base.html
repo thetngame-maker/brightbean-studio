@@ -49,6 +49,29 @@
             }
             /* On mobile, never show collapsed state pre-Alpine */
             html.sidebar-is-collapsed .sidebar-initial { width: 240px !important; }
+            .studio-mobile-nav {
+                position: fixed; left: 10px; right: 10px;
+                bottom: calc(8px + env(safe-area-inset-bottom)); z-index: 35;
+                display: grid; grid-template-columns: repeat(5, 1fr); align-items: end;
+                padding: 7px 6px; border: 1px solid rgba(229, 229, 234, .92);
+                border-radius: 20px; background: rgba(255, 255, 255, .94);
+                box-shadow: 0 12px 34px rgba(28, 28, 30, .16);
+                backdrop-filter: saturate(180%) blur(18px);
+                -webkit-backdrop-filter: saturate(180%) blur(18px);
+            }
+            .studio-mobile-nav a, .studio-mobile-nav button {
+                min-width: 0; min-height: 43px; border: 0; background: transparent;
+                color: #8e8e93; text-decoration: none; display: flex; flex-direction: column;
+                align-items: center; justify-content: center; gap: 3px; font-size: 9px; font-weight: 720;
+            }
+            .studio-mobile-nav a.active { color: #c2410c; }
+            .studio-mobile-nav svg { width: 19px; height: 19px; }
+            .studio-mobile-nav .studio-mobile-new {
+                width: 49px; height: 49px; min-height: 49px; margin: -13px auto 0;
+                border-radius: 16px; background: linear-gradient(135deg, #f97316, #ea580c);
+                color: #fff; box-shadow: 0 7px 18px rgba(234, 88, 12, .3);
+            }
+            .studio-has-bottom-nav main { padding-bottom: calc(82px + env(safe-area-inset-bottom)) !important; }
         }
 
         /* Idea modal styles (shared with create_landing) */
@@ -256,7 +279,7 @@
         });
     </script>
     {% if user.is_authenticated %}
-    <div class="flex h-screen overflow-hidden"
+    <div class="flex h-screen overflow-hidden {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' %}studio-has-bottom-nav{% endif %}"
          style="background: var(--surface-page);"
          x-data="{ sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true', mobileMenuOpen: false }"
          x-effect="localStorage.setItem('sidebarCollapsed', sidebarCollapsed)"
@@ -645,28 +668,16 @@
                 </a>
                 <a href="{% url 'composer:create_landing' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'create_landing' or request.resolver_match.url_name == 'compose' %}active{% endif %}">
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 00-4 12.73V16a1 1 0 001 1h6a1 1 0 001-1v-1.27A7 7 0 0012 2z"/><path d="M9 18h6"/><path d="M10 22h4"/><path d="M10 8.5c0 1.5 2 2.5 2 4"/><path d="M14 8.5c0 1.5-2 2.5-2 4"/></svg>
-                    <span class="sidebar-nav-label">Create Idea</span>
+                    <span class="sidebar-nav-label">Create</span>
                 </a>                
                 <a href="{% url 'inbox:feed' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'inbox' %}active{% endif %}">
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
                     <span class="sidebar-nav-label">Social Inbox</span>
                     {% if sidebar_unread_inbox_count %}<span class="sidebar-badge">{{ sidebar_unread_inbox_count }}</span>{% endif %}
                 </a>
-                <a href="{% url 'ugc:moderation_queue' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'ugc' and request.resolver_match.url_name != 'tourism_guard' and request.resolver_match.url_name != 'impact_reports' and request.resolver_match.url_name != 'impact_report_detail' and request.resolver_match.url_name != 'attribution_links' and request.resolver_match.url_name != 'attribution_link_detail' %}active{% endif %}">
+                <a href="{% url 'ugc:moderation_queue' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'ugc' %}active{% endif %}">
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg>
                     <span class="sidebar-nav-label">Community Content</span>
-                </a>
-                <a href="{% url 'ugc:tourism_guard' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'tourism_guard' %}active{% endif %}">
-                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-                    <span class="sidebar-nav-label">Tourism Guard</span>
-                </a>
-                <a href="{% url 'ugc:impact_reports' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'impact_reports' or request.resolver_match.url_name == 'impact_report_detail' %}active{% endif %}">
-                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/><path d="M3 5l5-3 5 4 7-4"/></svg>
-                    <span class="sidebar-nav-label">Impact Reports</span>
-                </a>
-                <a href="{% url 'ugc:attribution_links' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'attribution_links' or request.resolver_match.url_name == 'attribution_link_detail' %}active{% endif %}">
-                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.07 0l2-2a5 5 0 00-7.07-7.07l-1.15 1.15"/><path d="M14 11a5 5 0 00-7.07 0l-2 2A5 5 0 0012 20.07l1.15-1.15"/></svg>
-                    <span class="sidebar-nav-label">Attribution</span>
                 </a>
                 {% endif %}
 
@@ -701,82 +712,11 @@
                 {% endif %}
 
                 {% if request.workspace %}
-                {% if sidebar_channels or sidebar_unhealthy_channels %}
-                <!-- Channels -->
-                <div class="group flex items-center justify-between mt-3.5 sidebar-section-label-wrap">
-                    <div class="sidebar-section-label" style="padding-top:0">Channels</div>
-                    <a href="{% url 'social_accounts:connect' workspace_id=request.workspace.id %}"
-                       class="opacity-0 group-hover:opacity-100 w-5 h-5 flex items-center justify-center rounded text-stone-400 hover:text-stone-600 transition-all mr-2 sidebar-nav-label"
-                       title="Connect a channel">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    </a>
-                </div>
-                {% for channel in sidebar_channels %}
-                <a href="{% url 'social_accounts:list' workspace_id=request.workspace.id %}" class="sidebar-nav-item" title="{{ channel.queued_post_count|default:0 }} upcoming post{{ channel.queued_post_count|default:0|pluralize }} in the queue for {{ channel.account_name|default:channel.account_handle }}">
-                    <div class="relative flex-shrink-0">
-                        {% if channel.avatar_url %}
-                        <img src="{{ channel.avatar_url }}" alt="" class="w-7 h-7 rounded-full object-cover">
-                        {% else %}
-                        <div class="w-7 h-7 rounded-full bg-stone-200 flex items-center justify-center text-[11px] font-semibold text-stone-500">{{ channel.account_name|default:channel.account_handle|make_list|first|upper }}</div>
-                        {% endif %}
-                        <div class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-white rounded-full flex items-center justify-center">
-                            {% include "partials/_platform_icon.html" with platform=channel.platform size="sm" %}
-                        </div>
-                    </div>
-                    <span class="sidebar-nav-label truncate">{{ channel.account_name|default:channel.account_handle }}</span>
-                    <span class="sidebar-badge">{{ channel.queued_post_count|default:0 }}</span>
+                <a href="{% url 'social_accounts:list' workspace_id=request.workspace.id %}" class="mt-3 sidebar-nav-item {% if request.resolver_match.app_name == 'social_accounts' %}active{% endif %}" title="Manage connected channels">
+                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 11l8-4M8 13l8 4"/></svg>
+                    <span class="sidebar-nav-label">Channels</span>
+                    {% if sidebar_unhealthy_channels %}<span class="sidebar-badge">{{ sidebar_unhealthy_channels|length }}</span>{% elif sidebar_channels %}<span class="sidebar-badge">{{ sidebar_channels|length }}</span>{% endif %}
                 </a>
-                {% endfor %}
-                {% endif %}
-
-                {% for channel in sidebar_unhealthy_channels %}
-                <div class="sidebar-nav-item flex items-center gap-2">
-                    <div class="relative flex-shrink-0 opacity-60">
-                        {% if channel.avatar_url %}
-                        <img src="{{ channel.avatar_url }}" alt="" class="w-7 h-7 rounded-full object-cover grayscale" x-data @error="$el.style.display='none';$el.nextElementSibling.style.display='flex'">
-                        <div class="w-7 h-7 rounded-full bg-stone-200 items-center justify-center text-[11px] font-semibold text-stone-500" style="display:none">{{ channel.account_name|default:channel.account_handle|make_list|first|upper }}</div>
-                        {% else %}
-                        <div class="w-7 h-7 rounded-full bg-stone-200 flex items-center justify-center text-[11px] font-semibold text-stone-500">{{ channel.account_name|default:channel.account_handle|make_list|first|upper }}</div>
-                        {% endif %}
-                        <div class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-white rounded-full flex items-center justify-center">
-                            {% include "partials/_platform_icon.html" with platform=channel.platform size="sm" %}
-                        </div>
-                    </div>
-                    <span class="sidebar-nav-label truncate flex-1 text-stone-400 opacity-60">{{ channel.account_name|default:channel.account_handle }}</span>
-                    <form method="post" action="{% url 'social_accounts:reconnect' workspace_id=request.workspace.id account_id=channel.id %}" class="sidebar-nav-label">
-                        {% csrf_token %}
-                        <button type="submit" class="inline-flex items-center px-2 py-0.5 text-[11px] font-semibold text-orange-700 bg-orange-50 rounded-full hover:bg-orange-100 transition-colors cursor-pointer" title="Reconnect {{ channel.account_name|default:channel.account_handle }}">
-                            Reconnect
-                        </button>
-                    </form>
-                </div>
-                {% endfor %}
-
-                <!-- Connect channels (hidden when collapsed) -->
-                {% if sidebar_connectable_platforms %}
-                <div class="sidebar-connect-channels" x-show="!sidebarCollapsed">
-                <div class="sidebar-section-label">Connect channels</div>
-                {% for platform_key, platform_label in sidebar_connectable_platforms|slice:":3" %}
-                <a href="{% url 'social_accounts:connect' workspace_id=request.workspace.id %}" class="sidebar-nav-item">
-                    <div class="relative flex-shrink-0">
-                        <div class="w-4 h-4 flex items-center justify-center rounded-lg bg-stone-100">
-                            {% include "partials/_platform_icon.html" with platform=platform_key size="sm" %}
-                        </div>
-                        <div class="absolute -bottom-1 -right-1 w-2.5 h-2.5 rounded-full bg-orange-500 flex items-center justify-center ring-1 ring-white">
-                            <svg viewBox="0 0 24 24" fill="none" width="6" height="6" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12H19M12 5V19"/></svg>
-                        </div>
-                    </div>
-                    <span class="sidebar-nav-label">{{ platform_label }}</span>
-                </a>
-                {% endfor %}
-                <a href="{% url 'social_accounts:connect' workspace_id=request.workspace.id %}" class="sidebar-nav-item">
-                    <div class="w-4 h-4 flex items-center justify-center flex-shrink-0 rounded-lg bg-stone-100">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                    </div>
-                    <span class="sidebar-nav-label">More channels</span>
-                </a>
-                </div>
-                {% endif %}
                 {% endif %}
                 {% endblock %}
             </nav>
@@ -916,6 +856,25 @@
                 </div>
             </main>
         </div>
+        {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' %}
+        <nav class="studio-mobile-nav lg:hidden" aria-label="Primary mobile navigation">
+            <a href="{% url 'composer:command_center' workspace_id=request.workspace.id %}" class="{% if request.resolver_match.url_name == 'command_center' %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Today</span>
+            </a>
+            <a href="{% url 'calendar:calendar' workspace_id=request.workspace.id %}" class="{% if request.resolver_match.app_name == 'calendar' %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg><span>Publish</span>
+            </a>
+            <a class="studio-mobile-new" href="{% url 'composer:compose' workspace_id=request.workspace.id %}" aria-label="Create a post">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.3"><path d="M12 5v14M5 12h14"/></svg><span>New</span>
+            </a>
+            <a href="{% url 'ugc:moderation_queue' workspace_id=request.workspace.id %}" class="{% if request.resolver_match.app_name == 'ugc' %}active{% endif %}">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg><span>Community</span>
+            </a>
+            <button type="button" @click="mobileMenuOpen = true" aria-label="Open full menu">
+                <svg fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg><span>More</span>
+            </button>
+        </nav>
+        {% endif %}
     </div>
 
     <!-- Onboarding checklist popup (fixed bottom-right) -->

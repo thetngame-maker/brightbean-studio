@@ -13,19 +13,29 @@
                 <span class="inline-flex items-center justify-center min-w-6 h-6 px-2 rounded-full text-xs font-semibold bg-orange-100 text-orange-700">{{ queue_counts.discovered|add:queue_counts.pending }}</span>
                 {% endif %}
             </div>
-            <p class="text-sm text-stone-500 mt-1">Discover, review, permission, and reuse community content with a complete moderation trail.</p>
+            <p class="text-sm text-stone-500 mt-1">Find, permission, approve, and turn community content into scheduled posts.</p>
         </div>
-        <div class="flex items-center gap-2">
-            <a href="{% url 'ugc:performance_learning' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100">Learning</a>
-            <a href="{% url 'ugc:content_missions' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 text-xs font-semibold hover:bg-violet-100">Missions</a>
-            <a href="{% url 'ugc:coverage_map' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-violet-200 bg-violet-50 text-violet-700 text-xs font-semibold hover:bg-violet-100">Coverage map</a>
-            <a href="{% url 'ugc:creator_hub' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-stone-200 bg-white text-violet-700 text-xs font-semibold hover:bg-violet-50">Creator relationships</a>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+            {% if active_tab == 'approved' %}
+            <a href="{% url 'ugc:approved_smart_plan' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 shadow-sm"><span aria-hidden="true">✨</span> Plan approved posts</a>
+            {% endif %}
+            <a href="{% url 'ugc:creator_hub' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-stone-200 bg-white text-violet-700 text-xs font-semibold hover:bg-violet-50">Creators</a>
             {% if active_tab == 'discovered' %}
             <a href="{% url 'ugc:discovered_item_form' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700">
                 <span class="text-base leading-none">+</span> Add discovered item
             </a>
             {% endif %}
-            <div class="text-xs text-stone-400">Up to 100 items shown per view</div>
+            <details class="relative">
+                <summary class="list-none cursor-pointer inline-flex items-center h-9 px-3.5 rounded-lg border border-stone-200 bg-white text-stone-600 text-xs font-semibold hover:bg-stone-50">More tools <span class="ml-1 text-stone-400">⌄</span></summary>
+                <div class="absolute right-0 z-30 mt-2 w-52 rounded-xl border border-stone-200 bg-white p-1.5 shadow-xl">
+                    <a href="{% url 'ugc:performance_learning' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Performance learning</a>
+                    <a href="{% url 'ugc:content_missions' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Missions</a>
+                    <a href="{% url 'ugc:coverage_map' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Coverage map</a>
+                    <a href="{% url 'ugc:tourism_guard' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Tourism Guard</a>
+                    <a href="{% url 'ugc:impact_reports' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Impact reports</a>
+                    <a href="{% url 'ugc:attribution_links' workspace_id=workspace.id %}" class="block rounded-lg px-3 py-2 text-xs font-medium text-stone-700 hover:bg-stone-50">Attribution</a>
+                </div>
+            </details>
         </div>
     </div>
 

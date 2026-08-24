@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.common.models import UGCContentMission, UGCCreatorTask, UGCSubmission
 from apps.common.tourism_guard import build_tourism_guard
 from apps.common.ugc_mobile_queue_views import discovered_workflow_snapshot
+from apps.common.ugc_smart_planning import _ready_candidates
 from apps.common.ugc_views import _pending_submission_q
 from apps.inbox.models import InboxMessage
 
@@ -158,6 +159,20 @@ def build_command_center(workspace, *, permissions=None):
             count=today_count,
         )
 
+    smart_ready_count = len(_ready_candidates(workspace))
+    smart_plan_url = _url("ugc:approved_smart_plan", workspace)
+    if smart_ready_count:
+        _add(
+            actions,
+            kind="Smart Plan",
+            title=f"Plan from {smart_ready_count} approved post{'s' if smart_ready_count != 1 else ''}",
+            detail="AI captions, strongest content, learned timing, and safe creator credit",
+            url=smart_plan_url,
+            minutes=2,
+            tone="purple",
+            count=smart_ready_count,
+        )
+
     creator_task_queryset = UGCCreatorTask.objects.for_workspace(workspace.id).filter(
         status=UGCCreatorTask.Status.OPEN,
         due_at__lt=tomorrow_start,
@@ -264,6 +279,7 @@ def build_command_center(workspace, *, permissions=None):
             "failed": failed_count,
             "approvals": pending_review_count,
             "community_today": today_count,
+            "smart_ready": smart_ready_count,
             "creator_today": creator_task_count,
             "inbox_unread": unread_inbox,
             "pending_ugc": pending_ugc,
@@ -276,6 +292,7 @@ def build_command_center(workspace, *, permissions=None):
         },
         "links": {
             "community": _url("ugc:moderation_queue", workspace) + "?tab=discovered&permission=today&sort=today",
+            "smart_plan": smart_plan_url,
             "approvals": _url("calendar:calendar", workspace) + "?tab=approvals&mode=list",
             "inbox": _url("inbox:feed", workspace),
             "orchestration": _url("composer:orchestration", workspace),

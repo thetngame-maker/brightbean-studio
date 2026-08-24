@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import httpx
 from django.conf import settings
@@ -12,6 +13,9 @@ from django.conf import settings
 from .ugc_smart_planning import _caption_for_account
 
 logger = logging.getLogger(__name__)
+
+
+AI_ERRORS = (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError)
 
 
 def _hashtag(value):
@@ -70,10 +74,17 @@ def _response_text(payload):
     return ""
 
 
-def _ai_drafts(workspace, items):
-    api_key = getattr(settings, "OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return None
+def _excerpt(value, *, limit):
+    clean = re.sub(r"\s+", " ", str(value or "")).strip()
+    return clean if len(clean) <= limit else f"{clean[: limit - 1].rstrip()}…"
+
+
+def _chunks(values, size):
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _ai_batch(workspace, items, *, api_key):
     inputs = []
     for item in items:
         submission = item["submission"]
@@ -82,12 +93,14 @@ def _ai_drafts(workspace, items):
                 "id": str(submission.id),
                 "account": item["account"].display_label,
                 "platform": item["account"].platform,
-                "title": submission.title,
-                "location_or_subject": submission.target_label,
-                "source_caption": submission.body,
+                "title": _excerpt(submission.title, limit=180),
+                "location_or_subject": _excerpt(submission.target_label, limit=180),
+                "source_caption": _excerpt(submission.body, limit=2400),
                 "creator": submission.contributor_handle or submission.contributor_name,
                 "source_engagement": item["engagement_label"],
-                "recent_high-performing_captions": item.get("winner_examples") or [],
+                "recent_high-performing_captions": [
+                    _excerpt(example, limit=700) for example in (item.get("winner_examples") or [])[:3]
+                ],
             }
         )
     schema = {
@@ -133,11 +146,32 @@ def _ai_drafts(workspace, items):
                 }
             },
         },
-        timeout=45,
+        timeout=max(10, int(getattr(settings, "OPENAI_CAPTION_TIMEOUT", 60))),
     )
     response.raise_for_status()
     parsed = json.loads(_response_text(response.json()))
     return {str(row["id"]): row for row in parsed.get("captions") or []}
+
+
+def _ai_drafts(workspace, items):
+    api_key = getattr(settings, "OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return None, len(items)
+    batch_size = max(1, min(4, int(getattr(settings, "OPENAI_CAPTION_BATCH_SIZE", 2))))
+    batches = list(_chunks(items, batch_size))
+    worker_count = max(1, min(len(batches), 8, int(getattr(settings, "OPENAI_CAPTION_MAX_WORKERS", 4))))
+    generated = {}
+    failed_items = 0
+    with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="smart-caption") as executor:
+        futures = {executor.submit(_ai_batch, workspace, batch, api_key=api_key): batch for batch in batches}
+        for future in as_completed(futures):
+            batch = futures[future]
+            try:
+                generated.update(future.result())
+            except AI_ERRORS:
+                failed_items += len(batch)
+                logger.exception("Smart Plan AI caption batch failed", extra={"batch_size": len(batch)})
+    return generated, failed_items
 
 
 def build_caption_drafts(workspace, items, *, use_ai=False):
@@ -145,12 +179,13 @@ def build_caption_drafts(workspace, items, *, use_ai=False):
     generated = None
     if use_ai:
         try:
-            generated = _ai_drafts(workspace, items)
-        except (httpx.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            generated, _ = _ai_drafts(workspace, items)
+        except AI_ERRORS:
             logger.exception("Smart Plan AI caption generation failed")
     for item in items:
         submission_id = str(item["submission"].id)
         row = (generated or {}).get(submission_id) or {}
+        item["caption_is_ai"] = bool(row)
         if use_ai:
             lead = row.get("caption") or _fallback_lead(item)
             hashtags = row.get("hashtags") or _fallback_hashtags(workspace, item)
@@ -158,11 +193,37 @@ def build_caption_drafts(workspace, items, *, use_ai=False):
         else:
             item["caption_draft"] = _caption_for_account(item["submission"], item["account"])
     if not use_ai:
-        return {"requested": False, "used_ai": False, "message": "Turn on Smart captions to draft hooks and hashtags."}
-    if generated is not None:
-        return {"requested": True, "used_ai": True, "message": "AI captions and hashtags are ready to edit."}
+        return {
+            "requested": False,
+            "used_ai": False,
+            "generated_count": 0,
+            "tone": "idle",
+            "message": "Turn on Smart captions to draft hooks and hashtags.",
+        }
+    generated_count = len(generated or {})
+    if items and generated_count == len(items):
+        return {
+            "requested": True,
+            "used_ai": True,
+            "generated_count": generated_count,
+            "tone": "success",
+            "message": "AI captions and hashtags are ready to edit.",
+        }
+    if generated_count:
+        return {
+            "requested": True,
+            "used_ai": True,
+            "generated_count": generated_count,
+            "tone": "partial",
+            "message": (
+                f"AI drafted {generated_count} of {len(items)} captions. "
+                "Fallback drafts filled the rest and everything is editable."
+            ),
+        }
     return {
         "requested": True,
         "used_ai": False,
+        "generated_count": 0,
+        "tone": "fallback",
         "message": "Smart fallback drafts are ready to edit; AI generation is temporarily unavailable.",
     }
