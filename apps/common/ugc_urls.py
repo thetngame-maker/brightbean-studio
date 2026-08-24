@@ -26,6 +26,7 @@ from . import (
     ugc_mobile_review_dispatch,
     ugc_mobile_target_views,
     ugc_performance_learning_views,
+    ugc_smart_planning_views,
     ugc_target_catalog_views,
     ugc_views,
 )
@@ -109,6 +110,7 @@ urlpatterns = [
         name="update_content_mission",
     ),
     path("learning/", ugc_performance_learning_views.performance_learning, name="performance_learning"),
+    path("approved/smart-plan/", ugc_smart_planning_views.approved_smart_plan, name="approved_smart_plan"),
     path(
         "learning/<uuid:platform_post_id>/update/",
         ugc_performance_learning_views.update_performance_profile,
