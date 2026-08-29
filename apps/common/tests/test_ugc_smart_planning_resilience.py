@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.messages import get_messages
@@ -30,7 +31,7 @@ class ApprovedSmartPlanResilienceTests(TestCase):
                 {
                     "submission_id": str(uuid.uuid4()),
                     "account_id": str(uuid.uuid4()),
-                    "scheduled_at": (timezone.now() + timezone.timedelta(days=index + 1)).isoformat(),
+                    "scheduled_at": (timezone.now() + timedelta(days=index + 1)).isoformat(),
                     "reason": "resilience test",
                 }
                 for index in range(item_count)
