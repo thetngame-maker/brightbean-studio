@@ -1,6 +1,7 @@
 """Server-rendered Approved Smart Plan preview and commit flow."""
 
 import logging
+import re
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -41,6 +42,21 @@ def _bounded_int(value, *, default, minimum, maximum):
     return max(minimum, min(maximum, parsed))
 
 
+def _safe_failure_reason(exc):
+    """Return an actionable diagnostic without exposing request or rights data."""
+    if isinstance(exc, (ValueError, AttributeError, TypeError)):
+        detail = re.sub(r"https?://\S+", "[link]", str(exc or ""))
+        detail = re.sub(
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+            "[id]",
+            detail,
+        )
+        detail = " ".join(detail.split())[:240]
+        if detail:
+            return f"{exc.__class__.__name__}: {detail}"
+    return f"{exc.__class__.__name__} in the scheduling service"
+
+
 def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
     """Isolate an unexpected batch failure so one bad item cannot 500 the whole plan.
 
@@ -51,6 +67,7 @@ def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
     """
     created = []
     failed = 0
+    failure_reasons = []
     direct_schedule = None
     for row in payload.get("items") or []:
         single_payload = {
@@ -68,6 +85,7 @@ def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
             )
         except SmartPlanError as exc:
             failed += 1
+            failure_reasons.append(str(exc))
             logger.warning(
                 "Smart Plan item skipped after batch failure: %s",
                 exc,
@@ -77,20 +95,24 @@ def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
                     "social_account_id": account_id,
                 },
             )
-        except Exception:
+        except Exception as exc:
             failed += 1
+            failure_reasons.append(_safe_failure_reason(exc))
             logger.exception(
                 "Smart Plan item failed during isolated retry",
                 extra={
                     "workspace_id": str(workspace.id),
                     "submission_id": submission_id,
                     "social_account_id": account_id,
+                    "failure_type": exc.__class__.__name__,
                 },
             )
         else:
             created.extend(posts)
             direct_schedule = item_direct_schedule
-    return created, bool(direct_schedule), failed
+    distinct_reasons = list(dict.fromkeys(reason for reason in failure_reasons if reason))
+    failure_reason = distinct_reasons[0] if len(distinct_reasons) == 1 else ""
+    return created, bool(direct_schedule), failed, failure_reason
 
 
 @login_required
@@ -120,16 +142,18 @@ def approved_smart_plan(request, workspace_id):
             messages.error(request, "This Smart Plan could not be verified. Refresh it and try again.")
         except SmartPlanError as exc:
             messages.error(request, str(exc))
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "Approved Smart Plan batch commit failed",
                 extra={
                     "workspace_id": str(workspace.id),
                     "planned_item_count": len((payload or {}).get("items") or []),
+                    "failure_type": exc.__class__.__name__,
                 },
             )
+            failure_reason = _safe_failure_reason(exc)
             if payload and payload.get("items"):
-                posts, direct_schedule, failed_count = _retry_plan_items(
+                posts, direct_schedule, failed_count, isolated_reason = _retry_plan_items(
                     workspace,
                     payload,
                     actor=request.user,
@@ -143,10 +167,12 @@ def approved_smart_plan(request, workspace_id):
                         "item(s) that need review. Nothing was duplicated.",
                     )
                     return redirect("calendar:calendar", workspace_id=workspace.id)
+                if isolated_reason:
+                    failure_reason = isolated_reason
             messages.error(
                 request,
-                "Smart Plan hit a server-side scheduling problem. No partial batch was left behind. "
-                "Refresh the recommendations and try again; the failure has been logged for diagnosis.",
+                "Smart Plan could not schedule any posts. No partial batch was left behind. "
+                f"Diagnostic: {failure_reason}. This has also been logged for repair.",
             )
         else:
             if direct_schedule:
