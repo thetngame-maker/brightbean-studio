@@ -1,5 +1,7 @@
 """Server-rendered Approved Smart Plan preview and commit flow."""
 
+import logging
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core import signing
@@ -26,6 +28,8 @@ from .ugc_smart_planning import (
 )
 from .ugc_views import _get_workspace
 
+logger = logging.getLogger(__name__)
+
 PLAN_SIGNING_SALT = "ugc-approved-smart-plan-v1"
 
 
@@ -37,12 +41,66 @@ def _bounded_int(value, *, default, minimum, maximum):
     return max(minimum, min(maximum, parsed))
 
 
+def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
+    """Isolate an unexpected batch failure so one bad item cannot 500 the whole plan.
+
+    ``commit_smart_plan`` is atomic for the complete payload, so an exception in
+    the first attempt rolls the batch back. Retrying one row at a time lets valid
+    rows commit while leaving the failing approved items untouched for review.
+    No caption text or creator-rights data is written to logs.
+    """
+    created = []
+    failed = 0
+    direct_schedule = None
+    for row in payload.get("items") or []:
+        single_payload = {
+            "workspace_id": payload.get("workspace_id"),
+            "items": [row],
+        }
+        submission_id = str(row.get("submission_id") or "")
+        account_id = str(row.get("account_id") or "")
+        try:
+            posts, item_direct_schedule = commit_smart_plan(
+                workspace,
+                single_payload,
+                actor=actor,
+                caption_overrides=caption_overrides,
+            )
+        except SmartPlanError as exc:
+            failed += 1
+            logger.warning(
+                "Smart Plan item skipped after batch failure: %s",
+                exc,
+                extra={
+                    "workspace_id": str(workspace.id),
+                    "submission_id": submission_id,
+                    "social_account_id": account_id,
+                },
+            )
+        except Exception:
+            failed += 1
+            logger.exception(
+                "Smart Plan item failed during isolated retry",
+                extra={
+                    "workspace_id": str(workspace.id),
+                    "submission_id": submission_id,
+                    "social_account_id": account_id,
+                },
+            )
+        else:
+            created.extend(posts)
+            direct_schedule = item_direct_schedule
+    return created, bool(direct_schedule), failed
+
+
 @login_required
 @require_permission("create_posts")
 @require_http_methods(["GET", "POST"])
 def approved_smart_plan(request, workspace_id):
     workspace = _get_workspace(request, workspace_id)
     if request.method == "POST" and request.POST.get("action") == "commit":
+        payload = None
+        caption_overrides = {}
         try:
             payload = signing.loads(
                 request.POST.get("plan_token") or "",
@@ -62,6 +120,34 @@ def approved_smart_plan(request, workspace_id):
             messages.error(request, "This Smart Plan could not be verified. Refresh it and try again.")
         except SmartPlanError as exc:
             messages.error(request, str(exc))
+        except Exception:
+            logger.exception(
+                "Approved Smart Plan batch commit failed",
+                extra={
+                    "workspace_id": str(workspace.id),
+                    "planned_item_count": len((payload or {}).get("items") or []),
+                },
+            )
+            if payload and payload.get("items"):
+                posts, direct_schedule, failed_count = _retry_plan_items(
+                    workspace,
+                    payload,
+                    actor=request.user,
+                    caption_overrides=caption_overrides,
+                )
+                if posts:
+                    action = "scheduled" if direct_schedule else "created as timed drafts"
+                    messages.warning(
+                        request,
+                        f"Smart Plan {action} {len(posts)} posts and safely skipped {failed_count} "
+                        "item(s) that need review. Nothing was duplicated.",
+                    )
+                    return redirect("calendar:calendar", workspace_id=workspace.id)
+            messages.error(
+                request,
+                "Smart Plan hit a server-side scheduling problem. No partial batch was left behind. "
+                "Refresh the recommendations and try again; the failure has been logged for diagnosis.",
+            )
         else:
             if direct_schedule:
                 messages.success(request, f"Smart Plan scheduled {len(posts)} community posts.")
