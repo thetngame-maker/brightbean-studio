@@ -24,9 +24,9 @@ from .ugc_smart_planning import (
     SmartPlanError,
     _connected_accounts,
     build_smart_plan,
-    commit_smart_plan,
     plan_payload,
 )
+from .ugc_smart_planning_commit import commit_smart_plan
 from .ugc_views import _get_workspace
 
 logger = logging.getLogger(__name__)
