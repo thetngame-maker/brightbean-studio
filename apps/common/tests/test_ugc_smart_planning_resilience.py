@@ -61,7 +61,7 @@ class ApprovedSmartPlanResilienceTests(TestCase):
         self.assertTrue(any("safely skipped 0" in message for message in messages))
 
     @patch("apps.common.ugc_smart_planning_views.commit_smart_plan")
-    def test_systemic_commit_failure_returns_to_plan_instead_of_500(self, mocked_commit):
+    def test_systemic_commit_failure_returns_safe_diagnostic(self, mocked_commit):
         mocked_commit.side_effect = RuntimeError("database unavailable")
 
         response = self.client.post(
@@ -73,4 +73,25 @@ class ApprovedSmartPlanResilienceTests(TestCase):
         self.assertEqual(response.url, self.url)
         self.assertEqual(mocked_commit.call_count, 3)
         messages = [str(message) for message in get_messages(response.wsgi_request)]
-        self.assertTrue(any("server-side scheduling problem" in message for message in messages))
+        self.assertTrue(any("could not schedule any posts" in message for message in messages))
+        self.assertTrue(any("RuntimeError in the scheduling service" in message for message in messages))
+        self.assertFalse(any("database unavailable" in message for message in messages))
+
+    @patch("apps.common.ugc_smart_planning_views.commit_smart_plan")
+    def test_actionable_value_error_is_surfaced_and_identifiers_are_redacted(self, mocked_commit):
+        mocked_commit.side_effect = ValueError(
+            "SocialAccount 123e4567-e89b-12d3-a456-426614174000 is invalid; reconnect before scheduling"
+        )
+
+        response = self.client.post(
+            self.url,
+            {"action": "commit", "plan_token": self._token(1)},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        messages = [str(message) for message in get_messages(response.wsgi_request)]
+        diagnostic = next(message for message in messages if "Diagnostic:" in message)
+        self.assertIn("ValueError", diagnostic)
+        self.assertIn("reconnect before scheduling", diagnostic)
+        self.assertIn("[id]", diagnostic)
+        self.assertNotIn("123e4567-e89b-12d3-a456-426614174000", diagnostic)
