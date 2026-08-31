@@ -86,6 +86,7 @@
             <label for="ugc-sort" class="sr-only">Sort community content</label>
             <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
                 <option value="newest">Newest</option>
+                {% if active_tab == 'approved' %}<option value="engaged">Most engagement</option>{% endif %}
                 <option value="oldest">Oldest</option>
                 <option value="used">Most used</option>
                 <option value="reported">Most reported</option>
@@ -97,7 +98,7 @@
     {% if submissions %}
     <div id="ugc-card-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
         {% for submission in submissions %}
-        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
+        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-likes="{{ submission.metadata.discovery_import.like_count|default:'0' }}" data-comments="{{ submission.metadata.discovery_import.comment_count|default:'0' }}" data-views="{{ submission.metadata.discovery_import.view_count|default:'0' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
             {% if submission.media_asset %}
             <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
                 {% if submission.media_asset.is_image %}
@@ -248,7 +249,8 @@
             let activeQuery = '';
             cards.forEach((card) => { card.dataset.searchText = (card.textContent || '').toLocaleLowerCase(); });
             function num(card, key) { const value = Number(card.dataset[key] || 0); return Number.isFinite(value) ? value : 0; }
-            function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
+            function engagementScore(card) { return num(card, 'likes') + (num(card, 'comments') * 10) + (num(card, 'views') / 100); }
+            function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'engaged') return (engagementScore(b) - engagementScore(a)) || newestFirst; if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
             function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; const activeSource = source ? source.value : ''; sorted.forEach((card) => { grid.appendChild(card); const matchesText = !activeQuery || card.dataset.searchText.includes(activeQuery); const matchesSource = !activeSource || card.dataset.source === activeSource; const matches = matchesText && matchesSource; card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0 || Boolean(activeSource); const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
             function clearFilters() { search.value = ''; activeQuery = ''; if (source) source.value = ''; refresh(); search.focus(); }
             function clearSearch() { search.value = ''; activeQuery = ''; refresh(); search.focus(); }
