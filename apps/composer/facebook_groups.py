@@ -323,10 +323,10 @@ def _inject_group_assistant(response, *, workspace_id: str, post_id: str = ""):
     post_key = post_id or "new"
     fragment = (
         f'<link rel="stylesheet" href="{static_url}composer/facebook_groups.css?v=20260901-2">'
-        "<script>window.TN_FACEBOOK_GROUPS_API="
-        + json.dumps({"catalogUrl": catalog_url, "postKey": post_key})
-        + ";</script>"
-        f'<script defer src="{static_url}composer/facebook_groups.js?v=20260901-3"></script>'
+        '<script id="tn-facebook-groups-script" defer '
+        f"data-catalog-url={json.dumps(catalog_url)} "
+        f"data-post-key={json.dumps(post_key)} "
+        f'src="{static_url}composer/facebook_groups.js?v=20260901-4"></script>'
     )
     if "</body>" in html:
         html = html.replace("</body>", f"{fragment}</body>", 1)

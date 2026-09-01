@@ -1,7 +1,15 @@
 (() => {
   'use strict';
 
-  const api = window.TN_FACEBOOK_GROUPS_API || {};
+  // Keep runtime configuration on this same-origin script tag. Production's
+  // CSP intentionally blocks inline JavaScript, so an injected `window.*`
+  // assignment would leave the visible panel without its API URL.
+  const loader = document.currentScript || document.getElementById('tn-facebook-groups-script');
+  const legacyApi = window.TN_FACEBOOK_GROUPS_API || {};
+  const api = {
+    catalogUrl: loader?.dataset.catalogUrl || legacyApi.catalogUrl || '',
+    postKey: loader?.dataset.postKey || legacyApi.postKey || 'new',
+  };
   const newSelectionKey = `tn-facebook-groups:new:${location.pathname}`;
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const state = {

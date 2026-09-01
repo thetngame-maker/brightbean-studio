@@ -32,6 +32,9 @@ class FacebookGroupComposerInjectionTests(SimpleTestCase):
         self.assertIn("facebook_groups.js", html)
         self.assertIn(post_id, html)
         self.assertIn("facebook-groups", html)
+        self.assertIn('id="tn-facebook-groups-script"', html)
+        self.assertIn('data-catalog-url="/workspace/', html)
+        self.assertNotIn("window.TN_FACEBOOK_GROUPS_API=", html)
 
     def test_does_not_inject_into_non_html_response(self):
         response = HttpResponse("{}", content_type="application/json")
