@@ -73,6 +73,7 @@
     } finally {
       state.loading = false;
       renderList();
+      maybeStartReadyAssistant();
     }
   }
 
@@ -94,6 +95,9 @@
   }
 
   function selectedGroups() { return state.groups.filter((group) => state.selected.has(group.id)); }
+  function pendingSelectedGroups() {
+    return selectedGroups().filter((group) => (state.statuses.get(group.id) || 'pending') === 'pending');
+  }
   function captionValue() { return document.querySelector('[name="caption"]')?.value || ''; }
   function mediaCount() { return document.querySelectorAll('.media-thumb img').length; }
 
@@ -161,7 +165,7 @@
     panel.querySelector('.tn-fbg-clear').addEventListener('click', async () => {
       state.selected.clear(); state.statuses.clear(); renderList(); await persistSelection();
     });
-    panel.querySelector('.tn-fbg-start').addEventListener('click', startAssistant);
+    panel.querySelector('.tn-fbg-start').addEventListener('click', () => startAssistant());
     renderList();
     loadState();
 
@@ -251,9 +255,18 @@
     }
   }
 
-  function startAssistant() {
-    const groups = selectedGroups(); if (!groups.length) return;
+  function startAssistant({ pendingOnly = false } = {}) {
+    const pending = pendingSelectedGroups();
+    const groups = pendingOnly || pending.length ? pending : selectedGroups();
+    if (!groups.length) return;
     state.activeIndex = 0; showAssistant(groups);
+  }
+
+  function maybeStartReadyAssistant() {
+    if (new URLSearchParams(location.search).get('facebook_groups') !== 'ready') return;
+    const groups = pendingSelectedGroups();
+    if (!groups.length) return;
+    startAssistant({ pendingOnly: true });
   }
 
   function showAssistant(groups) {

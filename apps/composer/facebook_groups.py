@@ -28,7 +28,6 @@ from django.views.decorators.http import require_http_methods
 
 from apps.members.decorators import require_permission
 
-
 _INSTALLED = False
 
 
@@ -129,6 +128,69 @@ def _serialize_post_target(link: PostFacebookGroupTarget) -> dict[str, str | Non
         "status": link.status,
         "posted_at": link.posted_at.isoformat() if link.posted_at else None,
     }
+
+
+def ready_facebook_group_handoffs(workspace, *, now=None):
+    """Return scheduled posts whose pending Group handoff is due.
+
+    Group targets intentionally do not become ``PlatformPost`` rows, so the
+    automatic publisher cannot discover them.  The assisted task follows the
+    real schedule of the post's automatic variants instead: a shared
+    ``Post.scheduled_at`` or a per-account ``PlatformPost.scheduled_at``.  A
+    client hold parks the handoff along with the automatic post so rights or
+    approval safeguards cannot be bypassed by the manual workflow.
+    """
+    from .models import PlatformPost
+
+    now = now or timezone.now()
+    active_schedule_statuses = {
+        PlatformPost.Status.SCHEDULED,
+        PlatformPost.Status.PUBLISHING,
+        PlatformPost.Status.PUBLISHED,
+        PlatformPost.Status.FAILED,
+    }
+    links = (
+        PostFacebookGroupTarget.objects.filter(
+            post__workspace=workspace,
+            status=PostFacebookGroupTarget.Status.PENDING,
+        )
+        .select_related("post", "target")
+        .prefetch_related("post__platform_posts")
+        .order_by("created_at")
+    )
+
+    by_post = {}
+    for link in links:
+        entry = by_post.setdefault(
+            link.post_id,
+            {"post": link.post, "groups": [], "due_at": None},
+        )
+        entry["groups"].append(link.target)
+
+    ready = []
+    for entry in by_post.values():
+        post = entry["post"]
+        variants = list(post.platform_posts.all())
+        if any(variant.status == PlatformPost.Status.ON_HOLD for variant in variants):
+            continue
+
+        due_times = []
+        for variant in variants:
+            if variant.status not in active_schedule_statuses:
+                continue
+            effective_at = variant.scheduled_at or post.scheduled_at
+            if effective_at is not None:
+                due_times.append(effective_at)
+
+        if not due_times:
+            continue
+        due_at = min(due_times)
+        if due_at > now:
+            continue
+        entry["due_at"] = due_at
+        ready.append(entry)
+
+    return sorted(ready, key=lambda item: (item["due_at"], item["post"].created_at))
 
 
 def _workspace(request, workspace_id):
@@ -264,7 +326,7 @@ def _inject_group_assistant(response, *, workspace_id: str, post_id: str = ""):
         "<script>window.TN_FACEBOOK_GROUPS_API="
         + json.dumps({"catalogUrl": catalog_url, "postKey": post_key})
         + ";</script>"
-        f'<script defer src="{static_url}composer/facebook_groups.js?v=20260901-2"></script>'
+        f'<script defer src="{static_url}composer/facebook_groups.js?v=20260901-3"></script>'
     )
     if "</body>" in html:
         html = html.replace("</body>", f"{fragment}</body>", 1)

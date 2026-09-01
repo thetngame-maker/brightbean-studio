@@ -18,6 +18,7 @@ from apps.common.ugc_smart_planning import _ready_candidates
 from apps.common.ugc_views import _pending_submission_q
 from apps.inbox.models import InboxMessage
 
+from .facebook_groups import ready_facebook_group_handoffs
 from .models import PlatformPost
 from .orchestration import tight_rollout_count
 
@@ -85,6 +86,31 @@ def build_command_center(workspace, *, permissions=None):
             url=f"{_url('composer:compose_edit', workspace, post_id=variant.post_id)}?account={variant.social_account_id}",
             minutes=2,
             tone="red",
+        )
+
+    facebook_group_handoffs = ready_facebook_group_handoffs(workspace)
+    facebook_groups_ready_count = sum(len(item["groups"]) for item in facebook_group_handoffs)
+    facebook_groups_ready_url = ""
+    for handoff in facebook_group_handoffs:
+        post = handoff["post"]
+        groups = handoff["groups"]
+        group_count = len(groups)
+        title = post.title or post.caption[:80] or "Untitled post"
+        group_names = ", ".join(group.name for group in groups[:3])
+        if group_count > 3:
+            group_names += f" +{group_count - 3} more"
+        handoff_url = f"{_url('composer:compose_edit', workspace, post_id=post.id)}?facebook_groups=ready"
+        if not facebook_groups_ready_url:
+            facebook_groups_ready_url = handoff_url
+        _add(
+            actions,
+            kind="Facebook Groups",
+            title=f"Post to {group_count} Facebook Group{'s' if group_count != 1 else ''}: {title}",
+            detail=f"Ready now · {group_names}",
+            url=handoff_url,
+            minutes=2,
+            tone="blue",
+            count=group_count,
         )
 
     guard = build_tourism_guard(workspace)
@@ -277,6 +303,7 @@ def build_command_center(workspace, *, permissions=None):
         "remaining_actions": max(0, len(actions) - len(run)),
         "counts": {
             "failed": failed_count,
+            "facebook_groups_ready": facebook_groups_ready_count,
             "approvals": pending_review_count,
             "community_today": today_count,
             "smart_ready": smart_ready_count,
@@ -291,6 +318,7 @@ def build_command_center(workspace, *, permissions=None):
             "guard_blockers": guard_blockers,
         },
         "links": {
+            "facebook_groups_ready": facebook_groups_ready_url,
             "community": _url("ugc:moderation_queue", workspace) + "?tab=discovered&permission=today&sort=today",
             "smart_plan": smart_plan_url,
             "approvals": _url("calendar:calendar", workspace) + "?tab=approvals&mode=list",
