@@ -322,11 +322,11 @@ def _inject_group_assistant(response, *, workspace_id: str, post_id: str = ""):
     catalog_url = reverse("composer:facebook_group_catalog", kwargs={"workspace_id": workspace_id})
     post_key = post_id or "new"
     fragment = (
-        f'<link rel="stylesheet" href="{static_url}composer/facebook_groups.css?v=20260901-2">'
+        f'<link rel="stylesheet" href="{static_url}composer/facebook_groups.css?v=20260901-3">'
         '<script id="tn-facebook-groups-script" defer '
         f"data-catalog-url={json.dumps(catalog_url)} "
         f"data-post-key={json.dumps(post_key)} "
-        f'src="{static_url}composer/facebook_groups.js?v=20260901-4"></script>'
+        f'src="{static_url}composer/facebook_groups.js?v=20260901-5"></script>'
     )
     if "</body>" in html:
         html = html.replace("</body>", f"{fragment}</body>", 1)
