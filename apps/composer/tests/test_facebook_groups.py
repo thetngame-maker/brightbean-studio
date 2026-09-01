@@ -1,9 +1,11 @@
 import uuid
+from types import SimpleNamespace
 
 from django.http import HttpResponse
 from django.test import SimpleTestCase
+from django.utils import timezone
 
-from apps.composer.facebook_groups import _inject_group_assistant, normalize_group_url
+from apps.composer.facebook_groups import _inject_group_assistant, _serialize_post_target, normalize_group_url
 
 
 class FacebookGroupUrlTests(SimpleTestCase):
@@ -20,6 +22,26 @@ class FacebookGroupUrlTests(SimpleTestCase):
 
 
 class FacebookGroupComposerInjectionTests(SimpleTestCase):
+    def test_post_target_serialization_includes_group_history_timestamp(self):
+        posted_at = timezone.now()
+        group_id = uuid.uuid4()
+        link = SimpleNamespace(
+            target=SimpleNamespace(
+                id=group_id,
+                name="Tennessee Waterfalls",
+                url="https://www.facebook.com/groups/tennesseewaterfalls/",
+            ),
+            status="posted",
+            posted_at=posted_at,
+        )
+
+        result = _serialize_post_target(link)
+
+        self.assertEqual(result["id"], str(group_id))
+        self.assertEqual(result["name"], "Tennessee Waterfalls")
+        self.assertEqual(result["status"], "posted")
+        self.assertEqual(result["posted_at"], posted_at.isoformat())
+
     def test_injects_group_assets_and_api_config(self):
         workspace_id = str(uuid.uuid4())
         post_id = str(uuid.uuid4())

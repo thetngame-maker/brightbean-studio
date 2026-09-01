@@ -16,6 +16,7 @@
     groups: [],
     selected: new Set(),
     statuses: new Map(),
+    postedAt: new Map(),
     activeIndex: 0,
     postId: api.postKey && api.postKey !== 'new' ? api.postKey : '',
     loading: true,
@@ -74,6 +75,7 @@
         const saved = await request(postUrl(postId));
         state.selected = new Set((saved.groups || []).map((group) => group.id));
         state.statuses = new Map((saved.groups || []).map((group) => [group.id, group.status || 'pending']));
+        state.postedAt = new Map((saved.groups || []).filter((group) => group.posted_at).map((group) => [group.id, group.posted_at]));
         localStorage.removeItem(newSelectionKey);
       }
     } catch (error) {
@@ -96,6 +98,7 @@
     try {
       const data = await request(postUrl(postId), { method: 'POST', body });
       state.statuses = new Map((data.groups || []).map((group) => [group.id, group.status || 'pending']));
+      state.postedAt = new Map((data.groups || []).filter((group) => group.posted_at).map((group) => [group.id, group.posted_at]));
       localStorage.removeItem(newSelectionKey);
     } catch (error) {
       showError(error.message || 'Could not save group selections.');
@@ -130,6 +133,7 @@
         <div><div class="tn-fbg-title"><span class="tn-fbg-icon">f</span> Facebook Groups</div><div class="tn-fbg-subtitle">Assisted publishing · select multiple groups</div></div>
         <button type="button" class="tn-fbg-collapse" aria-expanded="false">Add groups</button>
       </div>
+      <div class="tn-fbg-history" hidden></div>
       <div class="tn-fbg-body" hidden>
         <div class="tn-fbg-add-row"><input class="tn-fbg-name" type="text" maxlength="120" placeholder="Group name"><input class="tn-fbg-url" type="url" placeholder="https://facebook.com/groups/..."><button class="tn-fbg-add" type="button">Add</button></div>
         <div class="tn-fbg-error" role="status"></div>
@@ -171,7 +175,7 @@
       state.groups.forEach((group) => state.selected.add(group.id)); renderList(); await persistSelection();
     });
     panel.querySelector('.tn-fbg-clear').addEventListener('click', async () => {
-      state.selected.clear(); state.statuses.clear(); renderList(); await persistSelection();
+      state.selected.clear(); state.statuses.clear(); state.postedAt.clear(); renderList(); await persistSelection();
     });
     panel.querySelector('.tn-fbg-start').addEventListener('click', () => startAssistant());
     renderList();
@@ -214,7 +218,7 @@
     try {
       await request(api.catalogUrl, { method: 'POST', body });
       state.groups = state.groups.filter((item) => item.id !== group.id);
-      state.selected.delete(group.id); state.statuses.delete(group.id); renderList();
+      state.selected.delete(group.id); state.statuses.delete(group.id); state.postedAt.delete(group.id); renderList();
     } catch (error) { showError(error.message || 'Could not remove this group.'); }
   }
 
@@ -236,7 +240,7 @@
         const row = document.createElement('label'); row.className = 'tn-fbg-row';
         const box = document.createElement('input'); box.type = 'checkbox'; box.checked = state.selected.has(group.id);
         box.addEventListener('change', async () => {
-          if (box.checked) state.selected.add(group.id); else { state.selected.delete(group.id); state.statuses.delete(group.id); }
+          if (box.checked) state.selected.add(group.id); else { state.selected.delete(group.id); state.statuses.delete(group.id); state.postedAt.delete(group.id); }
           renderList(); await persistSelection();
         });
         const text = document.createElement('span'); text.className = 'tn-fbg-row-text';
@@ -261,6 +265,32 @@
       count.hidden = selected === 0;
       count.textContent = String(selected);
     }
+    renderPostingHistory();
+  }
+
+  function renderPostingHistory() {
+    const history = document.querySelector('#tn-fb-groups-panel .tn-fbg-history');
+    if (!history) return;
+    const posted = selectedGroups().filter((group) => state.statuses.get(group.id) === 'posted');
+    history.innerHTML = '';
+    history.hidden = posted.length === 0;
+    if (!posted.length) return;
+
+    const heading = document.createElement('div'); heading.className = 'tn-fbg-history-heading';
+    heading.textContent = `Posted in ${posted.length} Facebook Group${posted.length === 1 ? '' : 's'}`;
+    const list = document.createElement('div'); list.className = 'tn-fbg-history-list';
+    posted.forEach((group) => {
+      const link = document.createElement('a');
+      link.className = 'tn-fbg-history-item'; link.href = group.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      const name = document.createElement('strong'); name.textContent = group.name;
+      const timestamp = document.createElement('span');
+      const value = state.postedAt.get(group.id);
+      timestamp.textContent = value
+        ? `Marked posted ${new Date(value).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`
+        : 'Marked posted';
+      link.append(name, timestamp); list.appendChild(link);
+    });
+    history.append(heading, list);
   }
 
   function startAssistant({ pendingOnly = false } = {}) {
@@ -298,12 +328,26 @@
   }
 
   async function markStatus(group, status) {
+    const previousStatus = state.statuses.get(group.id) || 'pending';
+    const previousPostedAt = state.postedAt.get(group.id);
     state.statuses.set(group.id, status); renderList();
     const postId = detectedPostId();
     if (!postId || !api.catalogUrl) return;
     const body = new URLSearchParams(); body.set('action', 'status'); body.set('group_id', group.id); body.set('status', status);
-    try { await request(postUrl(postId), { method: 'POST', body }); }
-    catch (error) { showError(error.message || 'Could not update group posting status.'); }
+    try {
+      const data = await request(postUrl(postId), { method: 'POST', body });
+      state.statuses.set(group.id, data.group?.status || status);
+      if (data.group?.posted_at) state.postedAt.set(group.id, data.group.posted_at);
+      else state.postedAt.delete(group.id);
+      renderList();
+    }
+    catch (error) {
+      state.statuses.set(group.id, previousStatus);
+      if (previousPostedAt) state.postedAt.set(group.id, previousPostedAt);
+      else state.postedAt.delete(group.id);
+      renderList();
+      showError(error.message || 'Could not update group posting status.');
+    }
   }
 
   async function advance(groups, overlay, status) {
