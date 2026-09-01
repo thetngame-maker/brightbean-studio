@@ -13,3 +13,10 @@ class ComposerConfig(AppConfig):
         from .instagram_story_mode import install_instagram_story_mode
 
         install_instagram_story_mode()
+
+        # Facebook Groups no longer has an official third-party publishing API.
+        # Keep the assisted multi-group handoff isolated from PlatformPost so
+        # automated Page/Instagram publishing remains unchanged.
+        from .facebook_groups import install_facebook_groups
+
+        install_facebook_groups()
