@@ -18,6 +18,7 @@ from functools import wraps
 from urllib.parse import urlparse
 
 from django.conf import settings
+from django.contrib.auth.decorators import login_required
 from django.db import models, transaction
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -143,6 +144,7 @@ def _post_in_workspace(post_id, workspace):
     return get_object_or_404(Post, id=post_id, workspace=workspace)
 
 
+@login_required
 @require_permission("create_posts")
 @require_http_methods(["GET", "POST"])
 def facebook_group_catalog(request, workspace_id):
@@ -181,6 +183,7 @@ def facebook_group_catalog(request, workspace_id):
     return JsonResponse({"error": "Unsupported action."}, status=400)
 
 
+@login_required
 @require_permission("create_posts")
 @require_http_methods(["GET", "POST"])
 def facebook_group_post_targets(request, workspace_id, post_id):
