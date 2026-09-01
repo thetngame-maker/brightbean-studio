@@ -7,6 +7,7 @@
 {% comment %}Header is rendered inside the content block to avoid overlap with the -m-6 layout{% endcomment %}
 
 {% block extra_head %}
+<link rel="stylesheet" href="{% static 'composer/caption_improvement.css' %}?v=20260901-1">
 <style>
     /* ── Composer-specific overrides ──────────────────────────── */
     /* Remove parent padding/overflow so the composer can fill the full area */
@@ -454,10 +455,19 @@
 
                 <!-- Caption with inline media -->
                 <div x-data="{ showTemplatePicker: false }">
-                    <div class="flex items-center justify-between mb-2">
+                    <div class="caption-heading flex items-center justify-between mb-2">
                         <label class="text-sm font-semibold text-stone-500 uppercase tracking-wider"
                                x-text="captionLabel">Caption</label>
-                        <div class="flex items-center gap-2 relative">
+                        <div class="caption-tools flex items-center gap-2 relative">
+                            <button type="button"
+                                    id="caption-ai-improve"
+                                    data-url="{% url 'composer:improve_caption' workspace_id=workspace.id %}"
+                                    data-post-id="{{ post.id|default:'' }}"
+                                    class="caption-ai-button"
+                                    aria-haspopup="dialog">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3zM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2z"/></svg>
+                                <span>Improve with AI</span>
+                            </button>
                             {% if post and is_edit %}
                             <div x-data="{ showSaveTemplate: false }">
                                 <button type="button" @click="showSaveTemplate = !showSaveTemplate"
@@ -1977,6 +1987,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script defer src="{% static 'composer/caption_improvement.js' %}?v=20260901-1"></script>
 <script nonce="{{ request.csp_nonce }}">
   // Reviewer approve / request-changes return 204 + toast + approvalAction. Let the
   // toast show, then reload so the status banner and history reflect the new state.

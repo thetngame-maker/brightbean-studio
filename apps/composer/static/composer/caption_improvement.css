@@ -1,0 +1,237 @@
+.caption-heading {
+    gap: .75rem;
+}
+
+.caption-tools {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.caption-ai-button {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    min-height: 30px;
+    padding: .375rem .75rem;
+    border: 1px solid #fdba74;
+    border-radius: 9999px;
+    background: #fff7ed;
+    color: #c2410c;
+    font-size: .75rem;
+    font-weight: 700;
+    line-height: 1;
+    transition: background 150ms, border-color 150ms, color 150ms;
+}
+
+.caption-ai-button:hover {
+    border-color: #fb923c;
+    background: #ffedd5;
+    color: #9a3412;
+}
+
+.caption-ai-button:disabled {
+    cursor: wait;
+    opacity: .65;
+}
+
+.caption-ai-button svg {
+    width: 15px;
+    height: 15px;
+    flex: 0 0 auto;
+}
+
+.caption-ai-history {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin: .5rem 0 0;
+    color: #78716c;
+    font-size: .75rem;
+}
+
+.caption-ai-history button {
+    color: #c2410c;
+    font-weight: 700;
+}
+
+.caption-ai-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(28, 25, 23, .5);
+    backdrop-filter: blur(2px);
+}
+
+.caption-ai-dialog {
+    width: min(920px, 100%);
+    max-height: min(780px, calc(100vh - 2rem));
+    overflow: auto;
+    border-radius: 1rem;
+    background: white;
+    box-shadow: 0 24px 64px rgba(28, 25, 23, .24);
+}
+
+.caption-ai-dialog-header,
+.caption-ai-dialog-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: 1rem 1.25rem;
+}
+
+.caption-ai-dialog-header {
+    border-bottom: 1px solid #e7e5e4;
+}
+
+.caption-ai-dialog-header h2 {
+    color: #1c1917;
+    font-size: 1rem;
+    font-weight: 750;
+}
+
+.caption-ai-dialog-header p {
+    margin-top: .2rem;
+    color: #78716c;
+    font-size: .75rem;
+}
+
+.caption-ai-close {
+    width: 36px;
+    height: 36px;
+    border-radius: 9999px;
+    color: #78716c;
+    font-size: 1.4rem;
+}
+
+.caption-ai-compare {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    padding: 1.25rem;
+}
+
+.caption-ai-column label {
+    display: block;
+    margin-bottom: .5rem;
+    color: #57534e;
+    font-size: .75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.caption-ai-column textarea {
+    width: 100%;
+    min-height: 300px;
+    resize: vertical;
+    border: 1px solid #d6d3d1;
+    border-radius: .75rem;
+    padding: .85rem;
+    background: white;
+    color: #292524;
+    font: inherit;
+    font-size: .875rem;
+    line-height: 1.55;
+    outline: none;
+}
+
+.caption-ai-column textarea[readonly] {
+    background: #fafaf9;
+    color: #78716c;
+}
+
+.caption-ai-column textarea:focus {
+    border-color: #f97316;
+    box-shadow: 0 0 0 3px #ffedd5;
+}
+
+.caption-ai-warning {
+    display: none;
+    margin: 0 1.25rem;
+    padding: .65rem .8rem;
+    border-radius: .65rem;
+    background: #fffbeb;
+    color: #92400e;
+    font-size: .75rem;
+}
+
+.caption-ai-warning.is-visible {
+    display: block;
+}
+
+.caption-ai-dialog-footer {
+    border-top: 1px solid #e7e5e4;
+    justify-content: flex-end;
+}
+
+.caption-ai-secondary,
+.caption-ai-primary {
+    min-height: 42px;
+    padding: .65rem 1rem;
+    border-radius: .7rem;
+    font-size: .875rem;
+    font-weight: 700;
+}
+
+.caption-ai-secondary {
+    border: 1px solid #d6d3d1;
+    color: #57534e;
+}
+
+.caption-ai-primary {
+    background: #f97316;
+    color: white;
+}
+
+.caption-ai-error {
+    margin-top: .5rem;
+    color: #b91c1c;
+    font-size: .75rem;
+}
+
+@media (max-width: 700px) {
+    .caption-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .caption-tools {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .caption-ai-overlay {
+        align-items: flex-end;
+        padding: 0;
+    }
+
+    .caption-ai-dialog {
+        max-height: 92vh;
+        border-radius: 1rem 1rem 0 0;
+    }
+
+    .caption-ai-compare {
+        grid-template-columns: 1fr;
+        gap: .85rem;
+        padding: 1rem;
+    }
+
+    .caption-ai-column textarea {
+        min-height: 190px;
+    }
+
+    .caption-ai-dialog-footer {
+        position: sticky;
+        bottom: 0;
+        background: white;
+    }
+
+    .caption-ai-dialog-footer button {
+        flex: 1;
+    }
+}
