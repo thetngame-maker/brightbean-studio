@@ -10,6 +10,7 @@ from apps.inbox.models import InboxMessage
 from apps.social_accounts.models import SocialAccount
 
 from ..command_center import build_command_center
+from ..facebook_groups import FacebookGroupTarget, PostFacebookGroupTarget
 from ..models import PlatformPost, Post
 
 
@@ -143,6 +144,51 @@ class FiveMinuteCommandCenterTests(TestCase):
 
         self.assertEqual(briefing["counts"]["scheduled_today"], 1)
         self.assertEqual(briefing["counts"]["published_today"], 1)
+
+    def test_due_facebook_group_handoff_opens_ready_assistant(self):
+        platform_post = self._platform_post(
+            PlatformPost.Status.SCHEDULED,
+            title="Scheduled waterfall post",
+            scheduled_at=timezone.now() - timedelta(minutes=1),
+        )
+        group = FacebookGroupTarget.objects.create(
+            workspace=self.workspace,
+            name="Tennessee Waterfalls",
+            url="https://www.facebook.com/groups/tennesseewaterfalls/",
+        )
+        PostFacebookGroupTarget.objects.create(post=platform_post.post, target=group)
+
+        briefing = build_command_center(self.workspace, permissions={})
+
+        self.assertEqual(briefing["counts"]["facebook_groups_ready"], 1)
+        action = next(action for action in briefing["actions"] if action["kind"] == "Facebook Groups")
+        self.assertIn("Scheduled waterfall post", action["title"])
+        self.assertIn("Tennessee Waterfalls", action["detail"])
+        self.assertTrue(action["url"].endswith("?facebook_groups=ready"))
+        self.assertEqual(briefing["links"]["facebook_groups_ready"], action["url"])
+
+    def test_future_or_completed_facebook_group_handoff_is_not_ready(self):
+        platform_post = self._platform_post(
+            PlatformPost.Status.SCHEDULED,
+            title="Future waterfall post",
+            scheduled_at=timezone.now() + timedelta(hours=1),
+        )
+        group = FacebookGroupTarget.objects.create(
+            workspace=self.workspace,
+            name="Tennessee Travel",
+            url="https://www.facebook.com/groups/tennesseetravel/",
+        )
+        link = PostFacebookGroupTarget.objects.create(post=platform_post.post, target=group)
+
+        self.assertEqual(build_command_center(self.workspace, permissions={})["counts"]["facebook_groups_ready"], 0)
+
+        platform_post.scheduled_at = timezone.now() - timedelta(minutes=1)
+        platform_post.save(update_fields=["scheduled_at", "updated_at"])
+        link.status = PostFacebookGroupTarget.Status.POSTED
+        link.posted_at = timezone.now()
+        link.save(update_fields=["status", "posted_at", "updated_at"])
+
+        self.assertEqual(build_command_center(self.workspace, permissions={})["counts"]["facebook_groups_ready"], 0)
 
     def test_creator_task_can_be_completed_from_command_center_with_existing_audit_flow(self):
         task = self._creator_task()

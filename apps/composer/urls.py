@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import command_center_views, orchestration_views, views
+from . import command_center_views, facebook_groups, orchestration_views, views
 
 app_name = "composer"
 
@@ -34,6 +34,18 @@ urlpatterns = [
     # Composer page
     path("compose/", views.compose, name="compose"),
     path("compose/<uuid:post_id>/", views.compose, name="compose_edit"),
+    # Facebook Groups assisted publishing. These targets deliberately do not
+    # become PlatformPost rows because Meta no longer supports Groups posting.
+    path(
+        "compose/facebook-groups/",
+        facebook_groups.facebook_group_catalog,
+        name="facebook_group_catalog",
+    ),
+    path(
+        "compose/facebook-groups/post/<uuid:post_id>/",
+        facebook_groups.facebook_group_post_targets,
+        name="facebook_group_post_targets",
+    ),
     # Save actions
     path("compose/save/", views.save_post, name="save_post"),
     path("compose/<uuid:post_id>/save/", views.save_post, name="save_post_edit"),
