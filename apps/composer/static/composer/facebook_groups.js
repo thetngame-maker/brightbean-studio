@@ -106,6 +106,10 @@
     if (document.getElementById('tn-fb-groups-panel')) return;
     const form = document.getElementById('composer-form');
     if (!form) return;
+    const scrollArea = form.querySelector('.panel-scroll');
+    const accountRow = scrollArea?.querySelector('.acct-pill')?.parentElement
+      || scrollArea?.querySelector('.flex.items-center.gap-2.flex-wrap');
+
     const panel = document.createElement('section');
     panel.id = 'tn-fb-groups-panel';
     panel.className = 'tn-fbg-panel';
@@ -122,11 +126,28 @@
         <div class="tn-fbg-footer"><span class="tn-fbg-count">0 groups selected</span><button type="button" class="tn-fbg-start">Post to selected groups</button></div>
         <div class="tn-fbg-note">Facebook discontinued third-party Groups publishing. Studio opens each selected group and prepares the caption so you can publish safely from Facebook. Saved groups and per-post selections are stored in your workspace.</div>
       </div>`;
-    const center = form.querySelector('.panel-center') || form.firstElementChild || form;
-    center.prepend(panel);
+
+    if (accountRow) accountRow.insertAdjacentElement('afterend', panel);
+    else (scrollArea || form).prepend(panel);
 
     const collapse = panel.querySelector('.tn-fbg-collapse');
     const body = panel.querySelector('.tn-fbg-body');
+
+    if (accountRow) {
+      const destinationPill = document.createElement('button');
+      destinationPill.type = 'button';
+      destinationPill.id = 'tn-fbg-destination-pill';
+      destinationPill.className = 'acct-pill tn-fbg-destination-pill';
+      destinationPill.innerHTML = '<span class="tn-fbg-icon">f</span><span class="text-sm font-medium text-stone-700">Facebook Groups</span><span class="tn-fbg-pill-count" hidden></span>';
+      destinationPill.addEventListener('click', () => {
+        body.hidden = false;
+        collapse.setAttribute('aria-expanded', 'true');
+        collapse.textContent = 'Hide';
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      });
+      accountRow.appendChild(destinationPill);
+    }
+
     collapse.addEventListener('click', () => {
       const open = body.hidden; body.hidden = !open;
       collapse.setAttribute('aria-expanded', String(open)); collapse.textContent = open ? 'Hide' : 'Add groups';
@@ -221,6 +242,13 @@
     const selected = selectedGroups().length;
     panel.querySelector('.tn-fbg-count').textContent = `${selected} group${selected === 1 ? '' : 's'} selected`;
     panel.querySelector('.tn-fbg-start').disabled = selected === 0;
+    const pill = document.getElementById('tn-fbg-destination-pill');
+    if (pill) {
+      pill.classList.toggle('selected', selected > 0);
+      const count = pill.querySelector('.tn-fbg-pill-count');
+      count.hidden = selected === 0;
+      count.textContent = String(selected);
+    }
   }
 
   function startAssistant() {
