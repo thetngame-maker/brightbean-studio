@@ -63,6 +63,13 @@ class MediaStreamTests(TestCase):
         self.assertEqual(response["Accept-Ranges"], "bytes")
         self.assertEqual(b"".join(response.streaming_content), b"video-bytes")
 
+    def test_download_uses_original_filename_and_disables_browser_cache(self):
+        response = self.client.get(f"{self._url(self.asset.id)}?download=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="clip.mp4"')
+        self.assertEqual(response["Cache-Control"], "private, no-store")
+        self.assertEqual(b"".join(response.streaming_content), b"video-bytes")
+
     def test_range_request_returns_partial_content(self):
         # "video-bytes" -> bytes 2..5 are "deo-"
         response = self.client.get(self._url(self.asset.id), HTTP_RANGE="bytes=2-5")

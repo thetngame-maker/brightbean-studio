@@ -20,6 +20,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.html import strip_tags
+from django.utils.http import content_disposition_header
 from django.views.decorators.http import require_GET, require_POST
 
 from apps.common.audit import record_audit_event
@@ -1533,9 +1534,16 @@ def media_stream(request, workspace_id, asset_id):
         response = FileResponse(file_handle, content_type=content_type)
 
     response["Accept-Ranges"] = "bytes"
-    # Asset files are immutable per id - let the browser cache the stream so
-    # reopening the frame picker doesn't re-download the whole video.
-    response["Cache-Control"] = "private, max-age=3600"
+    if request.GET.get("download") == "1":
+        filename = asset.filename or asset.file.name.rsplit("/", 1)[-1]
+        disposition = content_disposition_header(True, filename)
+        if disposition:
+            response["Content-Disposition"] = disposition
+        response["Cache-Control"] = "private, no-store"
+    else:
+        # Asset files are immutable per id - let the browser cache the stream so
+        # reopening the frame picker doesn't re-download the whole video.
+        response["Cache-Control"] = "private, max-age=3600"
     return response
 
 
