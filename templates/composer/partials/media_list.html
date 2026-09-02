@@ -4,7 +4,9 @@ Context: media_attachments, post, workspace.
 {% endcomment %}
 
 {% for attachment in media_attachments %}
-<div class="media-thumb" draggable="true">
+<div class="media-thumb" draggable="true"
+     data-download-url="{% url 'composer:media_stream' workspace_id=workspace.id asset_id=attachment.media_asset.id %}?download=1"
+     data-media-filename="{{ attachment.media_asset.filename }}">
     {% if attachment.media_asset.is_video %}
     <video src="{{ attachment.media_asset.file.url }}#t=0.5" data-asset-id="{{ attachment.media_asset.id }}" class="w-full h-full object-cover" muted preload="metadata"></video>
     <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
