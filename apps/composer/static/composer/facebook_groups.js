@@ -110,7 +110,51 @@
     return selectedGroups().filter((group) => (state.statuses.get(group.id) || 'pending') === 'pending');
   }
   function captionValue() { return document.querySelector('[name="caption"]')?.value || ''; }
-  function mediaCount() { return document.querySelectorAll('.media-thumb img').length; }
+  function attachedMedia() {
+    const mediaList = document.getElementById('media-list');
+    if (!mediaList) return [];
+    return Array.from(mediaList.children).filter((item) =>
+      item.classList.contains('media-thumb') && item.querySelector('img, video')
+    );
+  }
+
+  function mediaHandoffMessage() {
+    const media = attachedMedia();
+    if (!media.length) return 'No media is attached in Studio. Only the caption will be prepared.';
+
+    const videoCount = media.filter((item) => item.querySelector('video')).length;
+    const photoCount = media.length - videoCount;
+    const parts = [];
+    if (photoCount) parts.push(`${photoCount} photo${photoCount === 1 ? '' : 's'}`);
+    if (videoCount) parts.push(`${videoCount} video${videoCount === 1 ? '' : 's'}`);
+    const description = parts.join(' and ');
+    const pronoun = media.length === 1 ? 'It' : 'They';
+    return `${description} attached in Studio. ${pronoun} will not transfer automatically—add the same media in Facebook after the group opens.`;
+  }
+
+  function downloadAttachedMedia(overlay) {
+    const media = attachedMedia().filter((item) => item.dataset.downloadUrl);
+    if (!media.length) return;
+
+    const button = overlay.querySelector('.tn-fbg-download');
+    const startDownload = (item) => {
+      const link = document.createElement('a');
+      link.href = item.dataset.downloadUrl;
+      link.download = item.dataset.mediaFilename || '';
+      link.hidden = true;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+    startDownload(media[0]);
+    media.slice(1).forEach((item, index) => {
+      window.setTimeout(() => startDownload(item), (index + 1) * 350);
+    });
+    button.textContent = media.length === 1 ? 'Download started' : `${media.length} downloads started`;
+    window.setTimeout(() => {
+      if (button.isConnected) button.textContent = media.length === 1 ? 'Download media' : `Download ${media.length} files`;
+    }, 1800);
+  }
 
   function showError(message) {
     const node = document.querySelector('#tn-fb-groups-panel .tn-fbg-error');
@@ -310,7 +354,7 @@
   function showAssistant(groups) {
     document.getElementById('tn-fb-groups-assistant')?.remove();
     const overlay = document.createElement('div'); overlay.id = 'tn-fb-groups-assistant'; overlay.className = 'tn-fbg-overlay';
-    overlay.innerHTML = `<div class="tn-fbg-modal" role="dialog" aria-modal="true" aria-label="Facebook Groups publishing assistant"><div class="tn-fbg-modal-head"><div><strong>Post to Facebook Groups</strong><div class="tn-fbg-step"></div></div><button type="button" class="tn-fbg-close" aria-label="Close">×</button></div><div class="tn-fbg-modal-body"><div class="tn-fbg-current"></div><div class="tn-fbg-caption-label">Caption</div><textarea class="tn-fbg-caption" readonly></textarea><div class="tn-fbg-media-note"></div><div class="tn-fbg-actions"><button type="button" class="tn-fbg-copy">Copy caption</button><button type="button" class="tn-fbg-open">Open group</button></div></div><div class="tn-fbg-modal-foot"><button type="button" class="tn-fbg-skip">Skip</button><button type="button" class="tn-fbg-posted">Mark posted & next</button></div></div>`;
+    overlay.innerHTML = `<div class="tn-fbg-modal" role="dialog" aria-modal="true" aria-label="Facebook Groups publishing assistant"><div class="tn-fbg-modal-head"><div><strong>Post to Facebook Groups</strong><div class="tn-fbg-step"></div></div><button type="button" class="tn-fbg-close" aria-label="Close">×</button></div><div class="tn-fbg-modal-body"><div class="tn-fbg-current"></div><div class="tn-fbg-caption-label">Caption</div><textarea class="tn-fbg-caption" readonly></textarea><div class="tn-fbg-media-note"></div><div class="tn-fbg-actions"><button type="button" class="tn-fbg-download tn-fbg-clear" hidden>Download media</button><button type="button" class="tn-fbg-copy">Copy caption</button><button type="button" class="tn-fbg-open">Open group</button></div></div><div class="tn-fbg-modal-foot"><button type="button" class="tn-fbg-skip">Skip</button><button type="button" class="tn-fbg-posted">Mark posted & next</button></div></div>`;
     document.body.appendChild(overlay);
     const close = () => overlay.remove();
     overlay.querySelector('.tn-fbg-close').addEventListener('click', close);
@@ -321,6 +365,7 @@
       const button = overlay.querySelector('.tn-fbg-copy'); button.textContent = 'Copied';
       setTimeout(() => { if (button.isConnected) button.textContent = 'Copy caption'; }, 1200);
     });
+    overlay.querySelector('.tn-fbg-download').addEventListener('click', () => downloadAttachedMedia(overlay));
     overlay.querySelector('.tn-fbg-open').addEventListener('click', () => window.open(groups[state.activeIndex].url, '_blank', 'noopener,noreferrer'));
     overlay.querySelector('.tn-fbg-skip').addEventListener('click', () => advance(groups, overlay, 'skipped'));
     overlay.querySelector('.tn-fbg-posted').addEventListener('click', () => advance(groups, overlay, 'posted'));
@@ -367,8 +412,11 @@
     const strong = document.createElement('strong'); strong.textContent = group.name;
     const small = document.createElement('small'); small.textContent = group.url; current.append(strong, small);
     overlay.querySelector('.tn-fbg-caption').value = captionValue();
-    const count = mediaCount();
-    overlay.querySelector('.tn-fbg-media-note').textContent = count ? `${count} media item${count === 1 ? '' : 's'} attached in Studio. Add the same media in Facebook after the group opens.` : 'No media detected on this post.';
+    overlay.querySelector('.tn-fbg-media-note').textContent = mediaHandoffMessage();
+    const downloadable = attachedMedia().filter((item) => item.dataset.downloadUrl);
+    const downloadButton = overlay.querySelector('.tn-fbg-download');
+    downloadButton.hidden = downloadable.length === 0;
+    downloadButton.textContent = downloadable.length === 1 ? 'Download media' : `Download ${downloadable.length} files`;
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildPanel); else buildPanel();
