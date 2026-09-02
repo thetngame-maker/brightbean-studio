@@ -326,7 +326,7 @@ def _inject_group_assistant(response, *, workspace_id: str, post_id: str = ""):
         '<script id="tn-facebook-groups-script" defer '
         f"data-catalog-url={json.dumps(catalog_url)} "
         f"data-post-key={json.dumps(post_key)} "
-        f'src="{static_url}composer/facebook_groups.js?v=20260902-2"></script>'
+        f'src="{static_url}composer/facebook_groups.js?v=20260902-3"></script>'
     )
     if "</body>" in html:
         html = html.replace("</body>", f"{fragment}</body>", 1)
