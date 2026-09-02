@@ -12,6 +12,7 @@
   };
   const newSelectionKey = `tn-facebook-groups:new:${location.pathname}`;
   const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const shareFilesByOverlay = new WeakMap();
   const state = {
     groups: [],
     selected: new Set(),
@@ -129,7 +130,11 @@
     if (videoCount) parts.push(`${videoCount} video${videoCount === 1 ? '' : 's'}`);
     const description = parts.join(' and ');
     const pronoun = media.length === 1 ? 'It' : 'They';
-    return `${description} attached in Studio. ${pronoun} will not transfer automatically—add the same media in Facebook after the group opens.`;
+    return `${description} attached in Studio. ${pronoun} will not transfer automatically—save or share the media, then add it in Facebook after the group opens.`;
+  }
+
+  function downloadButtonLabel(media) {
+    return media.length === 1 ? 'Download media' : `Download ${media.length} files`;
   }
 
   function downloadAttachedMedia(overlay) {
@@ -152,8 +157,72 @@
     });
     button.textContent = media.length === 1 ? 'Download started' : `${media.length} downloads started`;
     window.setTimeout(() => {
-      if (button.isConnected) button.textContent = media.length === 1 ? 'Download media' : `Download ${media.length} files`;
+      if (button.isConnected) button.textContent = downloadButtonLabel(media);
     }, 1800);
+  }
+
+  async function prepareMediaShare(overlay) {
+    const media = attachedMedia().filter((item) => item.dataset.downloadUrl);
+    const button = overlay.querySelector('.tn-fbg-download');
+    if (!media.length) { button.hidden = true; return; }
+
+    button.hidden = false;
+    const preparedFiles = shareFilesByOverlay.get(overlay);
+    if (preparedFiles?.length === media.length) {
+      button.dataset.mode = 'share';
+      button.disabled = false;
+      button.textContent = preparedFiles.length === 1 ? 'Save to Photos' : `Save ${preparedFiles.length} to Photos`;
+      overlay.querySelector('.tn-fbg-media-note').textContent += ' On iPhone, choose Save Image or Save Video in the share sheet.';
+      return;
+    }
+    if (button.dataset.mode === 'download') {
+      button.disabled = false;
+      button.textContent = downloadButtonLabel(media);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = 'Preparing media…';
+    try {
+      const files = await Promise.all(media.map(async (item) => {
+        const response = await fetch(item.dataset.downloadUrl, { credentials: 'same-origin' });
+        if (!response.ok) throw new Error(`Media request failed (${response.status})`);
+        const blob = await response.blob();
+        return new File([blob], item.dataset.mediaFilename || 'tn-game-media', {
+          type: blob.type || response.headers.get('Content-Type') || 'application/octet-stream',
+        });
+      }));
+      const shareData = { files };
+      const canShareFiles = typeof navigator.share === 'function'
+        && typeof navigator.canShare === 'function'
+        && navigator.canShare(shareData);
+      if (canShareFiles) {
+        shareFilesByOverlay.set(overlay, files);
+        button.dataset.mode = 'share';
+        button.textContent = files.length === 1 ? 'Save to Photos' : `Save ${files.length} to Photos`;
+        overlay.querySelector('.tn-fbg-media-note').textContent += ' On iPhone, choose Save Image or Save Video in the share sheet.';
+      } else {
+        button.dataset.mode = 'download';
+        button.textContent = downloadButtonLabel(media);
+      }
+    } catch (_) {
+      button.dataset.mode = 'download';
+      button.textContent = downloadButtonLabel(media);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function shareOrDownloadMedia(overlay) {
+    const files = shareFilesByOverlay.get(overlay);
+    if (overlay.querySelector('.tn-fbg-download').dataset.mode !== 'share' || !files?.length) {
+      downloadAttachedMedia(overlay);
+      return;
+    }
+    try {
+      await navigator.share({ files, title: 'TN Game media' });
+    } catch (error) {
+      if (error?.name !== 'AbortError') downloadAttachedMedia(overlay);
+    }
   }
 
   function showError(message) {
@@ -365,7 +434,7 @@
       const button = overlay.querySelector('.tn-fbg-copy'); button.textContent = 'Copied';
       setTimeout(() => { if (button.isConnected) button.textContent = 'Copy caption'; }, 1200);
     });
-    overlay.querySelector('.tn-fbg-download').addEventListener('click', () => downloadAttachedMedia(overlay));
+    overlay.querySelector('.tn-fbg-download').addEventListener('click', () => shareOrDownloadMedia(overlay));
     overlay.querySelector('.tn-fbg-open').addEventListener('click', () => window.open(groups[state.activeIndex].url, '_blank', 'noopener,noreferrer'));
     overlay.querySelector('.tn-fbg-skip').addEventListener('click', () => advance(groups, overlay, 'skipped'));
     overlay.querySelector('.tn-fbg-posted').addEventListener('click', () => advance(groups, overlay, 'posted'));
@@ -413,10 +482,7 @@
     const small = document.createElement('small'); small.textContent = group.url; current.append(strong, small);
     overlay.querySelector('.tn-fbg-caption').value = captionValue();
     overlay.querySelector('.tn-fbg-media-note').textContent = mediaHandoffMessage();
-    const downloadable = attachedMedia().filter((item) => item.dataset.downloadUrl);
-    const downloadButton = overlay.querySelector('.tn-fbg-download');
-    downloadButton.hidden = downloadable.length === 0;
-    downloadButton.textContent = downloadable.length === 1 ? 'Download media' : `Download ${downloadable.length} files`;
+    prepareMediaShare(overlay);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', buildPanel); else buildPanel();
