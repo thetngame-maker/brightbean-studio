@@ -5,6 +5,7 @@ from django.urls import include, path
 
 from apps.accounts.views import health_check
 from apps.api.api import api as agent_api
+from apps.composer.mobile_capture import mobile_capture
 from apps.oauth_server import views as oauth_views
 
 urlpatterns = [
@@ -24,6 +25,9 @@ urlpatterns = [
     path("members/", include("apps.members.urls")),
     path("settings/", include("apps.settings_manager.urls")),
     path("social-accounts/", include("apps.social_accounts.urls")),
+    # Global iPhone Share Sheet handoff. RBACMiddleware resolves the user's
+    # latest workspace so the Shortcut never needs to embed a workspace UUID.
+    path("mobile-capture/", mobile_capture, name="mobile_capture"),
     # Content Pipeline (Stream A)
     path("workspace/<uuid:workspace_id>/", include("apps.composer.urls")),
     path("workspace/<uuid:workspace_id>/calendar/", include("apps.calendar.urls")),
