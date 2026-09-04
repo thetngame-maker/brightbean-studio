@@ -1,0 +1,34 @@
+{
+  "name": "Add to TN Social Studio",
+  "share_sheet_input": [
+    "URLs",
+    "Safari Web Pages",
+    "Text"
+  ],
+  "actions": [
+    {
+      "action": "Get URLs from Input",
+      "input": "Shortcut Input"
+    },
+    {
+      "action": "Get Item from List",
+      "item": "First Item"
+    },
+    {
+      "action": "URL Encode",
+      "input": "First Item"
+    },
+    {
+      "action": "Text",
+      "value": "https://studio.thetngame.com/mobile-capture/?source={{URL Encoded Text}}"
+    },
+    {
+      "action": "Open URLs",
+      "input": "Text"
+    }
+  ],
+  "security": {
+    "embedded_api_key": false,
+    "authentication": "Existing TN Social Studio Safari session"
+  }
+}

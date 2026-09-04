@@ -279,7 +279,7 @@
         });
     </script>
     {% if user.is_authenticated %}
-    <div class="flex h-screen overflow-hidden {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' %}studio-has-bottom-nav{% endif %}"
+    <div class="flex h-screen overflow-hidden {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' and request.resolver_match.url_name != 'mobile_capture' %}studio-has-bottom-nav{% endif %}"
          style="background: var(--surface-page);"
          x-data="{ sidebarCollapsed: localStorage.getItem('sidebarCollapsed') === 'true', mobileMenuOpen: false }"
          x-effect="localStorage.setItem('sidebarCollapsed', sidebarCollapsed)"
@@ -856,7 +856,7 @@
                 </div>
             </main>
         </div>
-        {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' %}
+        {% if request.workspace and request.resolver_match.url_name != 'approved_smart_plan' and request.resolver_match.url_name != 'compose' and request.resolver_match.url_name != 'compose_edit' and request.resolver_match.url_name != 'mobile_review' and request.resolver_match.url_name != 'mobile_capture' %}
         <nav class="studio-mobile-nav lg:hidden" aria-label="Primary mobile navigation">
             <a href="{% url 'composer:command_center' workspace_id=request.workspace.id %}" class="{% if request.resolver_match.url_name == 'command_center' %}active{% endif %}">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Today</span>
