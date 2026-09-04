@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TN Social Studio Extension Settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand-mark">T</span>
+        <div>
+          <h1>TN Social Studio</h1>
+          <p>Browser capture extension settings</p>
+        </div>
+      </header>
+
+      <section>
+        <h2>Connect your workspace</h2>
+        <p>Create a scoped key in <strong>Organization → API Keys</strong>. Grant <strong>Create posts</strong> and <strong>Upload media</strong>, then allow the accounts you want available here.</p>
+        <form id="settings-form">
+          <label>
+            Studio URL
+            <input id="studio-url" type="url" required value="https://studio.thetngame.com" spellcheck="false">
+          </label>
+          <label>
+            Studio API key
+            <input id="api-key" type="password" required placeholder="bb_studio_…" autocomplete="off" spellcheck="false">
+          </label>
+          <label>
+            Default account
+            <select id="default-account">
+              <option value="">Choose when capturing</option>
+            </select>
+          </label>
+          <div class="actions">
+            <button id="test" class="secondary" type="button">Test connection</button>
+            <button class="primary" type="submit">Save settings</button>
+          </div>
+        </form>
+        <div id="status" role="status" hidden></div>
+      </section>
+
+      <aside>
+        <strong>Your key stays in this browser.</strong>
+        It is stored in extension-local storage and sent only to the Studio URL above. You can revoke it from Studio at any time.
+      </aside>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

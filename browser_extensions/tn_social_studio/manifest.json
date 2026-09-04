@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Add to TN Social Studio",
+  "description": "Capture a social post as an editable, rights-aware TN Social Studio draft.",
+  "version": "1.0.0",
+  "permissions": [
+    "activeTab",
+    "contextMenus",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://studio.thetngame.com/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Add to TN Social Studio",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html"
+}

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Add to TN Social Studio</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand-mark">T</span>
+        <div>
+          <h1>Add to Studio</h1>
+          <p>Capture this post as an editable draft.</p>
+        </div>
+        <button id="settings" class="icon-button" type="button" aria-label="Extension settings">⚙</button>
+      </header>
+
+      <div id="status" class="status loading" role="status">Reading the current post…</div>
+
+      <form id="draft-form" hidden>
+        <div class="source-card">
+          <span id="platform-badge" class="platform-badge">Web</span>
+          <div>
+            <strong id="source-label">Current post</strong>
+            <a id="source-url" href="#" target="_blank" rel="noreferrer">View original</a>
+          </div>
+        </div>
+
+        <label>
+          Save for account
+          <select id="account" required></select>
+        </label>
+
+        <div class="split-fields">
+          <label>
+            Creator handle
+            <input id="creator-handle" type="text" maxlength="255" placeholder="@creator">
+          </label>
+          <label>
+            Creator name
+            <input id="creator-name" type="text" maxlength="255" placeholder="Creator name">
+          </label>
+        </div>
+
+        <label>
+          Draft title
+          <input id="title" type="text" maxlength="255" placeholder="Post title">
+        </label>
+
+        <label>
+          Caption
+          <textarea id="caption" maxlength="10000" rows="8" placeholder="The detected caption appears here."></textarea>
+        </label>
+
+        <label id="media-option" class="check-row" hidden>
+          <input id="include-media" type="checkbox" checked>
+          <span>
+            <strong id="media-count">Include detected media</strong>
+            <small>Studio will try to copy the original photo or video into your media library.</small>
+          </span>
+        </label>
+
+        <div class="rights-note">
+          <strong>Rights review stays on</strong>
+          <span>The source and creator are retained. Studio will require permission and credit review before scheduling.</span>
+        </div>
+
+        <button id="save" class="primary" type="submit">Add to TN Social Studio</button>
+      </form>
+
+      <section id="success" class="success" hidden>
+        <div class="success-icon">✓</div>
+        <h2 id="success-title">Draft added</h2>
+        <p id="success-message">The post is ready to edit in TN Social Studio.</p>
+        <a id="open-draft" class="primary link-button" href="#" target="_blank">Open draft in Studio</a>
+        <button id="capture-another" class="secondary" type="button">Capture again</button>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>
