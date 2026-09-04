@@ -2,6 +2,8 @@
 
 import logging
 import re
+import zoneinfo
+from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -9,16 +11,21 @@ from django.core import signing
 from django.core.signing import BadSignature, SignatureExpired
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views.decorators.http import require_http_methods
 
 from apps.members.decorators import require_permission
 
 from .ugc_smart_captions import build_caption_drafts
 from .ugc_smart_planning import (
+    DEFAULT_DAILY_LIMIT,
     DEFAULT_PLAN_COUNT,
     DEFAULT_PLAN_DAYS,
+    MAX_DAILY_LIMIT,
     MAX_PLAN_COUNT,
     MAX_PLAN_DAYS,
+    MIN_DAILY_LIMIT,
     MIN_PLAN_COUNT,
     MIN_PLAN_DAYS,
     SmartPlanError,
@@ -32,6 +39,7 @@ from .ugc_views import _get_workspace
 logger = logging.getLogger(__name__)
 
 PLAN_SIGNING_SALT = "ugc-approved-smart-plan-v1"
+WEEKDAY_OPTIONS = ((0, "Mon"), (1, "Tue"), (2, "Wed"), (3, "Thu"), (4, "Fri"), (5, "Sat"), (6, "Sun"))
 
 
 def _bounded_int(value, *, default, minimum, maximum):
@@ -40,6 +48,48 @@ def _bounded_int(value, *, default, minimum, maximum):
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _planning_window(request, workspace, fallback_days):
+    workspace_tz = zoneinfo.ZoneInfo(workspace.effective_timezone or "UTC")
+    today = timezone.now().astimezone(workspace_tz).date()
+    last_available = today + timedelta(days=MAX_PLAN_DAYS - 1)
+    start = parse_date(request.GET.get("start_date") or "") or today
+    start = max(today, min(last_available, start))
+    default_end = start + timedelta(days=fallback_days - 1)
+    end = parse_date(request.GET.get("end_date") or "") or default_end
+    end = max(start, min(last_available, end))
+    return today, last_available, start, end
+
+
+def _selected_weekdays(request):
+    if request.GET.get("weekday_filter") != "1":
+        return set(range(7))
+    selected = set()
+    for value in request.GET.getlist("weekdays"):
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            selected.add(day)
+    return selected
+
+
+def _date_limits(request, start, end):
+    limits = {}
+    day = start
+    while day <= end:
+        key = f"date_limit_{day.isoformat()}"
+        if request.GET.get(key) not in {None, ""}:
+            limits[day] = _bounded_int(
+                request.GET.get(key),
+                default=0,
+                minimum=0,
+                maximum=MAX_DAILY_LIMIT,
+            )
+        day += timedelta(days=1)
+    return limits
 
 
 def _safe_failure_reason(exc):
@@ -72,6 +122,7 @@ def _retry_plan_items(workspace, payload, *, actor, caption_overrides):
     for row in payload.get("items") or []:
         single_payload = {
             "workspace_id": payload.get("workspace_id"),
+            "constraints": payload.get("constraints"),
             "items": [row],
         }
         submission_id = str(row.get("submission_id") or "")
@@ -191,18 +242,40 @@ def approved_smart_plan(request, workspace_id):
     days = _bounded_int(
         request.GET.get("days"), default=DEFAULT_PLAN_DAYS, minimum=MIN_PLAN_DAYS, maximum=MAX_PLAN_DAYS
     )
+    daily_limit = _bounded_int(
+        request.GET.get("daily_limit"),
+        default=DEFAULT_DAILY_LIMIT,
+        minimum=MIN_DAILY_LIMIT,
+        maximum=MAX_DAILY_LIMIT,
+    )
+    today, max_plan_date, start_date, end_date = _planning_window(request, workspace, days)
+    days = (end_date - start_date).days + 1
+    selected_weekdays = _selected_weekdays(request)
+    date_limits = _date_limits(request, start_date, end_date)
     available_accounts = _connected_accounts(workspace)
     if request.GET.get("account_filter") == "1":
         account_ids = request.GET.getlist("accounts")
     else:
         account_ids = [str(account.id) for account in available_accounts]
-    plan = build_smart_plan(workspace, count=count, days=days, account_ids=account_ids)
+    plan = build_smart_plan(
+        workspace,
+        count=count,
+        days=days,
+        account_ids=account_ids,
+        start_date=start_date,
+        end_date=end_date,
+        weekdays=selected_weekdays,
+        daily_limit=daily_limit,
+        date_limits=date_limits,
+    )
     smart_captions = request.GET.get("smart_captions") in {"1", "true", "on"}
     caption_status = build_caption_drafts(workspace, plan["items"], use_ai=smart_captions)
     token = ""
     if plan["items"]:
         token = signing.dumps(plan_payload(workspace, plan), salt=PLAN_SIGNING_SALT, compress=True)
-    return_to = reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id}) + "?tab=approved&draft_state=ready"
+    return_to = (
+        reverse("ugc:moderation_queue", kwargs={"workspace_id": workspace.id}) + "?tab=approved&draft_state=ready"
+    )
     return render(
         request,
         "ugc/approved_smart_plan.html",
@@ -212,11 +285,28 @@ def approved_smart_plan(request, workspace_id):
             "plan_token": token,
             "selected_count": count,
             "selected_days": days,
+            "selected_daily_limit": daily_limit,
+            "selected_start_date": start_date,
+            "selected_end_date": end_date,
+            "selected_weekdays": selected_weekdays,
+            "weekday_options": WEEKDAY_OPTIONS,
+            "today": today,
+            "max_plan_date": max_plan_date,
+            "plan_dates": [
+                {
+                    "date": start_date + timedelta(days=offset),
+                    "override": date_limits.get(start_date + timedelta(days=offset), ""),
+                    "planned": plan["daily_counts"].get(start_date + timedelta(days=offset), 0),
+                    "existing": plan["existing_daily_counts"].get(start_date + timedelta(days=offset), 0),
+                    "enabled": (start_date + timedelta(days=offset)).weekday() in selected_weekdays,
+                }
+                for offset in range(days)
+            ],
             "max_plan_count": MAX_PLAN_COUNT,
             "max_plan_days": MAX_PLAN_DAYS,
+            "max_daily_limit": MAX_DAILY_LIMIT,
             "available_accounts": [
-                {"account": account, "selected": str(account.id) in set(account_ids)}
-                for account in available_accounts
+                {"account": account, "selected": str(account.id) in set(account_ids)} for account in available_accounts
             ],
             "selected_account_ids": {str(value) for value in account_ids},
             "smart_captions": smart_captions,
