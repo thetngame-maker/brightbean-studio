@@ -28,10 +28,13 @@ from .ugc_relevance import score_relevance
 
 DEFAULT_PLAN_COUNT = 7
 DEFAULT_PLAN_DAYS = 14
+DEFAULT_DAILY_LIMIT = 2
 MIN_PLAN_COUNT = 1
 MAX_PLAN_COUNT = 30
 MIN_PLAN_DAYS = 1
 MAX_PLAN_DAYS = 60
+MIN_DAILY_LIMIT = 1
+MAX_DAILY_LIMIT = 10
 PLAN_LOOKAHEAD_DAYS = 60
 DIRECT_SCHEDULE_BLOCKED_MODES = {"required_internal", "required_internal_and_client"}
 GENERIC_ACCOUNT_WORDS = {
@@ -48,6 +51,18 @@ GENERIC_ACCOUNT_WORDS = {
 
 class SmartPlanError(ValueError):
     pass
+
+
+def _normalized_weekdays(values):
+    selected = set()
+    for value in range(7) if values is None else values:
+        try:
+            day = int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= day <= 6:
+            selected.add(day)
+    return sorted(selected)
 
 
 def _number(value):
@@ -197,10 +212,7 @@ def _account_insight(account, history, workspace_tz):
                 score
                 for (day, observed_time), values in observed.items()
                 if day == slot.day_of_week
-                and abs(
-                    (observed_time.hour * 60 + observed_time.minute)
-                    - (slot.time.hour * 60 + slot.time.minute)
-                )
+                and abs((observed_time.hour * 60 + observed_time.minute) - (slot.time.hour * 60 + slot.time.minute))
                 <= 120
                 for score in values
             ]
@@ -242,7 +254,19 @@ def _account_insight(account, history, workspace_tz):
     }
 
 
-def _available_times(account, insight, workspace_tz, *, count, days):
+def _available_times(
+    account,
+    insight,
+    workspace_tz,
+    *,
+    count,
+    days,
+    start_date=None,
+    end_date=None,
+    weekdays=None,
+    daily_limit=DEFAULT_DAILY_LIMIT,
+    date_limits=None,
+):
     now = timezone.now()
     floor = now + timedelta(hours=2)
     existing = list(
@@ -253,10 +277,29 @@ def _available_times(account, insight, workspace_tz, *, count, days):
         .exclude(status__in=PlatformPost.PROTECTED_STATUSES)
         .values_list("scheduled_at", flat=True)
     )
+    existing.extend(
+        PlatformPost.objects.filter(
+            social_account=account,
+            scheduled_at__isnull=True,
+            post__proposed_publish_at__gt=now,
+        )
+        .exclude(status__in=PlatformPost.PROTECTED_STATUSES)
+        .values_list("post__proposed_publish_at", flat=True)
+    )
     candidates = []
     local_floor = floor.astimezone(workspace_tz)
-    for offset in range(min(days, PLAN_LOOKAHEAD_DAYS)):
-        date = local_floor.date() + timedelta(days=offset)
+    planning_start = max(start_date or local_floor.date(), local_floor.date())
+    planning_end = end_date or (planning_start + timedelta(days=min(days, PLAN_LOOKAHEAD_DAYS) - 1))
+    planning_end = min(planning_end, planning_start + timedelta(days=PLAN_LOOKAHEAD_DAYS - 1))
+    selected_weekdays = set(range(7)) if weekdays is None else set(weekdays)
+    limits_by_date = date_limits or {}
+    for offset in range((planning_end - planning_start).days + 1):
+        date = planning_start + timedelta(days=offset)
+        if date.weekday() not in selected_weekdays:
+            continue
+        effective_limit = max(0, min(MAX_DAILY_LIMIT, int(limits_by_date.get(date, daily_limit))))
+        if effective_limit == 0:
+            continue
         for pattern in insight["patterns"]:
             if date.weekday() != pattern["day"]:
                 continue
@@ -294,7 +337,9 @@ def _account_fit(candidate, insight, planned_targets, planned_creators):
     reasons = []
     target_key = (submission.target_label or "").strip().casefold()
     creator_key = str(submission.creator_id or "")
-    account_words = _words(f"{insight['account'].display_label} {insight['account'].account_handle}") - GENERIC_ACCOUNT_WORDS
+    account_words = (
+        _words(f"{insight['account'].display_label} {insight['account'].account_handle}") - GENERIC_ACCOUNT_WORDS
+    )
     content_words = _words(f"{submission.target_label} {submission.title} {submission.body}")
     if "waterfalls" in account_words and any(word.startswith("fall") or word == "waterfall" for word in content_words):
         account_words.add("fall")
@@ -346,9 +391,34 @@ def _engagement_label(metrics):
     return " · ".join(bits) or "No imported engagement yet"
 
 
-def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_DAYS, account_ids=None):
+def build_smart_plan(
+    workspace,
+    *,
+    count=DEFAULT_PLAN_COUNT,
+    days=DEFAULT_PLAN_DAYS,
+    account_ids=None,
+    start_date=None,
+    end_date=None,
+    weekdays=None,
+    daily_limit=DEFAULT_DAILY_LIMIT,
+    date_limits=None,
+):
     count = max(MIN_PLAN_COUNT, min(MAX_PLAN_COUNT, int(count)))
     days = max(MIN_PLAN_DAYS, min(MAX_PLAN_DAYS, int(days)))
+    daily_limit = max(MIN_DAILY_LIMIT, min(MAX_DAILY_LIMIT, int(daily_limit)))
+    workspace_tz = zoneinfo.ZoneInfo(workspace.effective_timezone or "UTC")
+    local_today = timezone.now().astimezone(workspace_tz).date()
+    last_available = local_today + timedelta(days=PLAN_LOOKAHEAD_DAYS - 1)
+    planning_start = min(max(start_date or local_today, local_today), last_available)
+    planning_end = end_date or (planning_start + timedelta(days=days - 1))
+    planning_end = max(planning_start, min(planning_end, last_available))
+    days = (planning_end - planning_start).days + 1
+    selected_weekdays = _normalized_weekdays(weekdays)
+    limits_by_date = {
+        day: max(0, min(MAX_DAILY_LIMIT, int(limit)))
+        for day, limit in (date_limits or {}).items()
+        if planning_start <= day <= planning_end
+    }
     accounts = _connected_accounts(workspace, account_ids)
     if not accounts:
         return {
@@ -357,6 +427,13 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
             "candidate_count": 0,
             "requested_count": count,
             "requested_days": days,
+            "start_date": planning_start,
+            "end_date": planning_end,
+            "daily_limit": daily_limit,
+            "weekdays": selected_weekdays,
+            "date_limits": limits_by_date,
+            "daily_counts": {},
+            "existing_daily_counts": {},
             "direct_schedule": False,
             "empty_reason": "Connect or select at least one social account before planning.",
         }
@@ -365,18 +442,42 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
     history_by_account = defaultdict(list)
     for row in learning["rows"]:
         history_by_account[row["account_id"]].append(row)
-    workspace_tz = zoneinfo.ZoneInfo(workspace.effective_timezone or "UTC")
-    insights = [
-        _account_insight(account, history_by_account.get(account.id, []), workspace_tz) for account in accounts
-    ]
+    insights = [_account_insight(account, history_by_account.get(account.id, []), workspace_tz) for account in accounts]
     slots_by_account = {
         insight["account"].id: _available_times(
-            insight["account"], insight, workspace_tz, count=count, days=days
+            insight["account"],
+            insight,
+            workspace_tz,
+            count=count,
+            days=days,
+            start_date=planning_start,
+            end_date=planning_end,
+            weekdays=selected_weekdays,
+            daily_limit=daily_limit,
+            date_limits=limits_by_date,
         )
         for insight in insights
     }
+    window_start = datetime.combine(planning_start, time.min, tzinfo=workspace_tz)
+    window_end = datetime.combine(planning_end + timedelta(days=1), time.min, tzinfo=workspace_tz)
+    existing_daily_counts = defaultdict(int)
+    for scheduled_at in PlatformPost.objects.filter(
+        social_account__in=accounts,
+        scheduled_at__gte=window_start,
+        scheduled_at__lt=window_end,
+    ).values_list("scheduled_at", flat=True):
+        existing_daily_counts[scheduled_at.astimezone(workspace_tz).date()] += 1
+    for proposed_at in PlatformPost.objects.filter(
+        social_account__in=accounts,
+        scheduled_at__isnull=True,
+        post__proposed_publish_at__gte=window_start,
+        post__proposed_publish_at__lt=window_end,
+    ).values_list("post__proposed_publish_at", flat=True):
+        existing_daily_counts[proposed_at.astimezone(workspace_tz).date()] += 1
     insight_by_account = {insight["account"].id: insight for insight in insights}
     planned_counts = defaultdict(int)
+    slot_cursors = defaultdict(int)
+    planned_daily_counts = defaultdict(int)
     planned_targets = []
     planned_creators = []
     items = []
@@ -388,8 +489,17 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
             submission = candidate["submission"]
             for account in accounts:
                 slots = slots_by_account[account.id]
-                index = planned_counts[account.id]
-                if index >= len(slots) or index >= per_account_soft_cap:
+                if planned_counts[account.id] >= per_account_soft_cap:
+                    continue
+                index = slot_cursors[account.id]
+                while index < len(slots):
+                    local_date = slots[index][0].astimezone(workspace_tz).date()
+                    capacity = limits_by_date.get(local_date, daily_limit)
+                    if existing_daily_counts[local_date] + planned_daily_counts[local_date] < capacity:
+                        break
+                    index += 1
+                slot_cursors[account.id] = index
+                if index >= len(slots):
                     continue
                 allowed, _error = account_rights(submission, account)
                 if not allowed or not _media_works_for_account(submission, account):
@@ -414,6 +524,8 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
         remaining.remove(candidate)
         submission = candidate["submission"]
         planned_counts[account.id] += 1
+        slot_cursors[account.id] += 1
+        planned_daily_counts[slot_at.astimezone(workspace_tz).date()] += 1
         target_key = (submission.target_label or "").strip().casefold()
         creator_key = str(submission.creator_id or "")
         planned_targets.append(target_key)
@@ -444,13 +556,34 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
     direct_schedule = workspace.approval_workflow_mode not in DIRECT_SCHEDULE_BLOCKED_MODES
     empty_reason = ""
     if not items:
-        empty_reason = "No undrafted, quality-checked content has valid rights for the selected accounts."
+        eligible_dates = [
+            planning_start + timedelta(days=offset)
+            for offset in range(days)
+            if (planning_start + timedelta(days=offset)).weekday() in selected_weekdays
+        ]
+        if not selected_weekdays:
+            empty_reason = "Select at least one posting day to build this schedule."
+        elif not any(limits_by_date.get(day, daily_limit) > existing_daily_counts[day] for day in eligible_dates):
+            empty_reason = "Every selected date is already at capacity. Increase a daily limit or extend the range."
+        elif not any(slots_by_account.values()):
+            empty_reason = (
+                "No open posting windows match these dates and weekdays. Extend the range or select more days."
+            )
+        else:
+            empty_reason = "No undrafted, quality-checked content has valid rights for the selected accounts."
     return {
         "items": items,
         "accounts": insights,
         "candidate_count": len(candidates),
         "requested_count": count,
         "requested_days": days,
+        "start_date": planning_start,
+        "end_date": planning_end,
+        "daily_limit": daily_limit,
+        "weekdays": selected_weekdays,
+        "date_limits": limits_by_date,
+        "daily_counts": {day: value for day, value in sorted(planned_daily_counts.items())},
+        "existing_daily_counts": {day: value for day, value in sorted(existing_daily_counts.items())},
         "direct_schedule": direct_schedule,
         "empty_reason": empty_reason,
     }
@@ -459,6 +592,13 @@ def build_smart_plan(workspace, *, count=DEFAULT_PLAN_COUNT, days=DEFAULT_PLAN_D
 def plan_payload(workspace, plan):
     return {
         "workspace_id": str(workspace.id),
+        "constraints": {
+            "start_date": plan["start_date"].isoformat(),
+            "end_date": plan["end_date"].isoformat(),
+            "weekdays": plan["weekdays"],
+            "daily_limit": plan["daily_limit"],
+            "date_limits": {day.isoformat(): limit for day, limit in plan["date_limits"].items()},
+        },
         "items": [
             {
                 "submission_id": str(item["submission"].id),
@@ -552,9 +692,7 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 raise SmartPlanError("A planned content item or account is no longer available.")
             if slot_at <= now + timedelta(minutes=15) or slot_at > now + timedelta(days=PLAN_LOOKAHEAD_DAYS + 1):
                 raise SmartPlanError("A planned time is no longer available. Refresh the plan.")
-            if submission.status != UGCSubmission.Status.APPROVED or (submission.metadata or {}).get(
-                "studio_post_ids"
-            ):
+            if submission.status != UGCSubmission.Status.APPROVED or (submission.metadata or {}).get("studio_post_ids"):
                 raise SmartPlanError("One of these community items was already used or is no longer approved.")
             if not submission.consent_confirmed or _quality_for(submission)["needs_check"]:
                 raise SmartPlanError("One of these community items now needs a rights or quality check.")
@@ -563,11 +701,14 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 raise SmartPlanError(error)
             if not _media_works_for_account(submission, account):
                 raise SmartPlanError(f"{account.display_label} requires media for this planned post.")
-            if direct_schedule and PlatformPost.objects.filter(
-                social_account=account,
-                scheduled_at__gte=slot_at - timedelta(minutes=29),
-                scheduled_at__lte=slot_at + timedelta(minutes=29),
-            ).exists():
+            if (
+                direct_schedule
+                and PlatformPost.objects.filter(
+                    social_account=account,
+                    scheduled_at__gte=slot_at - timedelta(minutes=29),
+                    scheduled_at__lte=slot_at + timedelta(minutes=29),
+                ).exists()
+            ):
                 raise SmartPlanError("A planned time was just filled. Refresh the plan to use the next opening.")
             override = (caption_overrides or {}).get(str(submission.id))
             caption = _caption_for_account(submission, account, lead_override=override)

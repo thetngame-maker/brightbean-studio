@@ -1,5 +1,6 @@
 import json
-from datetime import time, timedelta
+import zoneinfo
+from datetime import datetime, time, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -184,9 +185,7 @@ class ApprovedSmartPlanningTests(TestCase):
         self.assertEqual(waterfall_insight["recent_count"], 2)
         self.assertGreater(strongest_item["scheduled_at"], timezone.now())
 
-        response = self.client.get(
-            reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
-        )
+        response = self.client.get(reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Highest engagement first")
         self.assertContains(response, "Nothing changes until you confirm")
@@ -322,13 +321,116 @@ class ApprovedSmartPlanningTests(TestCase):
         self.assertEqual(response.context["plan"]["requested_count"], 14)
         self.assertEqual(response.context["plan"]["requested_days"], 30)
         self.assertContains(response, "14 posts")
-        self.assertContains(response, "planned over 30 days")
+        self.assertContains(response, "Maximum posts per day")
+        self.assertContains(response, "Start date")
+        self.assertContains(response, "Customize individual dates")
         self.assertContains(response, 'data-plan-name="count" data-plan-value="14"')
         self.assertContains(response, 'nonce="')
         self.assertNotContains(response, "onclick=")
         self.assertTrue(
-            all(item["scheduled_at"] < timezone.now() + timedelta(days=31) for item in response.context["plan"]["items"])
+            all(
+                item["scheduled_at"] < timezone.now() + timedelta(days=31) for item in response.context["plan"]["items"]
+            )
         )
+
+    def test_exact_dates_weekdays_and_daily_capacity_shape_the_schedule(self):
+        for index in range(12):
+            self.create_submission(
+                title=f"Capacity option {index}",
+                target=f"Tennessee trail {index}",
+                likes=900 - index,
+            )
+        local_today = timezone.now().astimezone(zoneinfo.ZoneInfo(self.workspace.effective_timezone or "UTC")).date()
+        days_until_monday = (7 - local_today.weekday()) % 7 or 7
+        monday = local_today + timedelta(days=days_until_monday)
+        wednesday = monday + timedelta(days=2)
+        friday = monday + timedelta(days=4)
+        existing_post = Post.objects.create(
+            workspace=self.workspace,
+            author=self.user,
+            title="Already scheduled Wednesday",
+            caption="Existing calendar post",
+        )
+        PlatformPost.objects.create(
+            post=existing_post,
+            social_account=self.general,
+            status=PlatformPost.Status.SCHEDULED,
+            scheduled_at=datetime.combine(
+                wednesday,
+                time(8, 0),
+                tzinfo=zoneinfo.ZoneInfo(self.workspace.effective_timezone or "UTC"),
+            ),
+        )
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+
+        response = self.client.get(
+            url,
+            {
+                "count": "10",
+                "daily_limit": "1",
+                "start_date": monday.isoformat(),
+                "end_date": friday.isoformat(),
+                "weekday_filter": "1",
+                "weekdays": ["0", "2", "4"],
+                f"date_limit_{monday.isoformat()}": "0",
+                f"date_limit_{friday.isoformat()}": "2",
+                "account_filter": "1",
+                "accounts": [str(self.waterfalls.id), str(self.general.id)],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        plan = response.context["plan"]
+        self.assertEqual(plan["start_date"], monday)
+        self.assertEqual(plan["end_date"], friday)
+        self.assertEqual(plan["daily_limit"], 1)
+        self.assertEqual(plan["existing_daily_counts"][wednesday], 1)
+        self.assertEqual(plan["daily_counts"], {friday: 2})
+        self.assertEqual(len(plan["items"]), 2)
+        workspace_tz = zoneinfo.ZoneInfo(self.workspace.effective_timezone or "UTC")
+        self.assertTrue(all(item["scheduled_at"].astimezone(workspace_tz).date() == friday for item in plan["items"]))
+        self.assertContains(response, "2 new")
+        self.assertContains(response, "1 on calendar")
+
+    def test_commit_rechecks_daily_capacity_after_preview(self):
+        submission = self.create_submission(
+            title="Capacity race guard",
+            target="Rock Island",
+            likes=700,
+        )
+        url = reverse("ugc:approved_smart_plan", kwargs={"workspace_id": self.workspace.id})
+        preview = self.client.get(
+            url,
+            {
+                "count": "1",
+                "daily_limit": "1",
+                "account_filter": "1",
+                "accounts": str(self.general.id),
+            },
+        )
+        planned_at = preview.context["plan"]["items"][0]["scheduled_at"]
+        workspace_tz = zoneinfo.ZoneInfo(self.workspace.effective_timezone or "UTC")
+        blocker_post = Post.objects.create(
+            workspace=self.workspace,
+            author=self.user,
+            title="Added after preview",
+            caption="New calendar post",
+        )
+        PlatformPost.objects.create(
+            post=blocker_post,
+            social_account=self.general,
+            status=PlatformPost.Status.SCHEDULED,
+            scheduled_at=datetime.combine(planned_at.astimezone(workspace_tz).date(), time.min, tzinfo=workspace_tz),
+        )
+
+        response = self.client.post(
+            url,
+            {"action": "commit", "plan_token": preview.context["plan_token"]},
+            follow=True,
+        )
+
+        self.assertContains(response, "selected date just reached its posting limit")
+        self.assertFalse(ContentPerformanceProfile.objects.filter(source_submission=submission).exists())
 
     def test_edited_caption_and_hashtags_are_used_while_required_credit_is_preserved(self):
         submission = self.create_submission(

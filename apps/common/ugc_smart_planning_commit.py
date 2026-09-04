@@ -5,7 +5,9 @@ FOR UPDATE against nullable outer-join relations. The commit path therefore
 locks only the base submission/account rows and reads related objects normally.
 """
 
-from datetime import timedelta
+import zoneinfo
+from collections import defaultdict
+from datetime import datetime, time, timedelta
 
 from django.db import transaction
 from django.utils import timezone
@@ -19,8 +21,11 @@ from .audit import record_audit_event
 from .models import ContentPerformanceProfile, UGCSubmission
 from .ugc_provenance import get_provenance
 from .ugc_smart_planning import (
+    DEFAULT_DAILY_LIMIT,
     DIRECT_SCHEDULE_BLOCKED_MODES,
+    MAX_DAILY_LIMIT,
     MAX_PLAN_COUNT,
+    MIN_DAILY_LIMIT,
     PLAN_LOOKAHEAD_DAYS,
     SmartPlanError,
     _caption_for_account,
@@ -28,6 +33,14 @@ from .ugc_smart_planning import (
     _parse_slot,
     _quality_for,
 )
+
+
+def _bounded_capacity(value, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(0, min(MAX_DAILY_LIMIT, parsed))
 
 
 def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
@@ -40,6 +53,16 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
     direct_schedule = workspace.approval_workflow_mode not in DIRECT_SCHEDULE_BLOCKED_MODES
     now = timezone.now()
     created = []
+    constraints = payload.get("constraints") or {}
+    enforce_capacity = bool(constraints)
+    daily_limit = max(
+        MIN_DAILY_LIMIT,
+        _bounded_capacity(constraints.get("daily_limit"), DEFAULT_DAILY_LIMIT),
+    )
+    date_limits = {
+        str(day): _bounded_capacity(limit, daily_limit) for day, limit in (constraints.get("date_limits") or {}).items()
+    }
+    workspace_tz = zoneinfo.ZoneInfo(workspace.effective_timezone or "UTC")
 
     with transaction.atomic():
         # PostgreSQL cannot apply FOR UPDATE to nullable relations introduced by
@@ -59,6 +82,25 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 id__in=[row.get("account_id") for row in raw_items],
             )
         }
+        existing_daily_counts = defaultdict(int)
+        planned_daily_counts = defaultdict(int)
+        if enforce_capacity and accounts:
+            slot_dates = [_parse_slot(row.get("scheduled_at")).astimezone(workspace_tz).date() for row in raw_items]
+            window_start = datetime.combine(min(slot_dates), time.min, tzinfo=workspace_tz)
+            window_end = datetime.combine(max(slot_dates) + timedelta(days=1), time.min, tzinfo=workspace_tz)
+            for scheduled_at in PlatformPost.objects.filter(
+                social_account_id__in=accounts,
+                scheduled_at__gte=window_start,
+                scheduled_at__lt=window_end,
+            ).values_list("scheduled_at", flat=True):
+                existing_daily_counts[scheduled_at.astimezone(workspace_tz).date()] += 1
+            for proposed_at in PlatformPost.objects.filter(
+                social_account_id__in=accounts,
+                scheduled_at__isnull=True,
+                post__proposed_publish_at__gte=window_start,
+                post__proposed_publish_at__lt=window_end,
+            ).values_list("post__proposed_publish_at", flat=True):
+                existing_daily_counts[proposed_at.astimezone(workspace_tz).date()] += 1
 
         for row in raw_items:
             submission = submissions.get(str(row.get("submission_id")))
@@ -79,11 +121,20 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 raise SmartPlanError(error)
             if not _media_works_for_account(submission, account):
                 raise SmartPlanError(f"{account.display_label} requires media for this planned post.")
-            if direct_schedule and PlatformPost.objects.filter(
-                social_account=account,
-                scheduled_at__gte=slot_at - timedelta(minutes=29),
-                scheduled_at__lte=slot_at + timedelta(minutes=29),
-            ).exists():
+            local_date = slot_at.astimezone(workspace_tz).date()
+            capacity = date_limits.get(local_date.isoformat(), daily_limit)
+            if enforce_capacity and existing_daily_counts[local_date] + planned_daily_counts[local_date] >= capacity:
+                raise SmartPlanError(
+                    "A selected date just reached its posting limit. Refresh the plan to use the next opening."
+                )
+            if (
+                direct_schedule
+                and PlatformPost.objects.filter(
+                    social_account=account,
+                    scheduled_at__gte=slot_at - timedelta(minutes=29),
+                    scheduled_at__lte=slot_at + timedelta(minutes=29),
+                ).exists()
+            ):
                 raise SmartPlanError("A planned time was just filled. Refresh the plan to use the next opening.")
 
             override = (caption_overrides or {}).get(str(submission.id))
@@ -118,6 +169,7 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 author=actor,
                 status="scheduled" if direct_schedule else "draft",
             )
+            planned_daily_counts[local_date] += 1
             ContentPerformanceProfile.objects.create(
                 workspace=workspace,
                 post=post,
