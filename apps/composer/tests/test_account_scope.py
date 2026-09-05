@@ -166,6 +166,46 @@ class ScopedSaveTests(AccountScopeTestsBase):
         body = response.content.decode("utf-8")
         self.assertIn('name="account_scope"', body)
         self.assertIn(f'value="{self.tiktok.id}"', body)
+        self.assertIn("Add or manage accounts", body)
+        self.assertIn(
+            reverse(
+                "composer:compose_edit",
+                kwargs={"workspace_id": self.workspace.id, "post_id": self.post.id},
+            ),
+            body,
+        )
+
+    def test_unscoped_editor_lists_other_connected_accounts(self):
+        edit_url = reverse(
+            "composer:compose_edit",
+            kwargs={"workspace_id": self.workspace.id, "post_id": self.post.id},
+        )
+
+        response = self.client.get(edit_url)
+
+        self.assertEqual(response.status_code, 200)
+        body = response.content.decode("utf-8")
+        self.assertIn("YT Channel", body)
+        self.assertIn("janschmitz51", body)
+        self.assertNotIn('name="account_scope"', body)
+
+    def test_unscoped_editor_can_add_another_account_variant(self):
+        instagram = SocialAccount.objects.create(
+            workspace=self.workspace,
+            platform="instagram_login",
+            account_platform_id="ig-1",
+            account_name="Instagram Account",
+            connection_status=SocialAccount.ConnectionStatus.CONNECTED,
+        )
+        payload = self._payload(selected_accounts=f"{self.tiktok.id},{instagram.id}")
+        del payload["account_scope"]
+
+        response = self.client.post(self.save_url, data=payload)
+
+        self.assertIn(response.status_code, (200, 204, 302))
+        self.assertTrue(
+            PlatformPost.objects.filter(post=self.post, social_account=instagram).exists()
+        )
 
     def test_garbage_selected_accounts_entries_ignored(self):
         response = self.client.post(

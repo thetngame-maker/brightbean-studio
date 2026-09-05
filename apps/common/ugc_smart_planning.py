@@ -9,17 +9,14 @@ import zoneinfo
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 
-from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from apps.composer.models import PlatformPost
-from apps.composer.services import create_post
 from apps.composer.ugc_publish_guard import account_rights
 from apps.social_accounts.models import SocialAccount
 
-from .audit import record_audit_event
-from .models import ContentPerformanceProfile, UGCSubmission
+from .models import UGCSubmission
 from .ugc_creator_services import rights_can_use
 from .ugc_mobile_quality import approved_quality
 from .ugc_performance_learning import build_performance_learning
@@ -151,7 +148,7 @@ def _connected_accounts(workspace, account_ids=None):
         .order_by("account_name", "account_handle", "platform")
     )
     selected = {str(value) for value in (account_ids or []) if value}
-    if selected:
+    if account_ids is not None:
         queryset = queryset.filter(id__in=selected)
     return list(queryset)
 
@@ -293,6 +290,7 @@ def _available_times(
     planning_end = min(planning_end, planning_start + timedelta(days=PLAN_LOOKAHEAD_DAYS - 1))
     selected_weekdays = set(range(7)) if weekdays is None else set(weekdays)
     limits_by_date = date_limits or {}
+    seen_candidates = set()
     for offset in range((planning_end - planning_start).days + 1):
         date = planning_start + timedelta(days=offset)
         if date.weekday() not in selected_weekdays:
@@ -303,19 +301,47 @@ def _available_times(
         for pattern in insight["patterns"]:
             if date.weekday() != pattern["day"]:
                 continue
-            slot_at = datetime.combine(date, pattern["time"], tzinfo=workspace_tz)
-            if slot_at <= floor:
-                continue
-            if any(abs((slot_at - occupied).total_seconds()) < 1800 for occupied in existing):
-                continue
+            base_at = datetime.combine(date, pattern["time"], tzinfo=workspace_tz)
+            # A single learned posting window must still support an explicit
+            # 2+/day limit. Expand around the strongest time in 90-minute
+            # steps, staying inside a practical 6 AM–11 PM publishing day.
+            offsets = [0]
+            for step in range(1, MAX_DAILY_LIMIT + 1):
+                offsets.extend((step * 90, step * -90))
+            daily_slots = []
+            for minute_offset in offsets:
+                slot_at = base_at + timedelta(minutes=minute_offset)
+                if slot_at.date() != date or not 6 <= slot_at.hour < 23:
+                    continue
+                if slot_at in seen_candidates or slot_at <= floor:
+                    continue
+                if any(abs((slot_at - occupied).total_seconds()) < 1800 for occupied in existing):
+                    continue
+                daily_slots.append(slot_at)
+                seen_candidates.add(slot_at)
+                # Keep alternates available in case another selected account
+                # already occupies one of this account's best times. The
+                # plan-level capacity check still caps how many are chosen.
+                if len(daily_slots) >= MAX_DAILY_LIMIT:
+                    break
             preference = offset - max(-2, min(2, (pattern["score"] - 100) / 25))
-            candidates.append((preference, slot_at, pattern))
+            for position, slot_at in enumerate(daily_slots):
+                candidates.append((preference + (position * 0.08), slot_at, pattern))
     candidates.sort(key=lambda item: (item[0], item[1]))
     min_gap = timedelta(hours=max(18, (insight["cadence_days"] * 24) - 6))
+    same_day_gap = timedelta(minutes=89)
     chosen = []
     anchors = list(existing)
     for _preference, slot_at, pattern in candidates:
-        if any(abs(slot_at - anchor) < min_gap for anchor in anchors):
+        if any(
+            abs(slot_at - anchor)
+            < (
+                same_day_gap
+                if slot_at.astimezone(workspace_tz).date() == anchor.astimezone(workspace_tz).date()
+                else min_gap
+            )
+            for anchor in anchors
+        ):
             continue
         chosen.append((slot_at, pattern))
         anchors.append(slot_at)
@@ -458,22 +484,45 @@ def build_smart_plan(
         )
         for insight in insights
     }
+    occupied_times = list(
+        PlatformPost.objects.filter(social_account__in=accounts, scheduled_at__gt=timezone.now())
+        .exclude(status__in=PlatformPost.PROTECTED_STATUSES)
+        .values_list("scheduled_at", flat=True)
+    )
+    occupied_times.extend(
+        PlatformPost.objects.filter(
+            social_account__in=accounts,
+            scheduled_at__isnull=True,
+            post__proposed_publish_at__gt=timezone.now(),
+        )
+        .exclude(status__in=PlatformPost.PROTECTED_STATUSES)
+        .values_list("post__proposed_publish_at", flat=True)
+    )
     window_start = datetime.combine(planning_start, time.min, tzinfo=workspace_tz)
     window_end = datetime.combine(planning_end + timedelta(days=1), time.min, tzinfo=workspace_tz)
     existing_daily_counts = defaultdict(int)
-    for scheduled_at in PlatformPost.objects.filter(
+    seen_existing = set()
+    for post_id, scheduled_at in PlatformPost.objects.filter(
         social_account__in=accounts,
         scheduled_at__gte=window_start,
         scheduled_at__lt=window_end,
-    ).values_list("scheduled_at", flat=True):
-        existing_daily_counts[scheduled_at.astimezone(workspace_tz).date()] += 1
-    for proposed_at in PlatformPost.objects.filter(
+    ).values_list("post_id", "scheduled_at"):
+        local_date = scheduled_at.astimezone(workspace_tz).date()
+        key = (post_id, local_date)
+        if key not in seen_existing:
+            existing_daily_counts[local_date] += 1
+            seen_existing.add(key)
+    for post_id, proposed_at in PlatformPost.objects.filter(
         social_account__in=accounts,
         scheduled_at__isnull=True,
         post__proposed_publish_at__gte=window_start,
         post__proposed_publish_at__lt=window_end,
-    ).values_list("post__proposed_publish_at", flat=True):
-        existing_daily_counts[proposed_at.astimezone(workspace_tz).date()] += 1
+    ).values_list("post_id", "post__proposed_publish_at"):
+        local_date = proposed_at.astimezone(workspace_tz).date()
+        key = (post_id, local_date)
+        if key not in seen_existing:
+            existing_daily_counts[local_date] += 1
+            seen_existing.add(key)
     insight_by_account = {insight["account"].id: insight for insight in insights}
     planned_counts = defaultdict(int)
     slot_cursors = defaultdict(int)
@@ -487,6 +536,15 @@ def build_smart_plan(
         choices = []
         for candidate in remaining:
             submission = candidate["submission"]
+            # Checked accounts are destinations, not a pool from which Studio
+            # may silently choose just one. Only recommend content that can be
+            # published safely to every selected account.
+            if any(
+                not account_rights(submission, destination)[0]
+                or not _media_works_for_account(submission, destination)
+                for destination in accounts
+            ):
+                continue
             for account in accounts:
                 slots = slots_by_account[account.id]
                 if planned_counts[account.id] >= per_account_soft_cap:
@@ -495,7 +553,14 @@ def build_smart_plan(
                 while index < len(slots):
                     local_date = slots[index][0].astimezone(workspace_tz).date()
                     capacity = limits_by_date.get(local_date, daily_limit)
-                    if existing_daily_counts[local_date] + planned_daily_counts[local_date] < capacity:
+                    slot_is_open_everywhere = not any(
+                        abs((slots[index][0] - occupied).total_seconds()) < 1800
+                        for occupied in occupied_times
+                    )
+                    if (
+                        existing_daily_counts[local_date] + planned_daily_counts[local_date] < capacity
+                        and slot_is_open_everywhere
+                    ):
                         break
                     index += 1
                 slot_cursors[account.id] = index
@@ -525,6 +590,7 @@ def build_smart_plan(
         submission = candidate["submission"]
         planned_counts[account.id] += 1
         slot_cursors[account.id] += 1
+        occupied_times.append(slot_at)
         planned_daily_counts[slot_at.astimezone(workspace_tz).date()] += 1
         target_key = (submission.target_label or "").strip().casefold()
         creator_key = str(submission.creator_id or "")
@@ -540,6 +606,7 @@ def build_smart_plan(
             {
                 "submission": submission,
                 "account": account,
+                "accounts": accounts,
                 "scheduled_at": slot_at,
                 "engagement_label": _engagement_label(candidate["metrics"]),
                 "engagement_rank": candidate["engagement_rank"],
@@ -603,6 +670,7 @@ def plan_payload(workspace, plan):
             {
                 "submission_id": str(item["submission"].id),
                 "account_id": str(item["account"].id),
+                "account_ids": [str(account.id) for account in item["accounts"]],
                 "scheduled_at": item["scheduled_at"].isoformat(),
                 "reason": item["reason"][:500],
             }
@@ -661,126 +729,12 @@ def _parse_slot(value):
 
 
 def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
-    if str(payload.get("workspace_id")) != str(workspace.id):
-        raise SmartPlanError("This plan belongs to another workspace.")
-    raw_items = list(payload.get("items") or [])
-    if not raw_items or len(raw_items) > MAX_PLAN_COUNT:
-        raise SmartPlanError("Refresh the Smart Plan before scheduling.")
-    direct_schedule = workspace.approval_workflow_mode not in DIRECT_SCHEDULE_BLOCKED_MODES
-    now = timezone.now()
-    created = []
-    with transaction.atomic():
-        submissions = {
-            str(item.id): item
-            for item in UGCSubmission.objects.select_for_update()
-            .filter(workspace=workspace, id__in=[row.get("submission_id") for row in raw_items])
-            .select_related("creator", "media_asset", "rights_passport")
-        }
-        accounts = {
-            str(item.id): item
-            for item in SocialAccount.objects.select_for_update().filter(
-                workspace=workspace,
-                connection_status=SocialAccount.ConnectionStatus.CONNECTED,
-                id__in=[row.get("account_id") for row in raw_items],
-            )
-        }
-        for row in raw_items:
-            submission = submissions.get(str(row.get("submission_id")))
-            account = accounts.get(str(row.get("account_id")))
-            slot_at = _parse_slot(row.get("scheduled_at"))
-            if submission is None or account is None:
-                raise SmartPlanError("A planned content item or account is no longer available.")
-            if slot_at <= now + timedelta(minutes=15) or slot_at > now + timedelta(days=PLAN_LOOKAHEAD_DAYS + 1):
-                raise SmartPlanError("A planned time is no longer available. Refresh the plan.")
-            if submission.status != UGCSubmission.Status.APPROVED or (submission.metadata or {}).get("studio_post_ids"):
-                raise SmartPlanError("One of these community items was already used or is no longer approved.")
-            if not submission.consent_confirmed or _quality_for(submission)["needs_check"]:
-                raise SmartPlanError("One of these community items now needs a rights or quality check.")
-            allowed, error = account_rights(submission, account)
-            if not allowed:
-                raise SmartPlanError(error)
-            if not _media_works_for_account(submission, account):
-                raise SmartPlanError(f"{account.display_label} requires media for this planned post.")
-            if (
-                direct_schedule
-                and PlatformPost.objects.filter(
-                    social_account=account,
-                    scheduled_at__gte=slot_at - timedelta(minutes=29),
-                    scheduled_at__lte=slot_at + timedelta(minutes=29),
-                ).exists()
-            ):
-                raise SmartPlanError("A planned time was just filled. Refresh the plan to use the next opening.")
-            override = (caption_overrides or {}).get(str(submission.id))
-            caption = _caption_for_account(submission, account, lead_override=override)
-            provenance = get_provenance(submission.metadata)
-            passport = submission.rights_passport
-            reason = str(row.get("reason") or "Smart Plan recommendation")[:500]
-            notes = [
-                "Scheduled by Approved Smart Plan" if direct_schedule else "Timed draft created by Approved Smart Plan",
-                f"UGC submission: {submission.id}",
-                f"Target: {submission.target_type}:{submission.target_id}",
-                f"Target name: {submission.target_label}",
-                f"Social account: {account.display_label}",
-                f"Planning evidence: {reason}",
-                f"Rights passport: {passport.id}",
-                f"Rights scopes: {', '.join(passport.scope_labels) or 'None'}",
-            ]
-            if provenance.get("source_url"):
-                notes.append(f"Original source URL: {provenance['source_url']}")
-            if passport.credit_required and passport.credit_text:
-                notes.append(f"Required credit: {passport.credit_text}")
-            post = create_post(
-                workspace=workspace,
-                social_account=account,
-                caption=caption,
-                media_asset_ids=[submission.media_asset_id] if submission.media_asset_id else [],
-                title=submission.title or submission.target_label or "Community content",
-                internal_notes="\n".join(notes),
-                scheduled_at=slot_at if direct_schedule else None,
-                proposed_publish_at=None if direct_schedule else slot_at,
-                author=actor,
-                status="scheduled" if direct_schedule else "draft",
-            )
-            ContentPerformanceProfile.objects.create(
-                workspace=workspace,
-                post=post,
-                source_submission=submission,
-                creator=submission.creator,
-                source_type=ContentPerformanceProfile.SourceType.UGC,
-                target_type=submission.target_type,
-                target_id=submission.target_id,
-                target_label=submission.target_label,
-                target_url=submission.target_url,
-                notes=f"Smart Plan evidence: {reason}",
-                created_by=actor,
-                updated_by=actor,
-            )
-            metadata = dict(submission.metadata or {})
-            post_ids = [str(value) for value in metadata.get("studio_post_ids") or [] if value]
-            post_ids.append(str(post.id))
-            metadata["studio_post_ids"] = post_ids[-20:]
-            metadata["studio_drafted_at"] = now.isoformat()
-            metadata["smart_plan"] = {
-                "post_id": str(post.id),
-                "social_account_id": str(account.id),
-                "planned_for": slot_at.isoformat(),
-                "committed_at": now.isoformat(),
-                "mode": "scheduled" if direct_schedule else "approval_draft",
-            }
-            submission.metadata = metadata
-            submission.save(update_fields=["metadata", "updated_at"])
-            record_audit_event(
-                workspace=workspace,
-                actor=actor,
-                action="ugc.smart_plan_scheduled" if direct_schedule else "ugc.smart_plan_draft_created",
-                target=submission,
-                metadata={
-                    "post_id": str(post.id),
-                    "social_account_id": str(account.id),
-                    "planned_for": slot_at.isoformat(),
-                    "rights_passport_id": str(passport.id),
-                    "reason": reason,
-                },
-            )
-            created.append(post)
-    return created, direct_schedule
+    """Compatibility wrapper for callers using the original module path."""
+    from .ugc_smart_planning_commit import commit_smart_plan as postgres_safe_commit
+
+    return postgres_safe_commit(
+        workspace,
+        payload,
+        actor=actor,
+        caption_overrides=caption_overrides,
+    )
