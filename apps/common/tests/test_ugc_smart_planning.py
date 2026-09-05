@@ -221,13 +221,34 @@ class ApprovedSmartPlanningTests(TestCase):
         platform_posts = PlatformPost.objects.filter(
             post__performance_profile__source_submission_id__in=[first.id, second.id]
         ).select_related("post")
-        self.assertEqual(platform_posts.count(), 2)
+        self.assertEqual(platform_posts.count(), 4)
+        self.assertTrue(
+            all(
+                set(profile.post.platform_posts.values_list("social_account_id", flat=True))
+                == {self.waterfalls.id, self.general.id}
+                for profile in ContentPerformanceProfile.objects.filter(
+                    source_submission_id__in=[first.id, second.id]
+                ).select_related("post")
+            )
+        )
+        self.assertTrue(
+            all(
+                len(set(profile.post.platform_posts.values_list("scheduled_at", flat=True))) == 1
+                for profile in ContentPerformanceProfile.objects.filter(
+                    source_submission_id__in=[first.id, second.id]
+                ).select_related("post")
+            )
+        )
         self.assertTrue(all(item.status == PlatformPost.Status.SCHEDULED for item in platform_posts))
         self.assertTrue(all(item.scheduled_at > timezone.now() for item in platform_posts))
         first.refresh_from_db()
         first_post = ContentPerformanceProfile.objects.get(source_submission=first).post
         self.assertIn("@robinphoto", first_post.caption)
         self.assertEqual(first.metadata["smart_plan"]["mode"], "scheduled")
+        self.assertEqual(
+            set(first.metadata["smart_plan"]["social_account_ids"]),
+            {str(self.waterfalls.id), str(self.general.id)},
+        )
         self.assertTrue(first.metadata["studio_post_ids"])
         self.assertEqual(AuditEvent.objects.filter(action="ugc.smart_plan_scheduled").count(), 2)
 
@@ -262,6 +283,21 @@ class ApprovedSmartPlanningTests(TestCase):
         self.assertEqual(planned_ids, {ready.id})
         self.assertNotIn(restricted.id, planned_ids)
 
+        cross_post_plan = build_smart_plan(
+            self.workspace,
+            count=3,
+            account_ids=[str(self.waterfalls.id), str(self.general.id)],
+        )
+        self.assertNotIn(restricted.id, {item["submission"].id for item in cross_post_plan["items"]})
+
+    def test_explicit_empty_account_selection_does_not_fall_back_to_every_account(self):
+        self.create_submission(title="No destination", target="Cummins Falls", likes=50)
+
+        plan = build_smart_plan(self.workspace, count=1, account_ids=[])
+
+        self.assertEqual(plan["items"], [])
+        self.assertIn("select at least one", plan["empty_reason"].lower())
+
     def test_required_approval_creates_timed_drafts_instead_of_bypassing_guard(self):
         submission = self.create_submission(title="Approval safe", target="Rock Island", likes=100)
         self.workspace.approval_workflow_mode = "required_internal"
@@ -278,9 +314,10 @@ class ApprovedSmartPlanningTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         profile = ContentPerformanceProfile.objects.get(source_submission=submission)
-        variant = profile.post.platform_posts.get()
-        self.assertEqual(variant.status, PlatformPost.Status.DRAFT)
-        self.assertIsNone(variant.scheduled_at)
+        variants = list(profile.post.platform_posts.all())
+        self.assertEqual(len(variants), 2)
+        self.assertTrue(all(variant.status == PlatformPost.Status.DRAFT for variant in variants))
+        self.assertTrue(all(variant.scheduled_at is None for variant in variants))
         self.assertIsNotNone(profile.post.proposed_publish_at)
         submission.refresh_from_db()
         self.assertEqual(submission.metadata["smart_plan"]["mode"], "approval_draft")

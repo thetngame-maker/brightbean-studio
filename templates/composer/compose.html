@@ -351,6 +351,14 @@
                     {% empty %}
                     <span class="text-xs text-stone-400">No accounts connected</span>
                     {% endfor %}
+                    {% if account_scope %}
+                    <a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=post.id %}"
+                       class="acct-pill text-sm font-semibold text-orange-600 no-underline"
+                       aria-label="Add or manage accounts for this post">
+                        <span class="w-7 h-7 rounded-full bg-orange-50 flex items-center justify-center text-lg">+</span>
+                        <span>Add or manage accounts</span>
+                    </a>
+                    {% endif %}
                 </div>
 
                 {% if composer_publish_guard.is_ugc %}

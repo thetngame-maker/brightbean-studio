@@ -43,6 +43,16 @@ def _bounded_capacity(value, default):
     return max(0, min(MAX_DAILY_LIMIT, parsed))
 
 
+def _row_account_ids(row):
+    """Return the signed destination list, accepting legacy single-account plans."""
+    values = row.get("account_ids")
+    if not isinstance(values, (list, tuple)):
+        values = [row.get("account_id")]
+    lead_id = row.get("account_id")
+    ordered = [lead_id, *values] if lead_id else list(values)
+    return list(dict.fromkeys(str(value) for value in ordered if value))
+
+
 def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
     if str(payload.get("workspace_id")) != str(workspace.id):
         raise SmartPlanError("This plan belongs to another workspace.")
@@ -74,12 +84,13 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
             .filter(workspace=workspace, id__in=[row.get("submission_id") for row in raw_items])
             .select_related("creator", "media_asset", "rights_passport")
         }
+        planned_account_ids = {account_id for row in raw_items for account_id in _row_account_ids(row)}
         accounts = {
             str(item.id): item
             for item in SocialAccount.objects.select_for_update(of=("self",)).filter(
                 workspace=workspace,
                 connection_status=SocialAccount.ConnectionStatus.CONNECTED,
-                id__in=[row.get("account_id") for row in raw_items],
+                id__in=planned_account_ids,
             )
         }
         existing_daily_counts = defaultdict(int)
@@ -88,26 +99,42 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
             slot_dates = [_parse_slot(row.get("scheduled_at")).astimezone(workspace_tz).date() for row in raw_items]
             window_start = datetime.combine(min(slot_dates), time.min, tzinfo=workspace_tz)
             window_end = datetime.combine(max(slot_dates) + timedelta(days=1), time.min, tzinfo=workspace_tz)
-            for scheduled_at in PlatformPost.objects.filter(
+            seen_existing = set()
+            for post_id, scheduled_at in PlatformPost.objects.filter(
                 social_account_id__in=accounts,
                 scheduled_at__gte=window_start,
                 scheduled_at__lt=window_end,
-            ).values_list("scheduled_at", flat=True):
-                existing_daily_counts[scheduled_at.astimezone(workspace_tz).date()] += 1
-            for proposed_at in PlatformPost.objects.filter(
+            ).values_list("post_id", "scheduled_at"):
+                local_date = scheduled_at.astimezone(workspace_tz).date()
+                key = (post_id, local_date)
+                if key not in seen_existing:
+                    existing_daily_counts[local_date] += 1
+                    seen_existing.add(key)
+            for post_id, proposed_at in PlatformPost.objects.filter(
                 social_account_id__in=accounts,
                 scheduled_at__isnull=True,
                 post__proposed_publish_at__gte=window_start,
                 post__proposed_publish_at__lt=window_end,
-            ).values_list("post__proposed_publish_at", flat=True):
-                existing_daily_counts[proposed_at.astimezone(workspace_tz).date()] += 1
+            ).values_list("post_id", "post__proposed_publish_at"):
+                local_date = proposed_at.astimezone(workspace_tz).date()
+                key = (post_id, local_date)
+                if key not in seen_existing:
+                    existing_daily_counts[local_date] += 1
+                    seen_existing.add(key)
 
         for row in raw_items:
             submission = submissions.get(str(row.get("submission_id")))
             account = accounts.get(str(row.get("account_id")))
+            destination_ids = _row_account_ids(row)
+            destinations = [accounts.get(account_id) for account_id in destination_ids]
             slot_at = _parse_slot(row.get("scheduled_at"))
 
-            if submission is None or account is None:
+            if (
+                submission is None
+                or account is None
+                or not destinations
+                or any(item is None for item in destinations)
+            ):
                 raise SmartPlanError("A planned content item or account is no longer available.")
             if slot_at <= now + timedelta(minutes=15) or slot_at > now + timedelta(days=PLAN_LOOKAHEAD_DAYS + 1):
                 raise SmartPlanError("A planned time is no longer available. Refresh the plan.")
@@ -116,29 +143,31 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
             if not submission.consent_confirmed or _quality_for(submission)["needs_check"]:
                 raise SmartPlanError("One of these community items now needs a rights or quality check.")
 
-            allowed, error = account_rights(submission, account)
-            if not allowed:
-                raise SmartPlanError(error)
-            if not _media_works_for_account(submission, account):
-                raise SmartPlanError(f"{account.display_label} requires media for this planned post.")
+            captions = {}
+            override = (caption_overrides or {}).get(str(submission.id))
+            for destination in destinations:
+                allowed, error = account_rights(submission, destination)
+                if not allowed:
+                    raise SmartPlanError(error)
+                if not _media_works_for_account(submission, destination):
+                    raise SmartPlanError(f"{destination.display_label} requires media for this planned post.")
+                captions[str(destination.id)] = _caption_for_account(
+                    submission, destination, lead_override=override
+                )
             local_date = slot_at.astimezone(workspace_tz).date()
             capacity = date_limits.get(local_date.isoformat(), daily_limit)
             if enforce_capacity and existing_daily_counts[local_date] + planned_daily_counts[local_date] >= capacity:
                 raise SmartPlanError(
                     "A selected date just reached its posting limit. Refresh the plan to use the next opening."
                 )
-            if (
-                direct_schedule
-                and PlatformPost.objects.filter(
-                    social_account=account,
-                    scheduled_at__gte=slot_at - timedelta(minutes=29),
-                    scheduled_at__lte=slot_at + timedelta(minutes=29),
-                ).exists()
-            ):
+            if direct_schedule and PlatformPost.objects.filter(
+                social_account__in=destinations,
+                scheduled_at__gte=slot_at - timedelta(minutes=29),
+                scheduled_at__lte=slot_at + timedelta(minutes=29),
+            ).exists():
                 raise SmartPlanError("A planned time was just filled. Refresh the plan to use the next opening.")
 
-            override = (caption_overrides or {}).get(str(submission.id))
-            caption = _caption_for_account(submission, account, lead_override=override)
+            caption = captions[str(account.id)]
             provenance = get_provenance(submission.metadata)
             passport = submission.rights_passport
             reason = str(row.get("reason") or "Smart Plan recommendation")[:500]
@@ -147,7 +176,7 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 f"UGC submission: {submission.id}",
                 f"Target: {submission.target_type}:{submission.target_id}",
                 f"Target name: {submission.target_label}",
-                f"Social account: {account.display_label}",
+                "Social accounts: " + ", ".join(destination.display_label for destination in destinations),
                 f"Planning evidence: {reason}",
                 f"Rights passport: {passport.id}",
                 f"Rights scopes: {', '.join(passport.scope_labels) or 'None'}",
@@ -169,6 +198,17 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 author=actor,
                 status="scheduled" if direct_schedule else "draft",
             )
+            for destination in destinations:
+                if destination.id == account.id:
+                    continue
+                destination_caption = captions[str(destination.id)]
+                PlatformPost.objects.create(
+                    post=post,
+                    social_account=destination,
+                    status=PlatformPost.Status.SCHEDULED if direct_schedule else PlatformPost.Status.DRAFT,
+                    scheduled_at=slot_at if direct_schedule else None,
+                    platform_specific_caption=destination_caption if destination_caption != caption else None,
+                )
             planned_daily_counts[local_date] += 1
             ContentPerformanceProfile.objects.create(
                 workspace=workspace,
@@ -193,6 +233,7 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
             metadata["smart_plan"] = {
                 "post_id": str(post.id),
                 "social_account_id": str(account.id),
+                "social_account_ids": destination_ids,
                 "planned_for": slot_at.isoformat(),
                 "committed_at": now.isoformat(),
                 "mode": "scheduled" if direct_schedule else "approval_draft",
@@ -207,6 +248,7 @@ def commit_smart_plan(workspace, payload, *, actor, caption_overrides=None):
                 metadata={
                     "post_id": str(post.id),
                     "social_account_id": str(account.id),
+                    "social_account_ids": destination_ids,
                     "planned_for": slot_at.isoformat(),
                     "rights_passport_id": str(passport.id),
                     "reason": reason,
