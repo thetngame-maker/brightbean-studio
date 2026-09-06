@@ -10,7 +10,9 @@ class CommonConfig(AppConfig):
         from django.db.models.signals import post_migrate
 
         from apps.common import ugc_creator_signals  # noqa: F401
+        from apps.common.ugc_media_repair import install_missing_file_recovery
 
+        install_missing_file_recovery()
         post_migrate.connect(self._register_tasks, sender=self)
 
     @staticmethod
