@@ -403,15 +403,15 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
     the composer can attach the complete carousel to the new Post.
     """
     discovery = _discovery_import(submission)
-    product_type = str(discovery.get("instagram_product_type") or "").lower()
+    metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
+    provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
+    source_url = str(provenance.get("source_url") or submission.target_url or "").strip()
+    is_instagram = str(provenance.get("platform") or "").lower() == "instagram" or "instagram.com/" in source_url.lower()
     try:
         known_count = int(discovery.get("media_count") or 0)
     except (TypeError, ValueError):
         known_count = 0
-    if known_count <= 1 and any(token in product_type for token in ("sidecar", "carousel")):
-        metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
-        provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
-        source_url = str(provenance.get("source_url") or submission.target_url or "").strip()
+    if known_count <= 1 and is_instagram:
         try:
             from .ugc_discovery_providers import fetch_instagram_post_details
 
@@ -420,11 +420,15 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
             logger.info("Could not refresh Instagram gallery %s: %s", submission.id, exc)
             refreshed = None
         refreshed_items = refreshed.get("media_items") if isinstance(refreshed, dict) else None
-        if isinstance(refreshed_items, list) and len(refreshed_items) > 1:
+        if isinstance(refreshed_items, list) and refreshed_items:
             updated_metadata = dict(metadata)
             discovery = dict(discovery)
             discovery["media_items"] = refreshed_items[:20]
             discovery["media_count"] = len(discovery["media_items"])
+            discovery["media_url"] = refreshed.get("media_url") or discovery.get("media_url") or ""
+            discovery["media_type"] = refreshed.get("media_type") or discovery.get("media_type") or "image"
+            discovery["thumbnail_url"] = refreshed.get("thumbnail_url") or discovery.get("thumbnail_url") or ""
+            discovery["instagram_product_type"] = refreshed.get("instagram_product_type") or discovery.get("instagram_product_type") or ""
             updated_metadata["discovery_import"] = discovery
             submission.metadata = updated_metadata
             submission.save(update_fields=["metadata", "updated_at"])
@@ -468,8 +472,15 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
             if ok and submission.media_asset_id:
                 assets.append(submission.media_asset)
     finally:
-        submission.media_asset = original_asset
-        submission.metadata = original_metadata
+        final_asset = original_asset or (assets[0] if assets else None)
+        final_metadata = dict(original_metadata)
+        if final_asset is not None:
+            final_discovery = dict(final_metadata.get("discovery_import") or {})
+            final_discovery["media_asset_id"] = str(final_asset.id)
+            final_discovery["media_capture_status"] = "captured"
+            final_metadata["discovery_import"] = final_discovery
+        submission.media_asset = final_asset
+        submission.metadata = final_metadata
         submission.save(update_fields=["media_asset", "metadata", "updated_at"])
     return assets
 
