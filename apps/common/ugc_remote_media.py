@@ -395,6 +395,59 @@ def capture_submission_image(submission: UGCSubmission) -> tuple[bool, str]:
     return capture_submission_media(submission)
 
 
+def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
+    """Ensure every normalized Instagram sidecar item has a durable asset.
+
+    The submission keeps the primary asset for moderation and provenance. Child
+    assets are captured through the same validated downloader, then returned so
+    the composer can attach the complete carousel to the new Post.
+    """
+    discovery = _discovery_import(submission)
+    raw_items = discovery.get("media_items") if isinstance(discovery.get("media_items"), list) else []
+    if not raw_items and discovery.get("media_url"):
+        raw_items = [
+            {
+                "media_type": discovery.get("media_type") or "image",
+                "media_url": discovery.get("media_url"),
+                "thumbnail_url": discovery.get("thumbnail_url") or "",
+            }
+        ]
+    original_asset = submission.media_asset
+    original_metadata = dict(submission.metadata or {})
+    assets = [original_asset] if original_asset else []
+    seen_urls = {str(discovery.get("media_url") or "")} if original_asset else set()
+    try:
+        for item in raw_items[:20]:
+            if not isinstance(item, dict):
+                continue
+            source_url = str(item.get("media_url") or "").strip()
+            if not source_url or source_url in seen_urls:
+                continue
+            seen_urls.add(source_url)
+            child_metadata = dict(original_metadata)
+            child_discovery = dict(discovery)
+            child_discovery.update(
+                {
+                    "media_url": source_url,
+                    "media_type": "video" if str(item.get("media_type")) == "video" else "image",
+                    "thumbnail_url": str(item.get("thumbnail_url") or ""),
+                    "media_capture_status": "queued",
+                }
+            )
+            child_metadata["discovery_import"] = child_discovery
+            submission.media_asset = None
+            submission.metadata = child_metadata
+            submission.save(update_fields=["media_asset", "metadata", "updated_at"])
+            ok, _status = capture_submission_media(submission)
+            if ok and submission.media_asset_id:
+                assets.append(submission.media_asset)
+    finally:
+        submission.media_asset = original_asset
+        submission.metadata = original_metadata
+        submission.save(update_fields=["media_asset", "metadata", "updated_at"])
+    return assets
+
+
 @background(schedule=0)
 def capture_discovered_media(submission_id):
     """Background wrapper used after discovery ingestion."""

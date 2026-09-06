@@ -61,6 +61,33 @@ class UGCDiscoveryProviderTests(SimpleTestCase):
         self.assertEqual(item["comment_count"], 14)
         self.assertEqual(item["view_count"], 987)
 
+    def test_apify_instagram_carousel_preserves_all_media_items(self):
+        item = _normalize_apify_instagram_row(
+            {
+                "id": "carousel-1",
+                "shortCode": "CAROUSEL1",
+                "url": "https://www.instagram.com/p/CAROUSEL1/",
+                "caption": "Three falls",
+                "displayUrl": "https://example.com/one.jpg",
+                "type": "Sidecar",
+                "childPosts": [
+                    {"displayUrl": "https://example.com/two.jpg"},
+                    {"displayUrl": "https://example.com/three.jpg"},
+                ],
+            },
+            {"query": "#waterfalls", "name": "Tennessee Waterfalls"},
+        )
+
+        self.assertEqual(item["media_count"], 3)
+        self.assertEqual(
+            [entry["media_url"] for entry in item["media_items"]],
+            [
+                "https://example.com/one.jpg",
+                "https://example.com/two.jpg",
+                "https://example.com/three.jpg",
+            ],
+        )
+
     def test_mock_provider_still_fails_closed_for_unattended_runs(self):
         with self.assertRaises(DiscoveryProviderError):
             fetch_discovery_results(

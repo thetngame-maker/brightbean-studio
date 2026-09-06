@@ -264,6 +264,33 @@ def _instagram_media_details(row: dict) -> tuple[str, str, str]:
     return "image", thumbnail_url, thumbnail_url
 
 
+def _instagram_media_items(row: dict) -> list[dict]:
+    """Normalize the primary asset plus Instagram sidecar/carousel children."""
+    media_type, media_url, thumbnail_url = _instagram_media_details(row)
+    items = []
+    if media_url:
+        items.append({"media_type": media_type, "media_url": media_url, "thumbnail_url": thumbnail_url})
+    child_values = []
+    for key in ("childPosts", "children", "carouselMedia", "sidecarMedia", "images"):
+        value = row.get(key)
+        if isinstance(value, list):
+            child_values.extend(value)
+        elif isinstance(value, dict) and isinstance(value.get("edges"), list):
+            child_values.extend(edge.get("node") for edge in value["edges"] if isinstance(edge, dict))
+    edges = row.get("edgeSidecarToChildren")
+    if isinstance(edges, dict) and isinstance(edges.get("edges"), list):
+        child_values.extend(edge.get("node") for edge in edges["edges"] if isinstance(edge, dict))
+    seen = {media_url}
+    for child in child_values:
+        if not isinstance(child, dict):
+            continue
+        child_type, child_url, child_thumb = _instagram_media_details(child)
+        if child_url and child_url not in seen:
+            items.append({"media_type": child_type, "media_url": child_url, "thumbnail_url": child_thumb})
+            seen.add(child_url)
+    return items[:20]
+
+
 def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:
     if not isinstance(row, dict) or row.get("error"):
         return None
@@ -299,6 +326,7 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         return None
 
     media_type, media_url, thumbnail_url = _instagram_media_details(row)
+    media_items = _instagram_media_items(row)
     external_id = str(_first(row.get("id"), shortcode) or "").strip()
     title = saved_search.get("target_label") or saved_search.get("name") or saved_search.get("query") or "Discovered Instagram post"
     resolved_location_name = saved_search.get("resolved_location_name") or ""
@@ -319,6 +347,8 @@ def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None
         "media_type": media_type,
         "media_url": media_url,
         "thumbnail_url": thumbnail_url,
+        "media_items": media_items,
+        "media_count": len(media_items),
         "instagram_product_type": str(_first(row.get("productType"), row.get("product_type"), row.get("type")) or "").strip(),
         "like_count": _first(row.get("likesCount"), row.get("likeCount"), row.get("likes")),
         "comment_count": _first(row.get("commentsCount"), row.get("commentCount"), row.get("comments")),

@@ -111,6 +111,24 @@ def _discovery_metadata(raw: dict, media_asset=None) -> dict:
     if media_type not in {"image", "video"}:
         media_type = "image"
     media_url = _text(raw.get("media_url") or raw.get("display_url"), 2000)
+    raw_items = raw.get("media_items") if isinstance(raw.get("media_items"), list) else []
+    media_items = []
+    for item in raw_items[:20]:
+        if not isinstance(item, dict):
+            continue
+        item_url = _text(item.get("media_url") or item.get("url"), 2000)
+        if not item_url or item_url in {row.get("media_url") for row in media_items}:
+            continue
+        item_type = _text(item.get("media_type") or "image", 20).lower()
+        media_items.append(
+            {
+                "media_type": item_type if item_type in {"image", "video"} else "image",
+                "media_url": item_url,
+                "thumbnail_url": _text(item.get("thumbnail_url"), 2000),
+            }
+        )
+    if media_url and not media_items:
+        media_items = [{"media_type": media_type, "media_url": media_url, "thumbnail_url": _text(raw.get("thumbnail_url"), 2000)}]
     discovery_method = _text(raw.get("discovery_method"), 30).lower()
     if discovery_method not in {"keyword", "hashtag", "location", "account"}:
         discovery_method = ""
@@ -118,6 +136,8 @@ def _discovery_metadata(raw: dict, media_asset=None) -> dict:
         "media_type": media_type,
         "media_url": media_url,
         "thumbnail_url": _text(raw.get("thumbnail_url"), 2000),
+        "media_items": media_items,
+        "media_count": len(media_items),
         "instagram_product_type": _text(raw.get("instagram_product_type"), 100),
         "discovery_method": discovery_method,
         "media_capture_status": "queued" if media_url and media_asset is None else "",
@@ -156,6 +176,13 @@ def _upgrade_duplicate_media(submission: UGCSubmission, raw: dict) -> bool:
     ):
         if incoming.get(key) not in (None, ""):
             discovery[key] = incoming.get(key)
+
+    # Preserve the complete Instagram carousel when a duplicate discovery row
+    # is enriched by a later provider run.
+    incoming_items = incoming.get("media_items")
+    if isinstance(incoming_items, list) and incoming_items:
+        discovery["media_items"] = incoming_items[:20]
+        discovery["media_count"] = len(discovery["media_items"])
 
     incoming_type = incoming.get("media_type") or "image"
     incoming_url = incoming.get("media_url") or ""
