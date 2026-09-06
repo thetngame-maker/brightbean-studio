@@ -29,6 +29,7 @@ from .ugc import moderate_submission, resolve_report
 from .ugc_creator_services import rights_can_use
 from .ugc_permissions import GRANTED, VALID_PERMISSION_STATUSES, set_permission
 from .ugc_provenance import build_provenance, get_provenance, set_provenance
+from .ugc_remote_media import capture_submission_gallery
 
 VALID_TABS = {"discovered", "pending", "approved", "reported", "removed"}
 
@@ -433,6 +434,7 @@ def use_in_post_view(request, workspace_id, submission_id):
     if passport.credit_required and passport.credit_text:
         source_bits.append(f"Required credit: {passport.credit_text}")
 
+    gallery_assets = capture_submission_gallery(submission)
     post = Post.objects.create(
         workspace=workspace,
         author=request.user,
@@ -454,12 +456,12 @@ def use_in_post_view(request, workspace_id, submission_id):
         updated_by=request.user,
     )
 
-    if submission.media_asset_id:
+    for position, media_asset in enumerate(gallery_assets):
         PostMedia.objects.create(
             post=post,
-            media_asset=submission.media_asset,
-            position=0,
-            alt_text=getattr(submission.media_asset, "alt_text", "") or submission.title or submission.target_label,
+            media_asset=media_asset,
+            position=position,
+            alt_text=getattr(media_asset, "alt_text", "") or submission.title or submission.target_label,
         )
 
     post_ids.append(str(post.id))
