@@ -7,7 +7,9 @@ import logging
 from background_task import background
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db.models import Q
 from django.shortcuts import redirect, render
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
 from apps.members.decorators import require_permission
@@ -121,19 +123,21 @@ def repair_one_approved_submission(submission: UGCSubmission) -> tuple[bool, str
 
 
 @background(schedule=0)
-def repair_approved_media_batch(workspace_id: str, after_id: str = ""):
+def repair_approved_media_batch(workspace_id: str, after_submitted_at: str = "", after_id: str = ""):
     qs = (
         UGCSubmission.objects.for_workspace(workspace_id)
         .select_related("media_asset")
         .filter(status=UGCSubmission.Status.APPROVED)
         .order_by("submitted_at", "id")
     )
-    if after_id:
-        previous = qs.filter(id=after_id).first()
-        if previous:
-            qs = qs.filter(submitted_at__gte=previous.submitted_at).exclude(id=previous.id)
 
-    batch = [item for item in qs[: BATCH_SIZE * 3] if _is_instagram(item)][:BATCH_SIZE]
+    cursor_time = parse_datetime(after_submitted_at) if after_submitted_at else None
+    if cursor_time and after_id:
+        qs = qs.filter(Q(submitted_at__gt=cursor_time) | Q(submitted_at=cursor_time, id__gt=after_id))
+
+    # Pull extra rows because Approved can contain non-Instagram submissions.
+    candidates = list(qs[: BATCH_SIZE * 5])
+    batch = [item for item in candidates if _is_instagram(item)][:BATCH_SIZE]
     if not batch:
         return
 
@@ -141,9 +145,12 @@ def repair_approved_media_batch(workspace_id: str, after_id: str = ""):
         repair_one_approved_submission(submission)
 
     last = batch[-1]
-    remaining = qs.filter(submitted_at__gte=last.submitted_at).exclude(id=last.id)
-    if any(_is_instagram(item) for item in remaining[: BATCH_SIZE * 3]):
-        repair_approved_media_batch(str(workspace_id), str(last.id), schedule=2)
+    repair_approved_media_batch(
+        str(workspace_id),
+        last.submitted_at.isoformat(),
+        str(last.id),
+        schedule=2,
+    )
 
 
 @login_required
@@ -158,13 +165,24 @@ def approved_media_repair(request, workspace_id):
         .order_by("-submitted_at")
     )
     instagram = [item for item in approved if _is_instagram(item)]
-    repaired = sum(1 for item in instagram if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "repaired")
-    failed = sum(1 for item in instagram if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "failed")
+    repaired = sum(
+        1
+        for item in instagram
+        if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "repaired"
+    )
+    failed = sum(
+        1
+        for item in instagram
+        if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "failed"
+    )
     missing_primary = sum(1 for item in instagram if not _asset_exists(item))
 
     if request.method == "POST":
         repair_approved_media_batch(str(workspace.id))
-        messages.success(request, f"Approved media repair queued for {len(instagram)} Instagram items. It will run in batches of {BATCH_SIZE}.")
+        messages.success(
+            request,
+            f"Approved media repair queued for {len(instagram)} Instagram items. It will run in batches of {BATCH_SIZE}.",
+        )
         return redirect("ugc:approved_media_repair", workspace_id=workspace.id)
 
     return render(
