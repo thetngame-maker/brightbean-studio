@@ -4,6 +4,7 @@ from . import (
     campaign_attribution_views,
     tourism_guard_views,
     tourism_impact_views,
+    ugc_approved_media_repair,
     ugc_bulk_permission_views,
     ugc_content_mission_views,
     ugc_coverage_views,
@@ -112,6 +113,7 @@ urlpatterns = [
     ),
     path("learning/", ugc_performance_learning_views.performance_learning, name="performance_learning"),
     path("approved/smart-plan/", ugc_smart_planning_views.approved_smart_plan, name="approved_smart_plan"),
+    path("approved/media-repair/", ugc_approved_media_repair.approved_media_repair, name="approved_media_repair"),
     path(
         "learning/<uuid:platform_post_id>/update/",
         ugc_performance_learning_views.update_performance_profile,
