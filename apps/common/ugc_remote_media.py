@@ -411,7 +411,11 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
         known_count = int(discovery.get("media_count") or 0)
     except (TypeError, ValueError):
         known_count = 0
-    if known_count <= 1 and is_instagram:
+    # Instagram CDN URLs are short-lived. If the submission has no durable
+    # MediaAsset yet, refresh the post details even when discovery already knew
+    # it was a multi-item carousel; otherwise stale sidecar URLs create an empty
+    # composer gallery and broken moderation preview.
+    if (known_count <= 1 or not submission.media_asset_id) and is_instagram:
         try:
             from .ugc_discovery_providers import fetch_instagram_post_details
 
