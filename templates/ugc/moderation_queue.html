@@ -18,6 +18,7 @@
         <div class="flex flex-wrap items-center justify-end gap-2">
             {% if active_tab == 'approved' %}
             <a href="{% url 'ugc:approved_smart_plan' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 shadow-sm"><span aria-hidden="true">✨</span> Plan approved posts</a>
+            <a href="{% url 'ugc:approved_media_repair' workspace_id=workspace.id %}" class="inline-flex items-center gap-1.5 h-9 px-3.5 rounded-lg bg-violet-600 text-white text-xs font-semibold hover:bg-violet-700 shadow-sm"><span aria-hidden="true">🛠</span> Repair Approved Media</a>
             {% endif %}
             <a href="{% url 'ugc:creator_hub' workspace_id=workspace.id %}" class="inline-flex items-center h-9 px-3.5 rounded-lg border border-stone-200 bg-white text-violet-700 text-xs font-semibold hover:bg-violet-50">Creators</a>
             {% if active_tab == 'discovered' %}
