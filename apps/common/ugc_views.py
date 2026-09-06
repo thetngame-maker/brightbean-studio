@@ -36,7 +36,7 @@ VALID_TABS = {"discovered", "pending", "approved", "reported", "removed"}
 
 def _attach_gallery_media(post, submission, media_assets):
     """Attach missing carousel assets while preserving the existing order."""
-    existing = list(post.media_items.order_by("position"))
+    existing = list(post.media_attachments.order_by("position"))
     existing_ids = {item.media_asset_id for item in existing}
     next_position = max((item.position for item in existing), default=-1) + 1
     for media_asset in media_assets:

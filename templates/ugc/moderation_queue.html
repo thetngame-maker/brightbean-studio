@@ -115,6 +115,18 @@
                 <div class="p-6 text-xs text-stone-500 text-center">{{ submission.media_asset.filename }}</div>
                 {% endif %}
             </div>
+            {% elif submission.metadata.discovery_import.thumbnail_url %}
+            <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
+                <button type="button" class="ugc-preview-trigger block w-full relative cursor-zoom-in" data-preview-src="{{ submission.metadata.discovery_import.thumbnail_url }}" data-preview-title="{{ submission.title|default:submission.target_label|default:'Community submission' }}" data-preview-contributor="{% if submission.contributor_handle %}@{{ submission.contributor_handle }}{% else %}{{ submission.contributor_name|default:'Community contributor' }}{% endif %}" aria-label="Preview {{ submission.title|default:submission.target_label|default:'community submission' }}">
+                    <img src="{{ submission.metadata.discovery_import.thumbnail_url }}" alt="{{ submission.title|default:submission.target_label }}" class="w-full h-full object-cover" style="height: 220px;" loading="lazy" decoding="async">
+                </button>
+            </div>
+            {% elif submission.metadata.discovery_import.media_type == 'image' and submission.metadata.discovery_import.media_url %}
+            <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
+                <button type="button" class="ugc-preview-trigger block w-full relative cursor-zoom-in" data-preview-src="{{ submission.metadata.discovery_import.media_url }}" data-preview-title="{{ submission.title|default:submission.target_label|default:'Community submission' }}" data-preview-contributor="{% if submission.contributor_handle %}@{{ submission.contributor_handle }}{% else %}{{ submission.contributor_name|default:'Community contributor' }}{% endif %}" aria-label="Preview {{ submission.title|default:submission.target_label|default:'community submission' }}">
+                    <img src="{{ submission.metadata.discovery_import.media_url }}" alt="{{ submission.title|default:submission.target_label }}" class="w-full h-full object-cover" style="height: 220px;" loading="lazy" decoding="async">
+                </button>
+            </div>
             {% endif %}
 
             <div class="p-3.5 flex flex-col flex-1 min-w-0">

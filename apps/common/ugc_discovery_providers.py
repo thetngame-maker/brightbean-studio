@@ -217,6 +217,7 @@ def resolve_instagram_location_candidates(query: str, limit: int = 8) -> list[di
 def _instagram_media_details(row: dict) -> tuple[str, str, str]:
     """Return (media_type, primary_media_url, thumbnail_url)."""
     image = row.get("image") if isinstance(row.get("image"), dict) else {}
+    image_url_scalar = row.get("image") if isinstance(row.get("image"), str) else ""
     video = row.get("video") if isinstance(row.get("video"), dict) else {}
     images = row.get("images") if isinstance(row.get("images"), list) else []
     first_image = images[0] if images and isinstance(images[0], dict) else {}
@@ -238,6 +239,7 @@ def _instagram_media_details(row: dict) -> tuple[str, str, str]:
             row.get("imageUrl"),
             row.get("image_url"),
             image.get("url"),
+            image_url_scalar,
             first_image.get("url"),
             first_image_url,
             row.get("thumbnailUrl"),

@@ -117,6 +117,20 @@ class UGCDiscoveryProviderTests(SimpleTestCase):
             ],
         )
 
+    def test_apify_location_result_accepts_scalar_image_url(self):
+        item = _normalize_apify_instagram_row(
+            {
+                "id": "location-image",
+                "code": "LOCATION1",
+                "username": "tn_hiker",
+                "image": "https://example.com/location.jpg",
+            },
+            {"query": "Greeter Falls", "name": "Greeter Falls"},
+        )
+
+        self.assertEqual(item["media_url"], "https://example.com/location.jpg")
+        self.assertEqual(item["thumbnail_url"], "https://example.com/location.jpg")
+
     def test_mock_provider_still_fails_closed_for_unattended_runs(self):
         with self.assertRaises(DiscoveryProviderError):
             fetch_discovery_results(
