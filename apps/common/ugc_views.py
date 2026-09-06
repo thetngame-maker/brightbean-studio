@@ -34,6 +34,24 @@ from .ugc_remote_media import capture_submission_gallery
 VALID_TABS = {"discovered", "pending", "approved", "reported", "removed"}
 
 
+def _attach_gallery_media(post, submission, media_assets):
+    """Attach missing carousel assets while preserving the existing order."""
+    existing = list(post.media_items.order_by("position"))
+    existing_ids = {item.media_asset_id for item in existing}
+    next_position = max((item.position for item in existing), default=-1) + 1
+    for media_asset in media_assets:
+        if media_asset.id in existing_ids:
+            continue
+        PostMedia.objects.create(
+            post=post,
+            media_asset=media_asset,
+            position=next_position,
+            alt_text=getattr(media_asset, "alt_text", "") or submission.title or submission.target_label,
+        )
+        existing_ids.add(media_asset.id)
+        next_position += 1
+
+
 def _get_workspace(request, workspace_id):
     workspace = get_object_or_404(Workspace, id=workspace_id)
     if not request.user.is_authenticated:
@@ -412,6 +430,8 @@ def use_in_post_view(request, workspace_id, submission_id):
     if post_ids and not allow_duplicate:
         existing_post = Post.objects.filter(workspace=workspace, id=post_ids[-1]).first()
         if existing_post:
+            gallery_assets = capture_submission_gallery(submission)
+            _attach_gallery_media(existing_post, submission, gallery_assets)
             messages.info(request, "This community item already has a draft. Opening the latest draft instead.")
             return redirect("composer:compose_edit", workspace_id=workspace.id, post_id=existing_post.id)
 
@@ -456,13 +476,7 @@ def use_in_post_view(request, workspace_id, submission_id):
         updated_by=request.user,
     )
 
-    for position, media_asset in enumerate(gallery_assets):
-        PostMedia.objects.create(
-            post=post,
-            media_asset=media_asset,
-            position=position,
-            alt_text=getattr(media_asset, "alt_text", "") or submission.title or submission.target_label,
-        )
+    _attach_gallery_media(post, submission, gallery_assets)
 
     post_ids.append(str(post.id))
     metadata["studio_post_ids"] = post_ids[-20:]

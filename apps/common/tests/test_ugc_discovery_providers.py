@@ -88,6 +88,35 @@ class UGCDiscoveryProviderTests(SimpleTestCase):
             ],
         )
 
+    def test_apify_instagram_carousel_accepts_url_string_arrays(self):
+        item = _normalize_apify_instagram_row(
+            {
+                "id": "carousel-strings",
+                "shortCode": "CAROUSEL2",
+                "url": "https://www.instagram.com/p/CAROUSEL2/",
+                "caption": "Greeter Falls gallery",
+                "type": "Sidecar",
+                "ownerUsername": "hikingviking_official",
+                "displayUrl": "https://example.com/one.jpg",
+                "carouselImages": [
+                    "https://example.com/one.jpg",
+                    "https://example.com/two.jpg",
+                    "https://example.com/three.jpg",
+                ],
+            },
+            {"query": "#greeterfalls", "name": "Tennessee Waterfalls"},
+        )
+
+        self.assertEqual(item["media_count"], 3)
+        self.assertEqual(
+            [entry["media_url"] for entry in item["media_items"]],
+            [
+                "https://example.com/one.jpg",
+                "https://example.com/two.jpg",
+                "https://example.com/three.jpg",
+            ],
+        )
+
     def test_mock_provider_still_fails_closed_for_unattended_runs(self):
         with self.assertRaises(DiscoveryProviderError):
             fetch_discovery_results(

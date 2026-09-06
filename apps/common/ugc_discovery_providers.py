@@ -220,6 +220,7 @@ def _instagram_media_details(row: dict) -> tuple[str, str, str]:
     video = row.get("video") if isinstance(row.get("video"), dict) else {}
     images = row.get("images") if isinstance(row.get("images"), list) else []
     first_image = images[0] if images and isinstance(images[0], dict) else {}
+    first_image_url = images[0] if images and isinstance(images[0], str) else ""
 
     video_url = str(
         _first(
@@ -238,6 +239,7 @@ def _instagram_media_details(row: dict) -> tuple[str, str, str]:
             row.get("image_url"),
             image.get("url"),
             first_image.get("url"),
+            first_image_url,
             row.get("thumbnailUrl"),
         )
         or ""
@@ -271,7 +273,15 @@ def _instagram_media_items(row: dict) -> list[dict]:
     if media_url:
         items.append({"media_type": media_type, "media_url": media_url, "thumbnail_url": thumbnail_url})
     child_values = []
-    for key in ("childPosts", "children", "carouselMedia", "sidecarMedia", "images"):
+    for key in (
+        "childPosts",
+        "children",
+        "carouselMedia",
+        "carouselImages",
+        "carousel_media",
+        "sidecarMedia",
+        "images",
+    ):
         value = row.get(key)
         if isinstance(value, list):
             child_values.extend(value)
@@ -282,13 +292,42 @@ def _instagram_media_items(row: dict) -> list[dict]:
         child_values.extend(edge.get("node") for edge in edges["edges"] if isinstance(edge, dict))
     seen = {media_url}
     for child in child_values:
-        if not isinstance(child, dict):
+        if isinstance(child, str):
+            child_type, child_url, child_thumb = "image", child.strip(), child.strip()
+        elif isinstance(child, dict):
+            child_type, child_url, child_thumb = _instagram_media_details(child)
+        else:
             continue
-        child_type, child_url, child_thumb = _instagram_media_details(child)
         if child_url and child_url not in seen:
             items.append({"media_type": child_type, "media_url": child_url, "thumbnail_url": child_thumb})
             seen.add(child_url)
     return items[:20]
+
+
+def fetch_instagram_post_details(source_url: str) -> dict | None:
+    """Fetch one post directly so legacy carousel rows can be repaired on use."""
+    source_url = str(source_url or "").strip()
+    if not source_url or "instagram.com/" not in source_url.lower():
+        return None
+    actor_id = (
+        os.getenv("APIFY_INSTAGRAM_ACTOR", DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR).strip()
+        or DEFAULT_APIFY_INSTAGRAM_GENERAL_ACTOR
+    )
+    payload = _apify_sync(
+        actor_id,
+        {
+            "directUrls": [source_url],
+            "resultsType": "posts",
+            "resultsLimit": 1,
+            "addParentData": True,
+        },
+        max_items=1,
+        timeout=90,
+    )
+    return _normalize_apify_instagram_row(
+        payload[0],
+        {"query": "Instagram post", "name": "Instagram post"},
+    ) if payload else None
 
 
 def _normalize_apify_instagram_row(row: dict, saved_search: dict) -> dict | None:

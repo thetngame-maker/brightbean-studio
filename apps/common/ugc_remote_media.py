@@ -403,6 +403,31 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
     the composer can attach the complete carousel to the new Post.
     """
     discovery = _discovery_import(submission)
+    product_type = str(discovery.get("instagram_product_type") or "").lower()
+    try:
+        known_count = int(discovery.get("media_count") or 0)
+    except (TypeError, ValueError):
+        known_count = 0
+    if known_count <= 1 and any(token in product_type for token in ("sidecar", "carousel")):
+        metadata = submission.metadata if isinstance(submission.metadata, dict) else {}
+        provenance = metadata.get("provenance") if isinstance(metadata.get("provenance"), dict) else {}
+        source_url = str(provenance.get("source_url") or submission.target_url or "").strip()
+        try:
+            from .ugc_discovery_providers import fetch_instagram_post_details
+
+            refreshed = fetch_instagram_post_details(source_url)
+        except Exception as exc:
+            logger.info("Could not refresh Instagram gallery %s: %s", submission.id, exc)
+            refreshed = None
+        refreshed_items = refreshed.get("media_items") if isinstance(refreshed, dict) else None
+        if isinstance(refreshed_items, list) and len(refreshed_items) > 1:
+            updated_metadata = dict(metadata)
+            discovery = dict(discovery)
+            discovery["media_items"] = refreshed_items[:20]
+            discovery["media_count"] = len(discovery["media_items"])
+            updated_metadata["discovery_import"] = discovery
+            submission.metadata = updated_metadata
+            submission.save(update_fields=["metadata", "updated_at"])
     raw_items = discovery.get("media_items") if isinstance(discovery.get("media_items"), list) else []
     if not raw_items and discovery.get("media_url"):
         raw_items = [
@@ -416,8 +441,9 @@ def capture_submission_gallery(submission: UGCSubmission) -> list[MediaAsset]:
     original_metadata = dict(submission.metadata or {})
     assets = [original_asset] if original_asset else []
     seen_urls = {str(discovery.get("media_url") or "")} if original_asset else set()
+    items_to_capture = raw_items[1:] if original_asset and raw_items else raw_items
     try:
-        for item in raw_items[:20]:
+        for item in items_to_capture[:20]:
             if not isinstance(item, dict):
                 continue
             source_url = str(item.get("media_url") or "").strip()
