@@ -138,3 +138,13 @@ class UGCDiscoveryProviderTests(SimpleTestCase):
                 provider_name="mock",
                 allow_mock=False,
             )
+
+
+class InstagramDetailRequestTests(SimpleTestCase):
+    @patch("apps.common.ugc_discovery_providers._apify_sync", return_value=[])
+    def test_single_post_refresh_allows_actor_startup_minimum(self, sync):
+        from apps.common.ugc_discovery_providers import fetch_instagram_post_details
+        fetch_instagram_post_details("https://www.instagram.com/p/test/")
+        self.assertEqual(sync.call_args.kwargs["max_items"], 2)
+        self.assertEqual(sync.call_args.args[1]["resultsLimit"], 1)
+        self.assertEqual(len(sync.call_args.args[1]["directUrls"]), 1)

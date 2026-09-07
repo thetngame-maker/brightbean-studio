@@ -323,7 +323,9 @@ def fetch_instagram_post_details(source_url: str) -> dict | None:
             "resultsLimit": 1,
             "addParentData": True,
         },
-        max_items=1,
+        # Apify converts maxItems into a charge ceiling. One item falls below
+        # the actor startup minimum; resultsLimit still restricts this to one post.
+        max_items=2,
         timeout=90,
     )
     return _normalize_apify_instagram_row(
