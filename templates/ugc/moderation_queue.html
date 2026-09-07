@@ -86,11 +86,11 @@
             </select>
             <label for="ugc-sort" class="sr-only">Sort community content</label>
             <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
-                <option value="newest">Newest</option>
-                {% if active_tab == 'approved' %}<option value="engaged">Most engagement</option>{% endif %}
-                <option value="oldest">Oldest</option>
-                <option value="used">Most used</option>
-                <option value="reported">Most reported</option>
+                <option value="newest" {% if active_sort == "newest" %}selected{% endif %}>Newest</option>
+                {% if active_tab == 'approved' %}<option value="engaged" {% if active_sort == "engaged" %}selected{% endif %}>Most engagement</option>{% endif %}
+                <option value="oldest" {% if active_sort == "oldest" %}selected{% endif %}>Oldest</option>
+                <option value="used" {% if active_sort == "used" %}selected{% endif %}>Most used</option>
+                <option value="reported" {% if active_sort == "reported" %}selected{% endif %}>Most reported</option>
             </select>
             <span id="ugc-result-count" class="text-[11px] text-stone-400 whitespace-nowrap"></span>
         </div>
@@ -99,7 +99,16 @@
     {% if submissions %}
     <div id="ugc-card-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
         {% for submission in submissions %}
-        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-likes="{{ submission.metadata.discovery_import.like_count|default:'0' }}" data-comments="{{ submission.metadata.discovery_import.comment_count|default:'0' }}" data-views="{{ submission.metadata.discovery_import.view_count|default:'0' }}" data-usage="{{ submission.metadata|ugc_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
+        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-likes="{{ submission.metadata.discovery_import.like_count|default:'0' }}" data-comments="{{ submission.metadata.discovery_import.comment_count|default:'0' }}" data-views="{{ submission.metadata.discovery_import.view_count|default:'0' }}" data-usage="{{ submission.studio_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
+            {% if active_tab == "approved" %}
+            <div class="ugc-durable-preview relative bg-stone-100 border-b border-stone-200" style="height:220px" data-endpoint="{% url 'ugc:card_preview' workspace_id=workspace.id submission_id=submission.id %}">
+                <button type="button" class="ugc-preview-trigger w-full h-full" data-preview-title="{{ submission.title }}" aria-label="Preview {{ submission.title }}" disabled>
+                    <img class="w-full h-full object-cover" style="height:220px" alt="{{ submission.title }}" hidden>
+                </button>
+                <span class="ugc-preview-state absolute inset-0 flex items-center justify-center text-xs text-stone-500 pointer-events-none">Loading preview…</span>
+            </div>
+
+            {% else %}
             {% if submission.media_asset %}
             <div class="relative bg-stone-100 border-b border-stone-200 overflow-hidden group" style="max-height: 220px;">
                 {% if submission.media_asset.is_image %}
@@ -130,6 +139,7 @@
             </div>
             {% endif %}
 
+            {% endif %}
             <div class="p-3.5 flex flex-col flex-1 min-w-0">
                 <div class="flex items-start justify-between gap-2">
                     <div class="min-w-0">
@@ -137,7 +147,7 @@
                             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-700">{{ submission.get_kind_display }}</span>
                             <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-violet-50 text-violet-700">{{ submission.metadata|ugc_source_label:submission.source }}</span>
                             {% if active_tab == 'discovered' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-violet-100 text-violet-800">Discovered</span>{% elif submission.status == 'pending' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-amber-50 text-amber-700">Pending</span>{% elif submission.status == 'approved' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-emerald-50 text-emerald-700">Approved</span>{% elif submission.status == 'removed' %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">Removed</span>{% else %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-stone-100 text-stone-600">{{ submission.get_status_display }}</span>{% endif %}
-                            {% if submission.metadata|ugc_usage_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-blue-50 text-blue-700">Used {{ submission.metadata|ugc_usage_count }}×</span>{% endif %}
+                            {% if submission.studio_usage_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-blue-50 text-blue-700">Used {{ submission.studio_usage_count }}×</span>{% endif %}
                             {% if submission.open_report_count %}<span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold bg-red-50 text-red-700">{{ submission.open_report_count }} report{{ submission.open_report_count|pluralize }}</span>{% endif %}
                         </div>
                         <h2 class="text-sm font-semibold text-stone-900 truncate">{{ submission.title|default:submission.target_label|default:"Community submission" }}</h2>
@@ -145,6 +155,12 @@
                     </div>
                     {% if submission.rating %}<div class="flex-shrink-0 text-xs font-semibold text-amber-600">★ {{ submission.rating }}/5</div>{% endif %}
                 </div>
+
+                <div class="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-stone-700" aria-label="Original post engagement">
+                    <span>♥ <strong>{{ submission.engagement.likes|default_if_none:"—"|intcomma }}</strong> likes</span>
+                    <span>💬 <strong>{{ submission.engagement.comments|default_if_none:"—"|intcomma }}</strong> comments</span>
+                    {% if submission.engagement.views != None %}<span>{{ submission.engagement.views|intcomma }} views</span>{% endif %}
+                </div><p class="text-[10px] text-stone-400 mt-1">Original post · last imported counts · — means unavailable</p>
 
                 {% if submission.body %}<p class="text-xs text-stone-700 leading-5 mt-3 whitespace-pre-line line-clamp-3">{{ submission.body }}</p>{% endif %}
 
@@ -187,11 +203,17 @@
                 {% endwith %}
                 {% endif %}
 
-                {% if submission.metadata|ugc_usage_count %}
-                {% with latest_post_id=submission.metadata|ugc_latest_post_id usage_count=submission.metadata|ugc_usage_count %}
-                <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-2.5 flex items-center justify-between gap-2 min-w-0"><div class="min-w-0"><div class="text-[11px] font-semibold text-blue-700">Studio usage</div><div class="text-xs text-blue-900 mt-0.5 truncate">Used in {{ usage_count }} post{{ usage_count|pluralize }}.</div></div>{% if latest_post_id %}<a href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=latest_post_id %}" class="text-[11px] font-semibold text-blue-700 hover:text-blue-900 whitespace-nowrap">Open →</a>{% endif %}</div>
-                {% endwith %}
-                {% endif %}
+                <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/60 p-2.5 min-w-0">
+                    <div class="text-[11px] font-semibold text-blue-700">Studio usage · {{ submission.studio_usage_count }} post{{ submission.studio_usage_count|pluralize }}</div>
+                    {% for usage in submission.studio_posts %}
+                    <details class="mt-2 text-xs text-stone-700" open>
+                        <summary class="cursor-pointer font-medium">{{ usage.title }} · {% for account_post in usage.accounts %}{{ account_post.get_status_display }}{% if not forloop.last %}, {% endif %}{% empty %}Draft{% endfor %}</summary>
+                        {% for account_post in usage.accounts %}
+                        <div class="mt-2 flex justify-between gap-2"><span>{{ account_post.social_account.account_name }} · {{ account_post.social_account.get_platform_display }}<br><strong>{{ account_post.get_status_display }}</strong>{% if account_post.status == 'published' %} · {{ account_post.published_at|date:"M j, Y g:i A" }}{% elif account_post.scheduled_at %} · {{ account_post.scheduled_at|date:"M j, Y g:i A" }}{% endif %}</span><a class="text-blue-700" href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=usage.id %}?account={{ account_post.social_account_id }}">Open →</a></div>
+                        {% empty %}<div class="mt-1">Draft · No account selected <a class="text-blue-700" href="{% url 'composer:compose_edit' workspace_id=workspace.id post_id=usage.id %}">Open →</a></div>{% endfor %}
+                    </details>
+                    {% empty %}<p class="text-xs text-stone-500 mt-1">Not used in a Studio post yet.</p>{% endfor %}
+                </div>
 
                 {% if submission.active_reports %}
                 <div class="mt-3 space-y-2">
@@ -202,14 +224,14 @@
                 </div>
                 {% endif %}
 
-                <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3 border-t border-stone-100 {% if not submission.body and not submission.metadata|ugc_usage_count %}mt-3{% else %}mt-4{% endif %}">
+                <div class="flex flex-wrap items-center gap-1.5 mt-auto pt-3 border-t border-stone-100 {% if not submission.body and not submission.studio_usage_count %}mt-3{% else %}mt-4{% endif %}">
                     {% if active_tab == 'discovered' %}
                     <span class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-violet-50 text-violet-700 border border-violet-100">Awaiting permission</span>
                     {% elif submission.status == 'pending' %}
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="approve"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled title="Contributor consent must be recorded before approval"{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Approve</button></form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="reject"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Reject</button></form>
                     {% elif submission.status == 'approved' %}
-                    <form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer"><svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>{% if submission.metadata|ugc_usage_count %}Use again{% else %}Use in post{% endif %}</button></form>
+                    <form method="post" action="{% url 'ugc:use_in_post' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<button class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-semibold rounded-lg text-white bg-orange-500 hover:bg-orange-600 cursor-pointer"><svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5V19M5 12H19"/></svg>{% if submission.studio_usage_count %}Use again{% else %}Use in post{% endif %}</button></form>
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="remove"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button class="px-3 py-1.5 text-xs font-semibold rounded-lg border border-red-200 text-red-700 bg-white hover:bg-red-50 cursor-pointer">Remove</button></form>
                     {% elif submission.status == 'removed' %}
                     <form method="post" action="{% url 'ugc:moderate' workspace_id=workspace.id submission_id=submission.id %}">{% csrf_token %}<input type="hidden" name="action" value="restore"><input type="hidden" name="return_to" value="{{ request.get_full_path }}"><button {% if not submission.consent_confirmed %}disabled{% endif %} class="px-3 py-1.5 text-xs font-semibold rounded-lg text-white {% if submission.consent_confirmed %}bg-emerald-600 hover:bg-emerald-700 cursor-pointer{% else %}bg-stone-300 cursor-not-allowed{% endif %}">Restore</button></form>
@@ -233,7 +255,7 @@
             <div class="min-w-0"><div class="flex items-center gap-2 min-w-0"><div id="ugc-preview-title" class="text-sm font-semibold truncate">Media preview</div><span id="ugc-preview-counter" class="text-[11px] text-stone-400 whitespace-nowrap"></span></div><div id="ugc-preview-contributor" class="text-xs text-stone-400 truncate mt-0.5"></div></div>
             <button id="ugc-preview-close" type="button" class="flex-shrink-0 w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white text-xl leading-none flex items-center justify-center" aria-label="Close preview">×</button>
         </div>
-        <div class="relative min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black"><button id="ugc-preview-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous image">‹</button><img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg"><button id="ugc-preview-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next image">›</button></div>
+        <div class="relative min-h-0 flex-1 flex items-center justify-center p-3 sm:p-5 bg-black"><button id="ugc-preview-prev" type="button" class="hidden sm:flex absolute left-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Previous image">‹</button><video id="ugc-preview-video" controls playsinline hidden style="max-width:100%;max-height:75vh"></video><img id="ugc-preview-image" src="" alt="" class="max-w-full max-h-[calc(100vh-9rem)] object-contain rounded-lg"><button id="ugc-preview-next" type="button" class="hidden sm:flex absolute right-3 z-10 w-10 h-10 items-center justify-center rounded-full bg-black/60 hover:bg-black/80 border border-white/10 text-white text-2xl" aria-label="Next image">›</button></div>
         <div id="ugc-preview-mobile-nav" class="hidden sm:hidden items-center justify-between gap-3 px-4 py-3 border-t border-white/10 bg-stone-950"><button id="ugc-preview-prev-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">← Previous</button><button id="ugc-preview-next-mobile" type="button" class="px-3 py-2 rounded-lg bg-white/10 text-white text-xs font-semibold">Next →</button></div>
     </div>
 </div>
@@ -241,6 +263,7 @@
 
 {% block extra_js %}
 {{ block.super }}
+<script defer src="{% static 'js/ugc-card-previews.js' %}"></script>
 <script nonce="{{ request.csp_nonce }}">
 (function () {
     const search = document.getElementById('ugc-search');
@@ -272,7 +295,7 @@
             search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } });
             search.addEventListener('input', () => { const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); });
             if (source) source.addEventListener('change', refresh);
-            sort.addEventListener('change', refresh);
+            sort.addEventListener('change', () => { const url = new URL(window.location.href); url.searchParams.set('sort', sort.value); window.location.assign(url); });
             clearButton.addEventListener('click', clearSearch);
             if (emptyClear) emptyClear.addEventListener('click', clearFilters);
             refresh();
@@ -294,11 +317,11 @@
     let previousFocus = null;
     let currentTrigger = null;
 
-    function visiblePreviewTriggers() { return Array.from(document.querySelectorAll('.ugc-card:not(.hidden) .ugc-preview-trigger')); }
+    function visiblePreviewTriggers() { return Array.from(document.querySelectorAll('.ugc-card:not(.hidden) .ugc-preview-trigger:not([disabled])')); }
     function updateNavigationState() { const triggers = visiblePreviewTriggers(); const index = currentTrigger ? triggers.indexOf(currentTrigger) : -1; const hasMany = triggers.length > 1; if (previewCounter) previewCounter.textContent = index >= 0 ? `${index + 1} of ${triggers.length}` : ''; [prevButton, nextButton].forEach((button) => { if (button) button.classList.toggle('invisible', !hasMany); }); if (mobileNav) { mobileNav.classList.toggle('hidden', !hasMany); mobileNav.classList.toggle('flex', hasMany); } }
-    function renderPreview(trigger) { if (!trigger || !previewImage) return; currentTrigger = trigger; previewImage.src = trigger.dataset.previewSrc || ''; previewImage.alt = trigger.dataset.previewTitle || 'Community content preview'; previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview'; previewContributor.textContent = trigger.dataset.previewContributor || ''; updateNavigationState(); }
+    function renderPreview(trigger) { if (!trigger || !previewImage) return; currentTrigger = trigger; const video = document.getElementById('ugc-preview-video'); const isVideo = trigger.dataset.previewType === 'video'; video.pause(); video.removeAttribute('src'); video.load(); video.hidden = !isVideo; previewImage.hidden = isVideo; if (isVideo) video.src = trigger.dataset.previewSrc || ''; previewImage.src = isVideo ? '' : (trigger.dataset.previewSrc || ''); previewImage.alt = trigger.dataset.previewTitle || 'Community content preview'; previewTitle.textContent = trigger.dataset.previewTitle || 'Media preview'; previewContributor.textContent = trigger.dataset.previewContributor || ''; updateNavigationState(); }
     function stepPreview(direction) { const triggers = visiblePreviewTriggers(); if (triggers.length < 2) return; let index = triggers.indexOf(currentTrigger); if (index < 0) index = 0; const nextIndex = (index + direction + triggers.length) % triggers.length; renderPreview(triggers[nextIndex]); }
-    function closePreview() { if (!modal || modal.classList.contains('hidden')) return; modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; previewImage.src = ''; currentTrigger = null; if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus(); }
+    function closePreview() { if (!modal || modal.classList.contains('hidden')) return; modal.classList.add('hidden'); modal.classList.remove('flex'); document.body.style.overflow = ''; previewImage.src = ''; const video = document.getElementById('ugc-preview-video'); video.pause(); video.removeAttribute('src'); video.load(); currentTrigger = null; if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus(); }
     function openPreview(trigger) { if (!modal || !previewImage) return; previousFocus = trigger; renderPreview(trigger); modal.classList.remove('hidden'); modal.classList.add('flex'); document.body.style.overflow = 'hidden'; closeButton.focus(); }
 
     document.querySelectorAll('.ugc-preview-trigger').forEach((trigger) => { trigger.addEventListener('click', () => openPreview(trigger)); });
