@@ -32,6 +32,14 @@ class CommonConfig(AppConfig):
             repeat=DISCOVERY_SCAN_INTERVAL_SECONDS,
             verbose_name="run_due_discovery_searches",
         )
+        # Existing deployments can have discovery jobs behind hours of media work.
+        from background_task.models import Task
+
+        from .ugc_discovery_tasks import DISCOVERY_PRIORITY, run_saved_discovery_search
+
+        Task.objects.filter(task_name__in=[run_due_discovery_searches.name, run_saved_discovery_search.name]).update(
+            priority=DISCOVERY_PRIORITY
+        )
         register_recurring_task(
             run_due_impact_report_schedules,
             repeat=IMPACT_REPORT_SCAN_INTERVAL_SECONDS,

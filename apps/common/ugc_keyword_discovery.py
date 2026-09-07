@@ -46,6 +46,13 @@ def _merge_unique(*groups: list[dict], limit: int) -> list[dict]:
     return merged
 
 
+def _normalize_keyword_payload(payload, saved_search, limit):
+    rows = _normalize_rows(payload, saved_search, limit)
+    if payload and not rows:
+        raise DiscoveryProviderError("Provider returned data, but no usable Instagram posts.")
+    return rows
+
+
 def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
     """Return a deep, engagement-aware candidate pool for one keyword search.
 
@@ -62,6 +69,7 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
     # Primary source: public Instagram keyword-search posts. Unlike the previous
     # keyword actor, this source does not require user/session cookies. Its clean
     # output matches the standard Instagram normalizer used elsewhere in Studio.
+    errors = []
     keyword_rows: list[dict] = []
     keyword_actor = (
         os.getenv("APIFY_INSTAGRAM_KEYWORD_POST_ACTOR", DEFAULT_APIFY_INSTAGRAM_KEYWORD_POST_ACTOR).strip()
@@ -78,10 +86,11 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
             max_items=scan_limit,
             timeout=360,
         )
-        keyword_rows = _normalize_rows(keyword_payload, saved_search, scan_limit)
+        keyword_rows = _normalize_keyword_payload(keyword_payload, saved_search, scan_limit)
         for row in keyword_rows:
             row["discovery_provider_path"] = "keyword_posts"
-    except DiscoveryProviderError:
+    except DiscoveryProviderError as exc:
+        errors.append("Keyword posts: " + str(exc))
         keyword_rows = []
 
     # Secondary source: Apify-maintained popular reels. Keep this because it is
@@ -100,10 +109,11 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
             max_items=popular_limit,
             timeout=240,
         )
-        popular_rows = _normalize_rows(popular_payload, saved_search, popular_limit)
+        popular_rows = _normalize_keyword_payload(popular_payload, saved_search, popular_limit)
         for row in popular_rows:
             row["discovery_provider_path"] = "popular_reels"
-    except DiscoveryProviderError:
+    except DiscoveryProviderError as exc:
+        errors.append("Popular reels: " + str(exc))
         popular_rows = []
 
     merged = _merge_unique(keyword_rows, popular_rows, limit=scan_limit)
@@ -128,10 +138,14 @@ def fetch_apify_keyword_results(saved_search: dict) -> list[dict]:
             max_items=scan_limit,
             timeout=300,
         )
-        hashtag_rows = _normalize_rows(fallback_payload, saved_search, scan_limit)
+        hashtag_rows = _normalize_keyword_payload(fallback_payload, saved_search, scan_limit)
         for row in hashtag_rows:
             row["discovery_provider_path"] = "keyword_fallback"
-    except DiscoveryProviderError:
+    except DiscoveryProviderError as exc:
+        errors.append("Keyword fallback: " + str(exc))
         hashtag_rows = []
 
-    return _merge_unique(keyword_rows, popular_rows, hashtag_rows, limit=scan_limit)
+    results = _merge_unique(keyword_rows, popular_rows, hashtag_rows, limit=scan_limit)
+    if not results and errors:
+        raise DiscoveryProviderError("Keyword discovery could not return results. " + " | ".join(errors))
+    return results
