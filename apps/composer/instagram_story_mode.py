@@ -118,9 +118,9 @@ def install_instagram_story_mode() -> None:
         if not static_url.endswith("/"):
             static_url += "/"
         tag = (
-            f'<script defer src="{static_url}composer/instagram_story_mode.js?v=20260816-3"></script>'
-            f'<script defer src="{static_url}composer/instagram_story_dom_fix.js?v=20260816-1"></script>'
-            f'<script defer src="{static_url}composer/instagram_story_preview_layout.js?v=20260816-1"></script>'
+            f'<script defer src="{static_url}composer/instagram_story_mode.js?v=20260907-1"></script>'
+            f'<script defer src="{static_url}composer/instagram_story_dom_fix.js?v=20260907-1"></script>'
+            f'<script defer src="{static_url}composer/instagram_story_preview_layout.js?v=20260907-1"></script>'
         )
         if "</body>" in html:
             html = html.replace("</body>", f"{tag}</body>", 1)

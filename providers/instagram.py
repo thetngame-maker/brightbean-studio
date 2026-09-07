@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 
 from .base import SocialProvider
 from .exceptions import APIError, OAuthError, PublishError
+from .media_validation import media_kind, validate_media
 from .meta_comments import (
     fetch_instagram_comments,
     find_own_instagram_comment,
@@ -297,9 +298,10 @@ class InstagramProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def publish_post(self, access_token: str, content: PublishContent) -> PublishResult:
+        validate_media("instagram", [media_kind(url) for url in content.media_urls], content.post_type.value)
         ig_user_id = content.extra.get("ig_user_id") or self._get_ig_user_id(access_token)
 
-        if content.post_type == PostType.CAROUSEL:
+        if len(content.media_urls) > 1:
             return self._publish_carousel(access_token, ig_user_id, content)
         return self._publish_single(access_token, ig_user_id, content)
 
@@ -343,7 +345,7 @@ class InstagramProvider(SocialProvider):
         child_ids: list[str] = []
 
         for url in content.media_urls:
-            is_video = url.lower().endswith((".mp4", ".mov"))
+            is_video = media_kind(url) == "video"
             child_payload: dict = {
                 "is_carousel_item": True,
             }

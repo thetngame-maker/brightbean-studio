@@ -61,6 +61,8 @@
         } else if (!state.userChoseFormat && state.format !== 'story') {
             state.format = defaultFormat(media);
         }
+        if (media.count > 1 && state.format !== 'story') state.format = 'carousel';
+        if (media.count > 1) state.alsoStory = false;
         if (state.format === 'story') state.alsoStory = false;
         return state;
     }

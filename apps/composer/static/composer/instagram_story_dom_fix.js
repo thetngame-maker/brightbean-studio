@@ -87,6 +87,11 @@
             const formatInput = card.querySelector('[data-role="format-input"]');
             const alsoInput = card.querySelector('[data-role="also-input"]');
 
+            if (count > 1 && formatInput && formatInput.value !== 'story') {
+                formatInput.value = 'carousel';
+                if (alsoInput) alsoInput.value = 'false';
+            }
+
             // For one real attached photo/video, Story must be selectable even
             // when Alpine's server-rendered mediaItems array is stale.
             if (one) {

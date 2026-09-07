@@ -9,6 +9,26 @@
     notice.setAttribute('role', 'status');
     notice.className = 'px-4 text-xs text-stone-500';
     list.parentElement.after(notice);
+    const constraints = document.createElement('p');
+    constraints.className = 'px-4 py-2 text-sm text-red-600';
+    constraints.setAttribute('role', 'status');
+    notice.after(constraints);
+    function syncConstraints() {
+        const all = items();
+        const selected = (document.querySelector('[name="selected_accounts"]')?.value || '').split(',');
+        const accounts = JSON.parse(document.getElementById('composer-char-limits')?.textContent || '{}');
+        const platforms = selected.map(id => accounts[id]?.platform);
+        const warnings = [];
+        if (all.length > 10 && platforms.some(p => ['instagram', 'instagram_login'].includes(p))) {
+            warnings.push(`Instagram: choose up to 10 photos or videos before publishing (${all.length} attached).`);
+        }
+        if (all.length > 1 && all.some(item => item.querySelector('video')) && platforms.includes('facebook')) {
+            warnings.push('Facebook: select photos only for a multi-photo post; publish videos separately.');
+        }
+        constraints.textContent = warnings.join(' ');
+        constraints.hidden = !warnings.length;
+    }
+    document.body.addEventListener('previewUpdate', syncConstraints);
     const dialog = document.createElement('dialog');
     dialog.setAttribute('aria-label', 'Media preview');
     dialog.style.cssText = 'padding:16px;border-radius:12px;width:min(960px,94vw);max-height:92vh;background:#1c1917;color:white;';
@@ -45,6 +65,7 @@
         if (!dialog.open) dialog.showModal();
     }
     function decorate() {
+        syncConstraints();
         items().forEach((item, index, all) => {
             item.draggable = !busy && !locked;
             item.tabIndex = 0;

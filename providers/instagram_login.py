@@ -20,6 +20,7 @@ from urllib.parse import urlencode
 
 from .base import SocialProvider
 from .exceptions import APIError, OAuthError, PublishError
+from .media_validation import media_kind, validate_media
 from .meta_comments import (
     fetch_instagram_comments,
     find_own_instagram_comment,
@@ -293,13 +294,14 @@ class InstagramLoginProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def publish_post(self, access_token: str, content: PublishContent) -> PublishResult:
+        validate_media("instagram_login", [media_kind(url) for url in content.media_urls], content.post_type.value)
         if not content.media_urls:
             raise PublishError(
                 "Instagram requires at least one media item",
                 platform=self.platform_name,
             )
 
-        if content.post_type == PostType.CAROUSEL and len(content.media_urls) > 1:
+        if len(content.media_urls) > 1:
             return self._publish_carousel(access_token, content)
         return self._publish_single(access_token, content)
 
@@ -330,7 +332,7 @@ class InstagramLoginProvider(SocialProvider):
         child_ids: list[str] = []
 
         for url in content.media_urls:
-            is_video = url.lower().endswith((".mp4", ".mov"))
+            is_video = media_kind(url) == "video"
             child_payload: dict = {"is_carousel_item": True}
             if is_video:
                 child_payload["media_type"] = "VIDEO"

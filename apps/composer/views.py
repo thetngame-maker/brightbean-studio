@@ -811,6 +811,34 @@ def save_post(request, workspace_id, post_id=None):
         post.author = request.user
 
     if action in _UGC_COMMIT_ACTIONS:
+        from apps.media_library.models import MediaAsset
+        from providers.media_validation import MediaValidationError, validate_media
+
+        if post_id:
+            kinds = list(post.media_attachments.values_list("media_asset__media_type", flat=True))
+        else:
+            pending_ids = request.session.get(f"pending_media_{workspace.id}", [])
+            kinds = list(
+                MediaAsset.objects.filter(id__in=pending_ids, workspace=workspace).values_list("media_type", flat=True)
+            )
+        selected_ids = _parse_selected_account_ids(request.POST.get("selected_accounts", ""))
+        media_errors = []
+        for account in SocialAccount.objects.filter(id__in=selected_ids, workspace=workspace):
+            if (
+                post_id
+                and post.platform_posts.filter(
+                    social_account=account, status__in=PlatformPost.PROTECTED_STATUSES
+                ).exists()
+            ):
+                continue
+            try:
+                validate_media(account.platform, kinds, request.POST.get(f"instagram_post_type_{account.id}"))
+            except MediaValidationError as exc:
+                media_errors.append(f"{account.account_name}: {exc}")
+        if media_errors:
+            return JsonResponse({"errors": {"media": media_errors}}, status=400)
+
+    if action in _UGC_COMMIT_ACTIONS:
         guard = _ugc_payload_guard(request, workspace, post, post.caption)
         if guard:
             blocker_messages = list(dict.fromkeys(item["message"] for item in guard["blockers"]))

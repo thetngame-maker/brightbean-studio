@@ -16,6 +16,7 @@ from providers.exceptions import (
     RateLimitError,
     TokenExpiredError,
 )
+from providers.media_validation import MEDIA_ERRORS, MediaValidationError
 
 RECONNECT_MESSAGE = "Account connection expired. Please reconnect."
 RATE_LIMIT_MESSAGE = "Rate limit reached. We'll retry this check shortly."
@@ -212,6 +213,8 @@ def friendly_publish_error(exc: Exception) -> str:
     The raw text is not lost: every publish failure writes a PublishLog row
     carrying ``error_message`` before the post is marked failed.
     """
+    if isinstance(exc, MediaValidationError):
+        return MEDIA_ERRORS[exc.code]
     return _friendly(
         exc,
         {

@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urlparse
 
 from .base import SocialProvider
 from .exceptions import APIError, OAuthError, PublishError
+from .media_validation import media_kind, validate_media
 from .meta_comments import parse_graph_time
 from .meta_insights import fetch_insights_safe, parse_insights_response
 from .meta_messaging import build_send_payload, resolve_recipient_id
@@ -294,6 +295,7 @@ class FacebookProvider(SocialProvider):
     # ------------------------------------------------------------------
 
     def publish_post(self, access_token: str, content: PublishContent) -> PublishResult:
+        validate_media("facebook", [media_kind(url) for url in content.media_urls], content.post_type.value)
         page_id = content.extra.get("page_id")
         if not page_id:
             raise PublishError(
@@ -301,7 +303,9 @@ class FacebookProvider(SocialProvider):
                 platform=self.platform_name,
             )
 
-        if content.post_type == PostType.IMAGE and content.media_urls:
+        if (
+            content.post_type in (PostType.IMAGE, PostType.CAROUSEL) or len(content.media_urls) > 1
+        ) and content.media_urls:
             return self._publish_photo(access_token, page_id, content)
         if content.post_type == PostType.VIDEO and content.media_urls:
             return self._publish_video(access_token, page_id, content)

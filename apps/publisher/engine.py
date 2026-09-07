@@ -485,6 +485,14 @@ class PublishEngine:
         temp_files = []
         attachments = list(platform_post.post.media_attachments.select_related("media_asset").order_by("position"))
 
+        from providers.media_validation import validate_media
+
+        validate_media(
+            platform,
+            [pm.media_asset.media_type for pm in attachments if pm.media_asset.file],
+            (platform_post.platform_extra or {}).get("post_type"),
+        )
+
         # For video-only platforms (YouTube, TikTok), skip non-video attachments
         video_only = set(provider.supported_post_types) <= {PostType.VIDEO, PostType.SHORT}
         if video_only:
@@ -639,6 +647,14 @@ class PublishEngine:
         3. Multi-media on carousel-capable platforms → CAROUSEL
         4. Fallback: video → VIDEO, image → IMAGE, else → TEXT
         """
+        # A saved single-item format must never silently discard carousel media.
+        if media_count > 1 and platform in ("instagram", "instagram_login"):
+            if platform_extra.get("post_type") == "story":
+                from providers.media_validation import MediaValidationError
+
+                raise MediaValidationError("instagram_story", platform)
+            return PostType.CAROUSEL
+
         # 1. Explicit post_type hint from platform_extra
         hint = platform_extra.get("post_type")
         if hint:
