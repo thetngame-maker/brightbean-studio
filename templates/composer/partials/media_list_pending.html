@@ -5,6 +5,8 @@ Context: pending_assets, workspace.
 
 {% for asset in pending_assets %}
 <div class="media-thumb"
+     data-media-id="{{ asset.id }}"
+     data-preview-url="{% url 'composer:media_stream' workspace_id=workspace.id asset_id=asset.id %}"
      data-download-url="{% url 'composer:media_stream' workspace_id=workspace.id asset_id=asset.id %}?download=1"
      data-media-filename="{{ asset.filename }}">
     {% if asset.is_video %}

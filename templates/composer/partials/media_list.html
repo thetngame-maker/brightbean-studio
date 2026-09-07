@@ -5,6 +5,8 @@ Context: media_attachments, post, workspace.
 
 {% for attachment in media_attachments %}
 <div class="media-thumb" draggable="true"
+     data-media-id="{{ attachment.media_asset.id }}"
+     data-preview-url="{% url 'composer:media_stream' workspace_id=workspace.id asset_id=attachment.media_asset.id %}"
      data-download-url="{% url 'composer:media_stream' workspace_id=workspace.id asset_id=attachment.media_asset.id %}?download=1"
      data-media-filename="{{ attachment.media_asset.filename }}">
     {% if attachment.media_asset.is_video %}

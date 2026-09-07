@@ -31,6 +31,7 @@ urlpatterns = [
     path("ideas/groups/create/", views.idea_group_create, name="idea_group_create"),
     path("ideas/groups/<uuid:group_id>/delete/", views.idea_group_delete, name="idea_group_delete"),
     path("ideas/groups/reorder/", views.idea_group_reorder, name="idea_group_reorder"),
+    path("compose/reorder-media/", views.reorder_media, name="reorder_media"),
     # Composer page
     path("compose/", views.compose, name="compose"),
     path("compose/<uuid:post_id>/", views.compose, name="compose_edit"),

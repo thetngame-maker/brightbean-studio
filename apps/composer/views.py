@@ -1325,7 +1325,10 @@ def preview(request, workspace_id):
         session_key = f"pending_media_{workspace.id}"
         pending_ids = request.session.get(session_key, [])
         if pending_ids:
-            for asset in MediaAsset.objects.filter(id__in=pending_ids, workspace=workspace):
+            for asset in sorted(
+                MediaAsset.objects.filter(id__in=pending_ids, workspace=workspace),
+                key=lambda asset: pending_ids.index(str(asset.id)),
+            ):
                 media_items.append(
                     {
                         "url": asset.file.url if asset.file else "",
@@ -2132,6 +2135,45 @@ def upload_media(request, workspace_id, post_id=None):
 
 
 @login_required
+@require_permission("create_posts")
+@require_POST
+def reorder_media(request, workspace_id):
+    """Persist a complete permutation; reject stale lists without losing attachments."""
+    workspace = _get_workspace(request, workspace_id)
+    order = request.POST.getlist("media_order")
+    post_id = request.POST.get("post_id", "")
+    if post_id:
+        try:
+            post_id = uuid.UUID(post_id)
+        except ValueError:
+            return JsonResponse({"error": "Invalid post."}, status=400)
+    with transaction.atomic():
+        if post_id:
+            post = get_object_or_404(Post.objects.select_for_update(), id=post_id, workspace=workspace)
+            membership = request.workspace_membership
+            perms = membership.effective_permissions if membership else {}
+            if post.author != request.user and not perms.get("edit_others_posts", False):
+                raise PermissionDenied("You do not have permission to edit this post.")
+            attachments = list(post.media_attachments.all())
+            current = [str(item.media_asset_id) for item in attachments]
+        else:
+            key = f"pending_media_{workspace.id}"
+            current = request.session.get(key, [])
+        if len(order) != len(current) or set(order) != set(current):
+            return JsonResponse({"error": "Media changed. Refresh the editor and try again."}, status=409)
+        if order != current:
+            if post_id:
+                positions = {asset_id: index for index, asset_id in enumerate(order)}
+                for item in attachments:
+                    item.position = positions[str(item.media_asset_id)]
+                PostMedia.objects.bulk_update(attachments, ["position"])
+                _revert_approved_to_review(post)
+            else:
+                request.session[key] = order
+    return JsonResponse({"ok": True})
+
+
+@login_required
 @require_POST
 def remove_media(request, workspace_id, post_id, media_id):
     """Remove a media attachment from a post."""
@@ -2178,7 +2220,9 @@ def remove_pending_media(request, workspace_id, asset_id):
             delete_asset(asset)
 
     # Return updated pending list
-    pending_assets = MediaAsset.objects.filter(id__in=pending, workspace=workspace)
+    pending_assets = sorted(
+        MediaAsset.objects.filter(id__in=pending, workspace=workspace), key=lambda asset: pending.index(str(asset.id))
+    )
     response = render(
         request,
         "composer/partials/media_list_pending.html",
