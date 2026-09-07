@@ -114,7 +114,7 @@ class CommunityCardTests(ComposerTestCase):
             with self.captureOnCommitCallbacks(execute=True):
                 self.assertEqual(self.client.post(url).json()["status"], "loading")
                 self.assertEqual(self.client.post(url).json()["status"], "loading")
-            repair.assert_called_once_with(str(self.item.id))
+            repair.assert_called_once_with(str(self.item.id), priority=100)
         from apps.workspaces.models import Workspace
 
         other = Workspace.objects.create(organization=self.org, name="Other")
@@ -146,3 +146,22 @@ class CommunityCardTests(ComposerTestCase):
         self.item.save()
         url = reverse("ugc:card_preview", kwargs={"workspace_id": self.workspace.id, "submission_id": self.item.id})
         self.assertEqual(self.client.get(url).json()["thumbnail"], "https://example.com/thumb.jpg")
+
+    def test_preview_recovery_does_not_download_entire_carousel(self):
+        from ..ugc_approved_media_repair import repair_one_approved_submission
+
+        self.item.metadata["provenance"] = {"platform": "instagram", "source_url": "https://www.instagram.com/p/test/"}
+        self.item.save()
+        refreshed = {"media_items": [{"media_type": "image", "media_url": "https://example.com/a.jpg"}]}
+        with (
+            patch("apps.common.ugc_approved_media_repair.fetch_instagram_post_details", return_value=refreshed),
+            patch(
+                "apps.common.ugc_approved_media_repair.capture_submission_media", return_value=(False, "unavailable")
+            ) as single,
+            patch("apps.common.ugc_approved_media_repair.capture_submission_gallery") as gallery,
+        ):
+            repair_one_approved_submission(self.item, preview_only=True)
+        single.assert_called_once()
+        gallery.assert_not_called()
+        self.item.refresh_from_db()
+        self.assertIn("media_refreshed_at", self.item.metadata["discovery_import"])

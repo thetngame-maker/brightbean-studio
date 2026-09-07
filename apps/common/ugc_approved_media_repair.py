@@ -17,7 +17,7 @@ from apps.members.decorators import require_permission
 
 from .models import UGCSubmission
 from .ugc_discovery_providers import fetch_instagram_post_details
-from .ugc_remote_media import capture_submission_gallery
+from .ugc_remote_media import capture_submission_gallery, capture_submission_media
 from .ugc_views import _get_workspace
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ def _write_status(submission: UGCSubmission, *, status: str, detail: str = "", a
     submission.save(update_fields=["metadata", "updated_at"])
 
 
-def repair_one_approved_submission(submission: UGCSubmission) -> tuple[bool, str, int]:
+def repair_one_approved_submission(submission: UGCSubmission, *, preview_only=False) -> tuple[bool, str, int]:
     if not _is_instagram(submission):
         return False, "not_instagram", 0
 
@@ -109,7 +109,11 @@ def repair_one_approved_submission(submission: UGCSubmission) -> tuple[bool, str
     submission.save(update_fields=["media_asset", "metadata", "updated_at"])
 
     try:
-        assets = capture_submission_gallery(submission)
+        if preview_only:
+            ok, detail = capture_submission_media(submission)
+            assets = [submission.media_asset] if ok and submission.media_asset_id else []
+        else:
+            assets = capture_submission_gallery(submission)
     except Exception as exc:
         detail = f"capture_failed:{exc}"
         logger.exception("Approved gallery capture failed for %s", submission.id)

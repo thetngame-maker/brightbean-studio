@@ -43,7 +43,7 @@ def recover_card_preview(submission_id):
         if not _asset_file_exists(submission.media_asset):
             if submission.status != UGCSubmission.Status.APPROVED:
                 return
-            repair_one_approved_submission(submission)
+            repair_one_approved_submission(submission, preview_only=True)
             submission.refresh_from_db()
         asset = submission.media_asset
         if (
@@ -121,10 +121,10 @@ def card_preview(request, workspace_id, submission_id):
             metadata = dict(submission.metadata or {})
             repair = metadata.get("card_preview_repair") or {}
             last = parse_datetime(repair.get("at", ""))
-            if not last or last < timezone.now() - timedelta(minutes=10):
+            if not last or last < timezone.now() - timedelta(minutes=2):
                 repair = {"status": "loading", "at": timezone.now().isoformat()}
                 metadata["card_preview_repair"] = repair
                 submission.metadata = metadata
                 submission.save(update_fields=["metadata", "updated_at"])
-                transaction.on_commit(lambda: recover_card_preview(str(submission.id)))
+                transaction.on_commit(lambda: recover_card_preview(str(submission.id), priority=100))
     return JsonResponse({"status": repair.get("status", "missing")}, status=202)
