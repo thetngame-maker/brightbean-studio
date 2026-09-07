@@ -21,7 +21,8 @@ from .ugc_remote_media import capture_submission_gallery, capture_submission_med
 from .ugc_views import _get_workspace
 
 logger = logging.getLogger(__name__)
-BATCH_SIZE = 20
+# Yield to discovery and other work between individual media repairs.
+BATCH_SIZE = 1
 
 
 def _is_instagram(submission: UGCSubmission) -> bool:
@@ -94,7 +95,9 @@ def repair_one_approved_submission(submission: UGCSubmission, *, preview_only=Fa
     discovery["media_url"] = refreshed.get("media_url") or refreshed_items[0].get("media_url") or ""
     discovery["media_type"] = refreshed.get("media_type") or refreshed_items[0].get("media_type") or "image"
     discovery["thumbnail_url"] = refreshed.get("thumbnail_url") or refreshed_items[0].get("thumbnail_url") or ""
-    discovery["instagram_product_type"] = refreshed.get("instagram_product_type") or discovery.get("instagram_product_type") or ""
+    discovery["instagram_product_type"] = (
+        refreshed.get("instagram_product_type") or discovery.get("instagram_product_type") or ""
+    )
     metadata["discovery_import"] = discovery
     submission.metadata = metadata
 
@@ -144,13 +147,13 @@ def repair_approved_media_batch(workspace_id: str, after_submitted_at: str = "",
     # Pull extra rows because Approved can contain non-Instagram submissions.
     candidates = list(qs[: BATCH_SIZE * 5])
     batch = [item for item in candidates if _is_instagram(item)][:BATCH_SIZE]
-    if not batch:
+    if not candidates:
         return
 
     for submission in batch:
         repair_one_approved_submission(submission)
 
-    last = batch[-1]
+    last = batch[-1] if batch else candidates[-1]
     repair_approved_media_batch(
         str(workspace_id),
         last.submitted_at.isoformat(),
@@ -172,14 +175,10 @@ def approved_media_repair(request, workspace_id):
     )
     instagram = [item for item in approved if _is_instagram(item)]
     repaired = sum(
-        1
-        for item in instagram
-        if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "repaired"
+        1 for item in instagram if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "repaired"
     )
     failed = sum(
-        1
-        for item in instagram
-        if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "failed"
+        1 for item in instagram if (item.metadata or {}).get("approved_media_repair", {}).get("status") == "failed"
     )
     missing_primary = sum(1 for item in instagram if not _asset_exists(item))
 

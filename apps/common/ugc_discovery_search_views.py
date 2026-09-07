@@ -149,6 +149,7 @@ def _clean_searches(value):
                 "last_run_at": _text(item.get("last_run_at"), 100),
                 "last_run_status": _text(item.get("last_run_status"), 30).lower(),
                 "last_started_at": _text(item.get("last_started_at"), 100),
+                "queued_at": _text(item.get("queued_at"), 100),
                 "last_run_error": _text(item.get("last_run_error"), 500),
                 "last_provider": _text(item.get("last_provider"), 50),
                 "last_created_count": _safe_int(item.get("last_created_count")),
@@ -184,8 +185,9 @@ def _schedule_state(item, now=None):
         "target_ready": target_ready,
         "location_ready": location_ready,
         "running": bool(running),
+        "queued": item.get("last_run_status") == "queued",
     }
-    if not item.get("enabled") or cadence == "manual" or running or not location_ready:
+    if not item.get("enabled") or cadence == "manual" or running or state["queued"] or not location_ready:
         return state
     last_run = _parse_aware(item.get("last_run_at"))
     if last_run is None:
@@ -251,12 +253,14 @@ def record_search_run(
         if started_at:
             item["last_started_at"] = _text(started_at, 100)
         item["last_run_status"] = _text(status, 30).lower()
-        item["last_provider"] = _text(provider, 50)
+        if status not in {"queued", "running"}:
+            item["last_provider"] = _text(provider, 50)
         item["last_run_error"] = _text(error, 500)
-        item["last_received_count"] = _safe_int(received)
-        item["last_created_count"] = _safe_int(created)
-        item["last_duplicate_count"] = _safe_int(duplicates)
-        item["last_invalid_count"] = _safe_int(invalid)
+        if status not in {"queued", "running"}:
+            item["last_received_count"] = _safe_int(received)
+            item["last_created_count"] = _safe_int(created)
+            item["last_duplicate_count"] = _safe_int(duplicates)
+            item["last_invalid_count"] = _safe_int(invalid)
         found = True
         break
     if found:
@@ -268,8 +272,11 @@ def record_search_run(
 @login_required
 @require_permission("manage_workspace_settings")
 def discovery_searches(request, workspace_id):
+    from .ugc_discovery_run_views import _status_signature
+
     workspace = _get_workspace(request, workspace_id)
     searches = _clean_searches(workspace.discovery_searches)
+    status_signature = _status_signature(searches)
     now = timezone.now()
     for item in searches:
         item.update(_schedule_state(item, now=now))
@@ -288,6 +295,7 @@ def discovery_searches(request, workspace_id):
         {
             "workspace": workspace,
             "searches": searches,
+            "status_signature": status_signature,
             "search_types": SEARCH_TYPES.items(),
             "platforms": PLATFORMS.items(),
             "cadences": CADENCES.items(),

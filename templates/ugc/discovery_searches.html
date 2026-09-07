@@ -16,7 +16,7 @@
         <p class="text-sm text-stone-500 mt-1">Define what Studio should discover, where it belongs in TN Game, and when the worker should run it.</p>
     </div>
     {% if live_provider_ready %}
-    <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">Worker + live provider ready</span>
+    <span class="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700">Live provider configured</span>
     {% else %}
     <span class="inline-flex items-center rounded-full bg-violet-50 px-3 py-1.5 text-xs font-medium text-violet-700">Worker test ready · live provider not connected</span>
     {% endif %}
@@ -55,7 +55,7 @@
     </section>
 
     <section class="min-w-0">
-        <div class="flex items-center justify-between gap-3 mb-3"><div><h2 class="text-sm font-semibold text-stone-900">Saved searches</h2><p class="text-xs text-stone-500 mt-0.5">Background tests run on the real worker. Automatic cadence runs remain disabled until a live provider is connected.</p></div><span class="text-xs text-stone-400">{{ searches|length }} total</span></div>
+        <div class="flex items-center justify-between gap-3 mb-3"><div><h2 class="text-sm font-semibold text-stone-900">Saved searches</h2><p class="text-xs text-stone-500 mt-0.5">Run now uses the live provider and imports new results. Weekly searches run once every seven days; manual searches run only when requested.</p></div><span class="text-xs text-stone-400">{{ searches|length }} total</span></div>
 
         {% if searches %}
         <div class="space-y-3">
@@ -66,10 +66,10 @@
                     <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-1.5">
                             <h3 class="text-sm font-semibold text-stone-900 truncate">{{ search.name }}</h3>
-                            {% if search.enabled %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Active</span>{% else %}<span class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Paused</span>{% endif %}
-                            {% if search.running %}<span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Worker running</span>{% elif search.due_now %}<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Due now</span>{% endif %}
+                            {% if search.enabled and search.cadence == "manual" %}<span class="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Manual only</span>{% elif search.enabled %}<span class="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Active</span>{% else %}<span class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-semibold text-stone-600">Paused</span>{% endif %}
+                            {% if search.queued %}<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Queued — waiting for worker</span>{% elif search.running %}<span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">Worker running</span>{% elif search.due_now %}<span class="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">Due now</span>{% endif %}
                             {% if not search.target_ready %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Needs target</span>{% endif %}
-                            {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
+                            {% if search.last_run_status == 'success' %}<span class="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Last run successful</span>{% elif search.last_run_status == 'empty' %}<span class="text-xs text-amber-800">Completed — no results returned</span>{% elif search.last_run_status == 'failed' %}<span class="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-semibold text-red-700">Last run failed</span>{% endif %}
                         </div>
                         <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] text-stone-500">
                             <span class="rounded-md bg-stone-100 px-1.5 py-0.5">{{ search.search_type|title }}</span>
@@ -91,15 +91,15 @@
                             <div class="mt-1.5 text-[10px] font-semibold text-amber-700">Instagram place needs matching before scheduled runs.</div>
                             {% endif %}
                         {% endif %}
-                        <div class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-stone-500"><span class="font-semibold text-stone-600">{{ search.cadence_label }}</span>{% if search.running %}<span class="font-semibold text-violet-700">Processing on worker</span>{% elif search.due_now %}<span class="font-semibold text-amber-700">Ready to run</span>{% elif search.next_run_at %}<span>Next {{ search.next_run_at|naturaltime }}</span>{% elif not search.enabled %}<span>Scheduling paused</span>{% else %}<span>Runs manually</span>{% endif %}</div>
+                        <div class="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-stone-500"><span class="font-semibold text-stone-600">{{ search.cadence_label }}</span>{% if search.queued %}<span class="font-semibold text-amber-800">Waiting since {{ search.queued_at|default:search.last_started_at|slice:":16" }}</span>{% elif search.running %}<span class="font-semibold text-violet-700">Processing on worker</span>{% elif search.due_now %}<span class="font-semibold text-amber-700">Ready to run</span>{% elif search.next_run_at %}<span>Next {{ search.next_run_at|naturaltime }}</span>{% elif not search.enabled %}<span>Scheduling paused</span>{% else %}<span>Runs manually</span>{% endif %}</div>
                         {% if search.target_ready %}<div class="mt-2 text-[10px] text-stone-500"><span class="font-semibold text-emerald-700">Target ready:</span> {{ search.target_label|default:search.target_id }} <span class="text-stone-400">· {{ search.target_type }} · {{ search.target_id }}</span></div>{% endif %}
-                        {% if search.last_run_at %}<div class="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-stone-500"><span class="font-medium text-stone-600">Last run {{ search.last_run_at|slice:":16" }}</span>{% if search.last_provider %}<span>{{ search.last_provider }}</span>{% endif %}<span>{{ search.last_created_count }} created</span><span>{{ search.last_duplicate_count }} duplicates</span><span>{{ search.last_invalid_count }} invalid</span></div>{% endif %}
+                        {% if search.last_run_at %}<div class="flex flex-wrap items-center gap-2 mt-1.5 text-[10px] text-stone-500"><span class="font-medium text-stone-600">Last completed run {{ search.last_run_at|slice:":16" }}</span>{% if search.last_provider %}<span>{{ search.last_provider }}</span>{% endif %}<span>{{ search.last_created_count }} created</span><span>{{ search.last_duplicate_count }} duplicates</span><span>{{ search.last_invalid_count }} invalid</span></div>{% endif %}
                         {% if search.last_run_error %}<div class="mt-1 text-[10px] text-red-600 truncate" title="{{ search.last_run_error }}">{{ search.last_run_error }}</div>{% endif %}
                     </div>
                     <div class="flex flex-wrap items-center gap-1.5 flex-shrink-0">
                         <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}" class="flex items-center gap-1">{% csrf_token %}<input type="hidden" name="action" value="set_cadence"><select name="cadence" onchange="this.form.submit()" aria-label="Run cadence" class="h-8 rounded-lg border border-stone-200 bg-white px-2 text-[11px] font-medium text-stone-600 outline-none focus:border-violet-400">{% for value, label in cadences %}<option value="{{ value }}" {% if search.cadence == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></form>
-                        {% if search.target_ready and not search.running %}<form method="post" action="{% url 'ugc:queue_background_test_run' workspace_id=workspace.id search_id=search.id %}">{% csrf_token %}<button class="px-3 py-1.5 rounded-lg bg-stone-900 text-xs font-semibold text-white hover:bg-stone-800 cursor-pointer">Run in background</button></form>{% endif %}
-                        <a href="{% url 'ugc:bulk_discovery_form' workspace_id=workspace.id %}?search_id={{ search.id }}" class="px-3 py-1.5 rounded-lg bg-violet-600 text-xs font-semibold text-white hover:bg-violet-700">Run test</a>
+                        {% if search.target_ready and not search.running and not search.queued %}<form method="post" action="{% url 'ugc:queue_background_test_run' workspace_id=workspace.id search_id=search.id %}">{% csrf_token %}<button class="px-3 py-1.5 rounded-lg bg-stone-900 text-xs font-semibold text-white hover:bg-stone-800 cursor-pointer">Run now</button></form>{% endif %}
+                        <a href="{% url 'ugc:bulk_discovery_form' workspace_id=workspace.id %}?search_id={{ search.id }}" class="px-3 py-1.5 rounded-lg bg-violet-600 text-xs font-semibold text-white hover:bg-violet-700">Sample import test</a>
                         <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}">{% csrf_token %}<input type="hidden" name="action" value="toggle"><button class="px-3 py-1.5 rounded-lg border border-stone-200 bg-white text-xs font-semibold text-stone-600 hover:bg-stone-50 cursor-pointer">{% if search.enabled %}Pause{% else %}Enable{% endif %}</button></form>
                         <form method="post" action="{% url 'ugc:update_discovery_search' workspace_id=workspace.id search_id=search.id %}" onsubmit="return confirm('Delete this discovery search?');">{% csrf_token %}<input type="hidden" name="action" value="delete"><button class="px-3 py-1.5 rounded-lg border border-red-200 bg-white text-xs font-semibold text-red-600 hover:bg-red-50 cursor-pointer">Delete</button></form>
                     </div>
@@ -142,7 +142,7 @@
 <script nonce="{{ request.csp_nonce }}">
 (function () {
     const statusUrl = "{% url 'ugc:discovery_run_status' workspace_id=workspace.id %}";
-    const renderedWorkspaceUpdatedAt = "{{ workspace.updated_at|date:'c'|escapejs }}";
+    const renderedSignature = "{{ status_signature|escapejs }}";
     let stopped = false;
 
     async function checkDiscoveryWorker() {
@@ -155,7 +155,7 @@
             });
             if (!response.ok) return;
             const payload = await response.json();
-            if (payload.workspace_updated_at && payload.workspace_updated_at !== renderedWorkspaceUpdatedAt) {
+            if (payload.signature && payload.signature !== renderedSignature) {
                 stopped = true;
                 window.location.reload();
             }
@@ -166,10 +166,7 @@
     }
 
     const timer = window.setInterval(checkDiscoveryWorker, 2500);
-    window.setTimeout(() => {
-        stopped = true;
-        window.clearInterval(timer);
-    }, 5 * 60 * 1000);
+
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) checkDiscoveryWorker();
     });

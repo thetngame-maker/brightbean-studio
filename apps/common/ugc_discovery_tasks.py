@@ -6,6 +6,7 @@ import logging
 from datetime import timedelta
 
 from background_task import background
+from background_task.models import Task
 from django.db import transaction
 from django.utils import timezone
 
@@ -31,11 +32,43 @@ DISCOVERY_SCAN_INTERVAL_SECONDS = 5 * 60
 RUNNING_STALE_AFTER = timedelta(minutes=30)
 MAX_PROVIDER_SCAN_ITEMS = 500
 KEYWORD_DEPTH_STEP = 100
+DISCOVERY_PRIORITY = 10
 
 
 def _find_search(searches, search_id):
     target = str(search_id or "")
     return next((item for item in searches if item.get("id") == target), None)
+
+
+def enqueue_saved_discovery_search(workspace_id, search_id, *, force=False):
+    """Atomically preserve the last result and enqueue at most one live run."""
+    with transaction.atomic():
+        workspace = Workspace.objects.select_for_update().get(id=workspace_id)
+        searches = _clean_searches(workspace.discovery_searches)
+        item = _find_search(searches, search_id)
+        if not item or not item.get("target_type") or not item.get("target_id"):
+            return False
+        if _schedule_state(item).get("running"):
+            return False
+        # Include legacy task argument shapes so already queued work is reused.
+        for task in Task.objects.filter(task_name=run_saved_discovery_search.name, failed_at__isnull=True):
+            args, _ = task.params()
+            if len(args) >= 2 and str(args[0]) == str(workspace_id) and str(args[1]) == str(search_id):
+                if task.locked_at is None:
+                    task.priority = DISCOVERY_PRIORITY
+                    task.save(update_fields=["priority"])
+                return False
+        if not force and not _schedule_state(item).get("due_now"):
+            return False
+        item["last_run_status"] = "queued"
+        item["queued_at"] = timezone.now().isoformat()
+        item["last_run_error"] = ""
+        workspace.discovery_searches = searches
+        workspace.save(update_fields=["discovery_searches", "updated_at"])
+        run_saved_discovery_search(
+            str(workspace_id), str(search_id), False, force, schedule={"priority": DISCOVERY_PRIORITY}
+        )
+        return True
 
 
 def _claim_search(workspace_id, search_id, *, force=False):
@@ -50,6 +83,7 @@ def _claim_search(workspace_id, search_id, *, force=False):
         started_raw = item.get("last_started_at") or ""
         if item.get("last_run_status") == "running" and started_raw:
             from django.utils.dateparse import parse_datetime
+
             started = parse_datetime(started_raw)
             if started is not None:
                 if timezone.is_naive(started):
@@ -59,10 +93,15 @@ def _claim_search(workspace_id, search_id, *, force=False):
 
         if not force:
             state = _schedule_state(item, now=now)
-            if not item.get("enabled") or item.get("cadence") == "manual" or not state.get("due_now"):
+            if (
+                not item.get("enabled")
+                or item.get("cadence") == "manual"
+                or (not state.get("due_now") and not state.get("queued"))
+            ):
                 return None
 
         item["last_run_status"] = "running"
+        item["queued_at"] = ""
         item["last_started_at"] = now.isoformat()
         item["last_run_error"] = ""
         workspace.discovery_searches = searches
@@ -168,12 +207,13 @@ def _keyword_source_counts(rows) -> dict[str, int]:
     return counts
 
 
-@background(schedule=0)
+@background(schedule={"priority": DISCOVERY_PRIORITY})
 def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_run=False):
     claimed = _claim_search(workspace_id, search_id, force=bool(test_mode or force_run))
     if not claimed:
         return
 
+    logger.info("Discovery started: %s (%s)", claimed.get("name"), search_id)
     provider = "mock" if test_mode else ""
     diagnostics = None
     fill_stats = {}
@@ -212,7 +252,9 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
                 query=str(claimed.get("query") or ""),
                 target_label=str(claimed.get("target_label") or claimed.get("name") or ""),
             )
-            relevance_rejected = sum(1 for row in rows if isinstance(row, dict) and row.get("relevance_status") == "low")
+            relevance_rejected = sum(
+                1 for row in rows if isinstance(row, dict) and row.get("relevance_status") == "low"
+            )
             rows = [row for row in rows if not isinstance(row, dict) or row.get("relevance_status") != "low"]
 
         workspace = Workspace.objects.get(id=workspace_id)
@@ -247,7 +289,19 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
             pr = keyword_sources["popular_reels"]
             fb = keyword_sources["keyword_fallback"]
             provider_label = f"apify · depth{progressive_depth} · kw{kw}/pr{pr}/fb{fb}"[:50]
-        _finish_search(workspace_id, search_id, status="success", provider=provider_label, summary=summary)
+        _finish_search(
+            workspace_id,
+            search_id,
+            status="success" if provider_scanned_count else "empty",
+            provider=provider_label,
+            summary=summary,
+        )
+        logger.info(
+            "Discovery finished: %s; scanned=%s created=%s",
+            claimed.get("name"),
+            provider_scanned_count,
+            summary["created_count"],
+        )
         repair_workspace_discovered_media(str(workspace.id))
         record_audit_event(
             workspace=workspace,
@@ -283,15 +337,16 @@ def run_saved_discovery_search(workspace_id, search_id, test_mode=False, force_r
         logger.exception("Background discovery search %s failed", search_id)
 
 
-@background(schedule=0)
+@background(schedule={"priority": DISCOVERY_PRIORITY})
 def run_due_discovery_searches():
     if not live_provider_ready():
         return
 
     now = timezone.now()
-    workspaces = Workspace.objects.filter(is_archived=False).exclude(discovery_searches=[]).only("id", "discovery_searches")
+    workspaces = (
+        Workspace.objects.filter(is_archived=False).exclude(discovery_searches=[]).only("id", "discovery_searches")
+    )
     for workspace in workspaces.iterator():
-        repair_workspace_discovered_media(str(workspace.id))
         for item in _clean_searches(workspace.discovery_searches):
             state = _schedule_state(item, now=now)
             if (
@@ -301,4 +356,4 @@ def run_due_discovery_searches():
                 and item.get("target_id")
                 and state.get("due_now")
             ):
-                run_saved_discovery_search(str(workspace.id), item["id"], False, False)
+                enqueue_saved_discovery_search(str(workspace.id), item["id"])
