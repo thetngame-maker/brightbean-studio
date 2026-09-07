@@ -2,6 +2,7 @@
 
 import logging
 from datetime import timedelta
+from urllib.parse import urlsplit
 
 from background_task import background
 from django.contrib.auth.decorators import login_required
@@ -97,6 +98,21 @@ def card_preview(request, workspace_id, submission_id):
                 "type": "video" if asset.is_video else "image",
                 "url": reverse("composer:media_stream", kwargs={"workspace_id": workspace.id, "asset_id": asset.id}),
             }
+        )
+    # Some Instagram CDN hosts reject server downloads but allow browser playback.
+    # Only use recently refreshed links; stale discovery URLs must be repaired.
+    discovery = (submission.metadata or {}).get("discovery_import") or {}
+    refreshed = parse_datetime(discovery.get("media_refreshed_at", ""))
+    source = discovery.get("media_url") or ""
+    thumbnail = discovery.get("thumbnail_url") or source
+    if (
+        refreshed
+        and refreshed > timezone.now() - timedelta(hours=1)
+        and urlsplit(source).scheme == "https"
+        and urlsplit(thumbnail).scheme == "https"
+    ):
+        return JsonResponse(
+            {"status": "ready", "type": discovery.get("media_type", "image"), "url": source, "thumbnail": thumbnail}
         )
     repair = (submission.metadata or {}).get("card_preview_repair") or {}
     if request.method == "POST":

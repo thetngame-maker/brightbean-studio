@@ -131,3 +131,18 @@ class CommunityCardTests(ComposerTestCase):
             recover_card_preview.now(str(self.item.id))
         self.item.refresh_from_db()
         self.assertEqual(self.item.metadata["card_preview_repair"]["status"], "unavailable")
+
+    def test_recently_refreshed_media_can_preview_when_server_download_is_unavailable(self):
+        from django.utils import timezone
+
+        self.item.metadata["discovery_import"].update(
+            {
+                "media_refreshed_at": timezone.now().isoformat(),
+                "media_url": "https://example.com/photo.jpg",
+                "thumbnail_url": "https://example.com/thumb.jpg",
+                "media_type": "image",
+            }
+        )
+        self.item.save()
+        url = reverse("ugc:card_preview", kwargs={"workspace_id": self.workspace.id, "submission_id": self.item.id})
+        self.assertEqual(self.client.get(url).json()["thumbnail"], "https://example.com/thumb.jpg")

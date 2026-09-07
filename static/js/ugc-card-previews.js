@@ -26,7 +26,7 @@
             await new Promise((resolve, reject) => {
                 img.onload = resolve;
                 img.onerror = reject;
-                img.src = box.dataset.endpoint + '?image=1';
+                img.src = data.thumbnail || (box.dataset.endpoint + '?image=1');
             });
             img.hidden = false;
             button.disabled = false;

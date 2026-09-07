@@ -9,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.http import require_http_methods
 
@@ -87,6 +88,7 @@ def repair_one_approved_submission(submission: UGCSubmission) -> tuple[bool, str
 
     metadata = dict(submission.metadata or {})
     discovery = dict(metadata.get("discovery_import") or {})
+    discovery["media_refreshed_at"] = timezone.now().isoformat()
     discovery["media_items"] = refreshed_items[:20]
     discovery["media_count"] = len(discovery["media_items"])
     discovery["media_url"] = refreshed.get("media_url") or refreshed_items[0].get("media_url") or ""
