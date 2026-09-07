@@ -2,6 +2,7 @@
 (() => {
     const list = document.getElementById('media-list');
     if (!list) return;
+    const locked = list.dataset.reorderDisabled === 'true';
     let busy = false, dragged = null, opener = null, selectedId = null;
     const items = () => [...list.querySelectorAll('[data-media-id]')];
     const notice = document.createElement('p');
@@ -45,7 +46,7 @@
     }
     function decorate() {
         items().forEach((item, index, all) => {
-            item.draggable = !busy;
+            item.draggable = !busy && !locked;
             item.tabIndex = 0;
             item.setAttribute('aria-label', `Preview ${item.dataset.mediaFilename || 'media'}, item ${index + 1}`);
             if (!item.querySelector('.media-order-controls')) {
@@ -55,13 +56,13 @@
                 item.append(controls);
             }
             item.querySelector('[data-position]').textContent = index + 1;
-            item.querySelector('[data-move="-1"]').disabled = busy || index === 0;
-            item.querySelector('[data-move="1"]').disabled = busy || index === all.length - 1;
+            item.querySelector('[data-move="-1"]').disabled = busy || locked || index === 0;
+            item.querySelector('[data-move="1"]').disabled = busy || locked || index === all.length - 1;
         });
     }
     async function move(item, target) {
         const before = items(), from = before.indexOf(item);
-        if (busy || from < 0 || target < 0 || target >= before.length || target === from) return;
+        if (busy || locked || from < 0 || target < 0 || target >= before.length || target === from) return;
         busy = true;
         list.insertBefore(item, target > from ? before[target].nextSibling : before[target]);
         decorate();
@@ -95,7 +96,7 @@
     });
     list.addEventListener('dragstart', event => {
         dragged = event.target.closest('[data-media-id]');
-        if (busy || !dragged) { event.preventDefault(); return; }
+        if (busy || locked || !dragged) { event.preventDefault(); return; }
         event.dataTransfer.setData('text/plain', dragged.dataset.mediaId);
         event.dataTransfer.effectAllowed = 'move';
     });

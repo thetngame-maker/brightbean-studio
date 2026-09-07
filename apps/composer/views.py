@@ -2154,6 +2154,11 @@ def reorder_media(request, workspace_id):
             perms = membership.effective_permissions if membership else {}
             if post.author != request.user and not perms.get("edit_others_posts", False):
                 raise PermissionDenied("You do not have permission to edit this post.")
+            if post.platform_posts.filter(status__in=PlatformPost.PROTECTED_STATUSES).exists():
+                return JsonResponse(
+                    {"error": "Published or publishing posts are read-only. Clone the post to reorder media."},
+                    status=409,
+                )
             attachments = list(post.media_attachments.all())
             current = [str(item.media_asset_id) for item in attachments]
         else:

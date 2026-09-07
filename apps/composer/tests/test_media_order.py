@@ -83,3 +83,13 @@ class MediaOrderTests(ComposerTestCase):
             )
             self.assertIn(f'data-preview-url="{url}"', html)
         self.assertIn("js/composer-media.js", html)
+
+    def test_published_media_cannot_be_reordered(self):
+        from apps.composer.models import PlatformPost
+        from apps.social_accounts.models import SocialAccount
+
+        account = SocialAccount.objects.create(workspace=self.workspace, platform="facebook", account_platform_id="1")
+        PlatformPost.objects.create(post=self.post, social_account=account, status="published")
+        response = self.client.post(self.url, {"post_id": str(self.post.id), "media_order": self.order})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual([item.position for item in self.post.media_attachments.all()], [0, 1, 2])

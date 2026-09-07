@@ -557,7 +557,8 @@
                             </button>
                             {% endif %}
                             <!-- display:contents keeps appended thumbs flowing in this row -->
-                            <div id="media-list" class="contents" data-reorder-url="{% url 'composer:reorder_media' workspace_id=workspace.id %}">
+                            <div id="media-list" class="contents" data-reorder-url="{% url 'composer:reorder_media' workspace_id=workspace.id %}"
+                                 data-reorder-disabled="{% if post.status == 'published' or post.status == 'partially_published' or post.status == 'publishing' %}true{% else %}false{% endif %}">
                                 {% if post %}
                                     {% include "composer/partials/media_list.html" %}
                                 {% elif pending_assets %}
