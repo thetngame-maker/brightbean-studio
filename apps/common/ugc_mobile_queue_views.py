@@ -37,7 +37,7 @@ MOBILE_PAGE_SIZE = 12
 FOLLOWUP_AFTER_DAYS = 3
 VALID_RELEVANCE = {"relevant", "all", "strong", "possible", "low"}
 VALID_MEDIA = {"all", "reels", "photos"}
-VALID_SORT = {"newest", "engaged", "liked", "viewed", "followup", "today"}
+VALID_SORT = {"newest", "oldest", "engaged", "liked", "viewed", "followup", "today"}
 VALID_PERMISSION = {"all", "not_contacted", "requested", "followup_due", "today", "granted", "declined"}
 
 
@@ -313,6 +313,8 @@ def _matches_permission(submission, permission_filter):
 
 
 def _sort_mobile(submissions, sort_mode):
+    if sort_mode == "oldest":
+        return sorted(submissions, key=lambda item: item.submitted_at)
     if sort_mode == "liked":
         return sorted(
             submissions,
