@@ -179,8 +179,23 @@ def moderation_queue(request, workspace_id):
     from .ugc_card_details import decorate_cards, engagement_score
 
     active_sort = request.GET.get("sort", "newest")
-    submissions = sorted(qs, key=engagement_score, reverse=True)[:100] if active_sort == "engaged" else list(qs[:100])
-    decorate_cards(submissions, workspace)
+    preference_key = f"ugc_hide_scheduled_posted_{workspace.id}"
+    if request.GET.get("hide_used") in {"0", "1"}:
+        request.session[preference_key] = request.GET["hide_used"] == "1"
+    hide_scheduled_posted = request.session.get(preference_key, False)
+    if hide_scheduled_posted:
+        # Filter the full queue so used items do not consume the 100 card limit.
+        submissions = list(qs)
+        decorate_cards(submissions, workspace)
+        submissions = [item for item in submissions if not item.studio_scheduled_or_posted]
+        if active_sort == "engaged":
+            submissions.sort(key=engagement_score, reverse=True)
+        submissions = submissions[:100]
+    else:
+        submissions = (
+            sorted(qs, key=engagement_score, reverse=True)[:100] if active_sort == "engaged" else list(qs[:100])
+        )
+        decorate_cards(submissions, workspace)
     reported_ids = [submission.id for submission in submissions if submission.open_report_count]
     reports_by_submission = {}
     if reported_ids:
@@ -205,6 +220,7 @@ def moderation_queue(request, workspace_id):
         "active_tab": tab,
         "active_kind": kind,
         "active_sort": active_sort,
+        "hide_scheduled_posted": hide_scheduled_posted,
         "kind_choices": UGCSubmission.Kind.choices,
         "queue_counts": _queue_counts(workspace),
     }

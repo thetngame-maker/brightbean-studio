@@ -46,6 +46,9 @@ class CommunityCardTests(ComposerTestCase):
         for text in ["TN Game", "TN Waterfalls", "Draft", "Published", "23", "Original post", "Studio usage · 1 post"]:
             self.assertContains(response, text)
         self.assertContains(response, "<strong>0</strong> likes", html=False)
+        response = self.client.get(self.url, {"tab": "approved", "hide_used": "1"})
+        self.assertFalse(response.context["submissions"])
+        self.assertContains(response, "Scheduled and posted content is hidden.")
 
     def test_cross_workspace_and_deleted_post_ids_are_not_counted(self):
         from apps.workspaces.models import Workspace
@@ -55,6 +58,59 @@ class CommunityCardTests(ComposerTestCase):
         self.item.metadata["studio_post_ids"] = [str(post.id), "00000000-0000-0000-0000-000000000000"]
         decorate_cards([self.item], self.workspace)
         self.assertEqual(self.item.studio_usage_count, 0)
+        self.assertFalse(self.item.studio_scheduled_or_posted)
+
+    def test_hide_scheduled_or_posted_uses_account_status_and_remembers_choice(self):
+        post = Post.objects.create(workspace=self.workspace, author=self.user)
+        account = SocialAccount.objects.create(
+            workspace=self.workspace, platform="facebook", account_name="TN Game", account_platform_id="filter"
+        )
+        platform_post = PlatformPost.objects.create(post=post, social_account=account, status="draft")
+        self.item.metadata["studio_post_ids"] = [str(post.id)]
+        self.item.save()
+        for status, visible in [
+            ("draft", True),
+            ("scheduled", False),
+            ("publishing", False),
+            ("published", False),
+            ("failed", True),
+            ("on_hold", True),
+        ]:
+            with self.subTest(status=status):
+                platform_post.status = status
+                platform_post.save()
+                response = self.client.get(self.url, {"tab": "approved", "hide_used": "1"})
+                self.assertEqual(bool(response.context["submissions"]), visible)
+                self.assertContains(response, 'id="ugc-hide-used"')
+        platform_post.status = "published"
+        platform_post.save()
+        self.assertFalse(self.client.get(self.url, {"tab": "approved"}).context["submissions"])
+        response = self.client.get(self.url, {"tab": "approved", "hide_used": "0"})
+        self.assertEqual([item.id for item in response.context["submissions"]], [self.item.id])
+
+    def test_hidden_posts_do_not_consume_queue_limit(self):
+        post = Post.objects.create(workspace=self.workspace, author=self.user)
+        account = SocialAccount.objects.create(
+            workspace=self.workspace, platform="facebook", account_name="TN Game", account_platform_id="limit"
+        )
+        PlatformPost.objects.create(post=post, social_account=account, status="scheduled")
+        UGCSubmission.objects.bulk_create(
+            [
+                UGCSubmission(
+                    workspace=self.workspace,
+                    kind="photo",
+                    status="approved",
+                    title=f"Scheduled {i}",
+                    target_type="top_sight",
+                    target_id=str(i),
+                    metadata={"studio_post_ids": [str(post.id)]},
+                )
+                for i in range(101)
+            ]
+        )
+        for sort in ["newest", "engaged"]:
+            response = self.client.get(self.url, {"tab": "approved", "hide_used": "1", "sort": sort})
+            self.assertEqual([item.id for item in response.context["submissions"]], [self.item.id])
 
     def test_reuse_through_shared_media_is_counted(self):
         asset = MediaAsset.objects.create(
@@ -65,6 +121,13 @@ class CommunityCardTests(ComposerTestCase):
         PostMedia.objects.create(post=post, media_asset=asset)
         decorate_cards([self.item], self.workspace)
         self.assertEqual(self.item.studio_usage_count, 1)
+        self.assertFalse(self.item.studio_scheduled_or_posted)
+        account = SocialAccount.objects.create(
+            workspace=self.workspace, platform="facebook", account_name="TN Game", account_platform_id="shared"
+        )
+        PlatformPost.objects.create(post=post, social_account=account, status="published")
+        decorate_cards([self.item], self.workspace)
+        self.assertTrue(self.item.studio_scheduled_or_posted)
 
     def test_engagement_sort_selects_from_all_submissions(self):
         UGCSubmission.objects.bulk_create(

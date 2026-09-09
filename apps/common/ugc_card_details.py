@@ -4,7 +4,7 @@ from uuid import UUID
 
 from django.db.models import Q
 
-from apps.composer.models import Post
+from apps.composer.models import PlatformPost, Post
 
 
 def count_value(value):
@@ -40,6 +40,7 @@ def decorate_cards(submissions, workspace):
         recorded[item.id] = ids
         item.engagement = engagement(item)
         item.studio_posts = []
+        item.studio_scheduled_or_posted = False
     all_ids = set().union(*recorded.values()) if recorded else set()
     asset_ids = {item.media_asset_id for item in submissions if item.media_asset_id}
     posts = list(
@@ -65,5 +66,15 @@ def decorate_cards(submissions, workspace):
                 or (item.media_asset_id and item.media_asset_id in media_ids)
             ):
                 item.studio_posts.append({"id": post.id, "title": post.title or "Untitled post", "accounts": rows})
+                if any(
+                    row.status
+                    in {
+                        PlatformPost.Status.SCHEDULED,
+                        PlatformPost.Status.PUBLISHING,
+                        PlatformPost.Status.PUBLISHED,
+                    }
+                    for row in rows
+                ):
+                    item.studio_scheduled_or_posted = True
     for item in submissions:
         item.studio_usage_count = len(item.studio_posts)
