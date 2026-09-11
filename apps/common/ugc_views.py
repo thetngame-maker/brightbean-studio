@@ -176,9 +176,20 @@ def moderation_queue(request, workspace_id):
     else:
         kind = ""
 
-    from .ugc_card_details import decorate_cards, engagement_score
+    from .ugc_card_details import decorate_cards, engagement, engagement_score
 
     active_sort = request.GET.get("sort", "newest")
+    metric_sorts = {"liked": "likes", "commented": "comments", "viewed": "views"}
+    if active_sort not in {"newest", "oldest", "engaged", "used", "reported", *metric_sorts}:
+        active_sort = "newest"
+
+    def engagement_sort_key(item):
+        score = (
+            engagement(item)[metric_sorts[active_sort]] or 0 if active_sort in metric_sorts else engagement_score(item)
+        )
+        return score, item.submitted_at
+
+    sort_by_engagement = active_sort == "engaged" or active_sort in metric_sorts
     preference_key = f"ugc_hide_scheduled_posted_{workspace.id}"
     if request.GET.get("hide_used") in {"0", "1"}:
         request.session[preference_key] = request.GET["hide_used"] == "1"
@@ -188,13 +199,11 @@ def moderation_queue(request, workspace_id):
         submissions = list(qs)
         decorate_cards(submissions, workspace)
         submissions = [item for item in submissions if not item.studio_scheduled_or_posted]
-        if active_sort == "engaged":
-            submissions.sort(key=engagement_score, reverse=True)
+        if sort_by_engagement:
+            submissions.sort(key=engagement_sort_key, reverse=True)
         submissions = submissions[:100]
     else:
-        submissions = (
-            sorted(qs, key=engagement_score, reverse=True)[:100] if active_sort == "engaged" else list(qs[:100])
-        )
+        submissions = sorted(qs, key=engagement_sort_key, reverse=True)[:100] if sort_by_engagement else list(qs[:100])
         decorate_cards(submissions, workspace)
     reported_ids = [submission.id for submission in submissions if submission.open_report_count]
     reports_by_submission = {}

@@ -88,6 +88,9 @@
             <select id="ugc-sort" class="h-9 text-xs border border-stone-200 rounded-lg bg-white px-3 text-stone-700 outline-none focus:border-orange-400">
                 <option value="newest" {% if active_sort == "newest" %}selected{% endif %}>Newest</option>
                 {% if active_tab == 'approved' %}<option value="engaged" {% if active_sort == "engaged" %}selected{% endif %}>Most engagement</option>{% endif %}
+                <option value="liked" {% if active_sort == "liked" %}selected{% endif %}>Most likes</option>
+                <option value="commented" {% if active_sort == "commented" %}selected{% endif %}>Most comments</option>
+                <option value="viewed" {% if active_sort == "viewed" %}selected{% endif %}>Most views</option>
                 <option value="oldest" {% if active_sort == "oldest" %}selected{% endif %}>Oldest</option>
                 <option value="used" {% if active_sort == "used" %}selected{% endif %}>Most used</option>
                 <option value="reported" {% if active_sort == "reported" %}selected{% endif %}>Most reported</option>
@@ -103,7 +106,7 @@
     {% if submissions %}
     <div id="ugc-card-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 pb-6">
         {% for submission in submissions %}
-        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-likes="{{ submission.metadata.discovery_import.like_count|default:'0' }}" data-comments="{{ submission.metadata.discovery_import.comment_count|default:'0' }}" data-views="{{ submission.metadata.discovery_import.view_count|default:'0' }}" data-usage="{{ submission.studio_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
+        <article class="ugc-card rounded-xl border border-stone-200 bg-white overflow-hidden shadow-sm flex flex-col min-w-0" data-source="{{ submission.metadata|ugc_source_platform:submission.source }}" data-submitted="{{ submission.submitted_at|date:'U' }}" data-likes="{{ submission.engagement.likes|default:'0' }}" data-comments="{{ submission.engagement.comments|default:'0' }}" data-views="{{ submission.engagement.views|default:'0' }}" data-usage="{{ submission.studio_usage_count|default:'0' }}" data-reports="{{ submission.open_report_count|default:'0' }}" data-original-order="{{ forloop.counter0 }}">
             {% if active_tab == "approved" %}
             <div class="ugc-durable-preview relative bg-stone-100 border-b border-stone-200" style="height:220px" data-endpoint="{% url 'ugc:card_preview' workspace_id=workspace.id submission_id=submission.id %}">
                 <button type="button" class="ugc-preview-trigger w-full h-full" data-preview-title="{{ submission.title }}" aria-label="Preview {{ submission.title }}" disabled>
@@ -301,7 +304,7 @@
             cards.forEach((card) => { card.dataset.searchText = (card.textContent || '').toLocaleLowerCase(); });
             function num(card, key) { const value = Number(card.dataset[key] || 0); return Number.isFinite(value) ? value : 0; }
             function engagementScore(card) { return num(card, 'likes') + (num(card, 'comments') * 10) + (num(card, 'views') / 100); }
-            function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); if (mode === 'engaged') return (engagementScore(b) - engagementScore(a)) || newestFirst; if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
+            function compareCards(a, b) { const mode = sort.value; const newestFirst = num(b, 'submitted') - num(a, 'submitted'); if (mode === 'oldest') return num(a, 'submitted') - num(b, 'submitted'); const metric = {liked: 'likes', commented: 'comments', viewed: 'views'}[mode]; if (metric) return (num(b, metric) - num(a, metric)) || newestFirst; if (mode === 'engaged') return (engagementScore(b) - engagementScore(a)) || newestFirst; if (mode === 'used') return (num(b, 'usage') - num(a, 'usage')) || newestFirst; if (mode === 'reported') return (num(b, 'reports') - num(a, 'reports')) || newestFirst; return newestFirst || (num(a, 'originalOrder') - num(b, 'originalOrder')); }
             function refresh() { const sorted = cards.slice().sort(compareCards); let visible = 0; const activeSource = source ? source.value : ''; sorted.forEach((card) => { grid.appendChild(card); const matchesText = !activeQuery || card.dataset.searchText.includes(activeQuery); const matchesSource = !activeSource || card.dataset.source === activeSource; const matches = matchesText && matchesSource; card.classList.toggle('hidden', !matches); if (matches) visible += 1; }); const filtering = activeQuery.length > 0 || Boolean(activeSource); const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); empty.classList.toggle('hidden', visible !== 0); empty.classList.toggle('flex', visible === 0); grid.classList.toggle('hidden', visible === 0); resultCount.textContent = filtering ? `${visible} of ${cards.length}` : `${cards.length} item${cards.length === 1 ? '' : 's'}`; }
             function clearFilters() { search.value = ''; activeQuery = ''; if (source) source.value = ''; refresh(); search.focus(); }
             function clearSearch() { search.value = ''; activeQuery = ''; refresh(); search.focus(); }
@@ -310,7 +313,7 @@
             search.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); applySearch(); } });
             search.addEventListener('input', () => { const hasTypedValue = (search.value || '').trim().length > 0; clearButton.classList.toggle('hidden', !hasTypedValue); clearButton.classList.toggle('flex', hasTypedValue); });
             if (source) source.addEventListener('change', refresh);
-            sort.addEventListener('change', () => { const url = new URL(window.location.href); url.searchParams.set('sort', sort.value); window.location.assign(url); });
+            sort.addEventListener('change', () => { const url = new URL(window.location.href); url.searchParams.set('sort', sort.value); url.searchParams.set('q', search.value || ''); url.searchParams.set('source', source.value || ''); window.location.assign(url); });
             clearButton.addEventListener('click', clearSearch);
             if (emptyClear) emptyClear.addEventListener('click', clearFilters);
             refresh();

@@ -108,7 +108,7 @@ class CommunityCardTests(ComposerTestCase):
                 for i in range(101)
             ]
         )
-        for sort in ["newest", "engaged"]:
+        for sort in ["newest", "engaged", "liked", "commented", "viewed"]:
             response = self.client.get(self.url, {"tab": "approved", "hide_used": "1", "sort": sort})
             self.assertEqual([item.id for item in response.context["submissions"]], [self.item.id])
 
@@ -145,6 +145,47 @@ class CommunityCardTests(ComposerTestCase):
         )
         response = self.client.get(self.url, {"tab": "approved", "sort": "engaged"})
         self.assertEqual(response.context["submissions"][0].id, self.item.id)
+
+    def test_desktop_metric_sorts_rank_full_queue_with_and_without_hide_filter(self):
+        competitors = UGCSubmission.objects.bulk_create(
+            [
+                UGCSubmission(
+                    workspace=self.workspace,
+                    kind="photo",
+                    status="approved",
+                    target_type="top_sight",
+                    target_id=str(i),
+                    title=f"Other {i}",
+                    metadata={"discovery_import": {"like_count": 1, "comment_count": 2, "view_count": 3}},
+                )
+                for i in range(101)
+            ]
+        )
+        for mode, metric, label in [
+            ("liked", "like_count", "Most likes"),
+            ("commented", "comment_count", "Most comments"),
+            ("viewed", "view_count", "Most views"),
+        ]:
+            for hide_used in ["0", "1"]:
+                with self.subTest(mode=mode, hide_used=hide_used):
+                    self.item.metadata = {"discovery_import": {metric: "9000"}}
+                    self.item.save()
+                    response = self.client.get(self.url, {"tab": "approved", "sort": mode, "hide_used": hide_used})
+                    items = response.context["submissions"]
+                    self.assertEqual(len(items), 100)
+                    self.assertEqual(items[0].id, self.item.id)
+                    self.assertEqual(items[1].id, competitors[-1].id)
+                    self.assertContains(response, f'<option value="{mode}" selected>{label}</option>', html=True)
+
+    def test_desktop_metric_sorts_handle_unavailable_counts(self):
+        self.item.metadata = {"discovery_import": {"like_count": "unknown", "comment_count": -2, "view_count": None}}
+        self.item.save()
+        for mode in ["liked", "commented", "viewed"]:
+            response = self.client.get(self.url, {"tab": "approved", "sort": mode})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["submissions"][0].id, self.item.id)
+        response = self.client.get(self.url, {"tab": "approved", "sort": "invalid"})
+        self.assertEqual(response.context["active_sort"], "newest")
 
     @override_settings(MEDIA_ROOT="/private/tmp/ugc-card-test-media")
     def test_preview_serves_stored_image_and_does_not_require_external_cdn(self):
