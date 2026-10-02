@@ -99,8 +99,9 @@
                         <h2 class="font-bold text-stone-900">Clip plan</h2>
                         <p class="rv-muted">One overview clip, followed by one travel clip for every leg.</p>
                     </div>
-                    <div class="flex gap-2">
-                        <button type="button" class="rv-secondary" @click="renderClip('overview', 0)" :disabled="rendering">Render overview MP4</button>
+                    <div class="flex flex-wrap gap-2 justify-end">
+                        <button type="button" class="rv-primary" @click="generateAll()" :disabled="packBusy">Generate all clips</button>
+                        <button type="button" class="rv-secondary" @click="renderClip('overview', 0)" :disabled="rendering">Overview MP4</button>
                         <button type="button" class="rv-secondary" @click="downloadManifest()">Manifest</button>
                     </div>
                 </div>
@@ -193,6 +194,8 @@ function routeVideoBuilder() {
         ],
         loading: false,
         rendering: false,
+        renderJob: null,
+        pollTimer: null,
         error: '',
         result: null,
 
