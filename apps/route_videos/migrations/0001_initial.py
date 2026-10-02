@@ -10,7 +10,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("workspaces", "0001_initial"),
+        ("workspaces", "0005_workspace_community_smart_rules"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
