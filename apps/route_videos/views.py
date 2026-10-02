@@ -324,6 +324,16 @@ def start_render_pack(request, workspace_id):
     if str(manifest.get("workspace_id") or "") != str(workspace.id):
         return JsonResponse({"error": "Route manifest does not belong to this workspace."}, status=400)
 
+    route_coordinates = (manifest.get("route") or {}).get("coordinates") or []
+    total_coordinate_count = len(route_coordinates)
+    for leg in legs:
+        coordinates = leg.get("coordinates") or []
+        if len(coordinates) < 2 or len(coordinates) > 20000:
+            return JsonResponse({"error": "A route leg has invalid geometry."}, status=400)
+        total_coordinate_count += len(coordinates)
+    if total_coordinate_count > 100000:
+        return JsonResponse({"error": "This route is too detailed to render as one pack."}, status=400)
+
     manifest["title"] = str(body.get("title") or "Tennessee Road Trip")[:140]
     manifest["marker_label"] = str(body.get("marker_label") or "TN")[:8]
     manifest["map_style"] = str(body.get("map_style") or "outdoors-v12")[:80]
