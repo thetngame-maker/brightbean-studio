@@ -679,6 +679,10 @@
                     <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.5"/><path d="M21 15l-5-5L5 20"/></svg>
                     <span class="sidebar-nav-label">Community Content</span>
                 </a>
+                <a href="{% url 'route_videos:builder' workspace_id=request.workspace.id %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.app_name == 'route_videos' %}active{% endif %}">
+                    <svg class="flex-shrink-0" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l5-2 8 3 5-2v13l-5 2-8-3-5 2z"/><path d="M8 4v13M16 7v13"/><circle cx="8" cy="9" r="1.5"/><circle cx="16" cy="15" r="1.5"/></svg>
+                    <span class="sidebar-nav-label">Route Videos</span>
+                </a>
                 {% endif %}
 
                 <a href="{% url 'notifications:list' %}" class="mb-1 sidebar-nav-item {% if request.resolver_match.url_name == 'list' and request.resolver_match.app_name == 'notifications' %}active{% endif %}">
