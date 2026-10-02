@@ -287,6 +287,7 @@ def render_clip(request, workspace_id):
                 "subtitle": f'{leg.get("distance_miles", 0)} mi · {leg.get("duration_minutes", 0)} min',
                 "marker_label": body.get("marker_label") or "TN",
                 "map_style": body.get("map_style") or "outdoors-v12",
+                "camera_follow": bool(body.get("camera_follow", True)),
             }
             filename = f"{clip_index + 2:02d}-route-leg.mp4"
         else:
