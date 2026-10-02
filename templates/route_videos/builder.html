@@ -30,6 +30,9 @@
 .rv-error { padding: 11px 13px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; }
 .rv-warning { padding: 12px 14px; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 13px; }
 .rv-muted { color: var(--text-tertiary); font-size: 13px; }
+.rv-progress-track { height: 8px; background: #f5f5f4; border-radius: 999px; overflow: hidden; }
+.rv-progress-bar { height: 100%; background: #f97316; border-radius: 999px; transition: width 250ms ease; }
+.rv-success { padding: 12px 14px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 13px; }
 @media (max-width: 900px) {
   .route-video-shell { padding: 16px; }
   .rv-grid { grid-template-columns: 1fr; }
@@ -100,6 +103,24 @@
                         <button type="button" class="rv-secondary" @click="renderClip('overview', 0)" :disabled="rendering">Render overview MP4</button>
                         <button type="button" class="rv-secondary" @click="downloadManifest()">Manifest</button>
                     </div>
+                </div>
+
+                <div class="mb-4 rounded-xl border border-stone-200 p-4" x-show="renderJob" x-cloak>
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <div>
+                            <div class="text-sm font-semibold text-stone-900" x-text="jobHeadline"></div>
+                            <div class="text-xs text-stone-500 mt-0.5" x-text="jobSubline"></div>
+                        </div>
+                        <span class="text-xs font-bold text-orange-600" x-text="jobPercent + '%'"></span>
+                    </div>
+                    <div class="rv-progress-track">
+                        <div class="rv-progress-bar" :style="'width:' + jobPercent + '%'"></div>
+                    </div>
+                    <div class="rv-success mt-3" x-show="renderJob && renderJob.status === 'completed'" x-cloak>
+                        All clips were saved to the <strong>Route Videos</strong> folder in Media Library.
+                        <a :href="renderJob ? renderJob.media_library_url : '#'" class="underline font-semibold ml-1">Open Media Library</a>
+                    </div>
+                    <div class="rv-error mt-3" x-show="renderJob && renderJob.status === 'failed'" x-cloak x-text="renderJob ? renderJob.error : ''"></div>
                 </div>
 
                 <div class="rv-clip">
@@ -179,6 +200,32 @@ function routeVideoBuilder() {
             return this.stops.filter(s => s.value.trim()).length >= 2;
         },
 
+        get packBusy() {
+            return this.renderJob && ['queued', 'rendering'].includes(this.renderJob.status);
+        },
+
+        get jobPercent() {
+            if (!this.renderJob || !this.renderJob.total_clips) return 0;
+            return Math.round((this.renderJob.completed_clips / this.renderJob.total_clips) * 100);
+        },
+
+        get jobHeadline() {
+            if (!this.renderJob) return '';
+            if (this.renderJob.status === 'queued') return 'Queued for rendering';
+            if (this.renderJob.status === 'rendering') return 'Generating video pack';
+            if (this.renderJob.status === 'completed') return 'Video pack complete';
+            if (this.renderJob.status === 'failed') return 'Video pack failed';
+            return 'Preparing videos';
+        },
+
+        get jobSubline() {
+            if (!this.renderJob) return '';
+            if (this.renderJob.status === 'completed') return this.renderJob.completed_clips + ' clips saved to Media Library';
+            if (this.renderJob.status === 'failed') return 'Rendering stopped before all clips were completed';
+            const active = this.renderJob.current_clip_label ? ' · ' + this.renderJob.current_clip_label : '';
+            return this.renderJob.completed_clips + ' of ' + this.renderJob.total_clips + ' clips complete' + active;
+        },
+
         addStop() {
             if (this.stops.length >= {{ max_stops }}) return;
             this.stops.push({ id: this.nextId++, value: '' });
@@ -249,6 +296,58 @@ function routeVideoBuilder() {
             return h + ' hr' + (rest ? ' ' + rest + ' min' : '');
         },
 
+        async generateAll() {
+            if (!this.result || !this.result.manifest || this.packBusy) return;
+            this.error = '';
+            try {
+                const response = await fetch('{% url "route_videos:generate_all" workspace_id=workspace.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    },
+                    body: JSON.stringify({
+                        manifest: this.result.manifest,
+                        title: 'Tennessee Road Trip',
+                        marker_label: 'TN',
+                        map_style: 'outdoors-v12',
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not start video generation.');
+                this.renderJob = {
+                    ...data,
+                    completed_clips: 0,
+                    current_clip_label: '',
+                    error: '',
+                    assets: [],
+                    media_library_url: '',
+                };
+                this.schedulePoll(data.job_id);
+            } catch (err) {
+                this.error = err.message || 'Could not start video generation.';
+            }
+        },
+
+        schedulePoll(jobId) {
+            if (this.pollTimer) window.clearTimeout(this.pollTimer);
+            this.pollTimer = window.setTimeout(() => this.pollJob(jobId), 1200);
+        },
+
+        async pollJob(jobId) {
+            try {
+                const response = await fetch('{% url "route_videos:job_status" workspace_id=workspace.id job_id="00000000-0000-0000-0000-000000000000" %}'.replace('00000000-0000-0000-0000-000000000000', jobId));
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not read render progress.');
+                this.renderJob = data;
+                if (['queued', 'rendering'].includes(data.status)) {
+                    this.schedulePoll(jobId);
+                }
+            } catch (err) {
+                this.error = err.message || 'Could not read render progress.';
+            }
+        },
+
         async renderClip(type, index) {
             if (!this.result || !this.result.manifest) return;
             this.rendering = true;
@@ -265,6 +364,7 @@ function routeVideoBuilder() {
                         clip_type: type,
                         clip_index: index,
                         marker_label: 'TN',
+                        camera_follow: true,
                     }),
                 });
                 if (!response.ok) {
