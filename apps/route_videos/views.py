@@ -302,3 +302,86 @@ def render_clip(request, workspace_id):
         return response
     except (json.JSONDecodeError, UnicodeDecodeError, RuntimeError, ValueError, OSError) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+
+
+@require_POST
+def start_render_pack(request, workspace_id):
+    """Queue rendering of the overview + every leg into the workspace Media Library."""
+    workspace = _get_workspace(request, workspace_id)
+
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JsonResponse({"error": "Invalid JSON body."}, status=400)
+
+    manifest = body.get("manifest") or {}
+    stops = manifest.get("stops") or []
+    legs = ((manifest.get("clips") or {}).get("legs") or [])
+
+    if len(stops) < 2 or len(stops) > MAX_STOPS:
+        return JsonResponse({"error": "Invalid route manifest."}, status=400)
+    if str(manifest.get("workspace_id") or "") != str(workspace.id):
+        return JsonResponse({"error": "Route manifest does not belong to this workspace."}, status=400)
+
+    manifest["title"] = str(body.get("title") or "Tennessee Road Trip")[:140]
+    manifest["marker_label"] = str(body.get("marker_label") or "TN")[:8]
+    manifest["map_style"] = str(body.get("map_style") or "outdoors-v12")[:80]
+
+    from .models import RouteVideoRenderJob
+    from .tasks import render_route_video_pack
+
+    job = RouteVideoRenderJob.objects.create(
+        workspace=workspace,
+        created_by=request.user,
+        manifest=manifest,
+        total_clips=1 + len(legs),
+    )
+    render_route_video_pack(str(job.id))
+
+    return JsonResponse(
+        {
+            "job_id": str(job.id),
+            "status": job.status,
+            "total_clips": job.total_clips,
+        },
+        status=202,
+    )
+
+
+def render_pack_status(request, workspace_id, job_id):
+    """Return progress and Media Library destinations for one render pack."""
+    workspace = _get_workspace(request, workspace_id)
+
+    from django.urls import reverse
+
+    from .models import RouteVideoRenderJob
+
+    job = get_object_or_404(
+        RouteVideoRenderJob,
+        pk=job_id,
+        workspace=workspace,
+    )
+    assets = []
+    for asset_id in job.media_asset_ids or []:
+        assets.append(
+            {
+                "id": asset_id,
+                "detail_url": reverse(
+                    "media_library:asset_detail",
+                    kwargs={"workspace_id": workspace.id, "asset_id": asset_id},
+                ),
+            }
+        )
+
+    return JsonResponse(
+        {
+            "job_id": str(job.id),
+            "status": job.status,
+            "total_clips": job.total_clips,
+            "completed_clips": job.completed_clips,
+            "current_clip_label": job.current_clip_label,
+            "error": job.error_message,
+            "assets": assets,
+            "media_library_url": reverse("media_library:index", kwargs={"workspace_id": workspace.id}),
+        }
+    )
