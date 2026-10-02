@@ -1,11 +1,11 @@
 """Background generation of complete Route Video clip packs."""
 
-import os
 from pathlib import Path
 
 from background_task import background
 from django.core.files import File
 from django.utils import timezone
+from django.utils.text import slugify
 
 from apps.media_library.models import MediaFolder
 from apps.media_library.services import create_asset
@@ -45,8 +45,8 @@ def _build_scenes(manifest):
     for index, leg in enumerate(clips.get("legs") or []):
         start = _short_name(leg.get("from"))
         end = _short_name(leg.get("to"))
-        slug_start = start.lower().replace(" ", "-")[:40] or "start"
-        slug_end = end.lower().replace(" ", "-")[:40] or "stop"
+        slug_start = slugify(start)[:40] or "start"
+        slug_end = slugify(end)[:40] or "stop"
         yield {
             "filename": f"{index + 2:02d}-{slug_start}-to-{slug_end}.mp4",
             "label": f"{start} → {end}",
