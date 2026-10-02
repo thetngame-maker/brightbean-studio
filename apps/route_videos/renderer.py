@@ -208,6 +208,27 @@ def _draw_bottom_card(draw, title, subtitle):
     draw.text((left+28, top+80), subtitle, font=sub_font, fill=(87,83,78))
 
 
+def _camera_follow_keyframes(coords, token, base_camera, style, count=10):
+    """Pre-render a small set of moving-camera backgrounds for leg scenes.
+
+    Static Images does not provide a continuous camera stream, so we cache a
+    bounded number of camera positions and switch between them while overlays
+    are projected against the matching camera. This gives the travel clip a
+    map-follow feel without issuing a Mapbox request for every video frame.
+    """
+    count = max(4, min(int(count), 12))
+    follow_zoom = min(MAX_ZOOM, max(10.5, float(base_camera[2]) + 1.75))
+    frames = []
+    last_index = max(len(coords) - 1, 1)
+    for i in range(count):
+        progress = i / max(count - 1, 1)
+        coord_index = min(round(progress * last_index), len(coords) - 1)
+        lon, lat = coords[coord_index]
+        camera = (float(lon), float(lat), follow_zoom)
+        frames.append((camera, fetch_base_map(token, camera, style=style)))
+    return frames
+
+
 def render_scene_mp4(scene, token, destination=None):
     """Render one overview or leg scene to an MP4 file and return its path."""
     coords = scene.get("coordinates") or []
@@ -218,7 +239,17 @@ def render_scene_mp4(scene, token, destination=None):
     seconds = max(2, min(int(scene.get("seconds") or DEFAULT_SECONDS), 15))
     frame_count = fps * seconds
     camera = choose_camera(coords, padding=90)
-    base = fetch_base_map(token, camera, style=scene.get("map_style") or "outdoors-v12")
+    map_style = scene.get("map_style") or "outdoors-v12"
+    base = fetch_base_map(token, camera, style=map_style)
+    follow_frames = None
+    if scene.get("type") == "leg" and scene.get("camera_follow"):
+        follow_frames = _camera_follow_keyframes(
+            coords,
+            token,
+            camera,
+            map_style,
+            count=scene.get("camera_keyframes") or 10,
+        )
     projected = [project_to_image(coord, camera) for coord in coords]
 
     if destination is None:
@@ -244,7 +275,18 @@ def render_scene_mp4(scene, token, destination=None):
             progress = frame_index / max(frame_count - 1, 1)
             # Ease in/out gives the moving marker a less robotic feel.
             eased = progress * progress * (3 - 2 * progress)
-            image = base.copy()
+            frame_camera = camera
+            if follow_frames:
+                camera_index = min(
+                    round(eased * (len(follow_frames) - 1)),
+                    len(follow_frames) - 1,
+                )
+                frame_camera, frame_base = follow_frames[camera_index]
+                image = frame_base.copy()
+                frame_projected = [project_to_image(coord, frame_camera) for coord in coords]
+            else:
+                image = base.copy()
+                frame_projected = projected
             draw = ImageDraw.Draw(image)
 
             if scene.get("type") == "overview":
@@ -259,12 +301,12 @@ def render_scene_mp4(scene, token, destination=None):
                     scene.get("subtitle") or "",
                 )
             else:
-                marker, visible = _interpolate_path(projected, eased)
-                _draw_polyline(draw, projected, fill=(255,255,255), width=12)
+                marker, visible = _interpolate_path(frame_projected, eased)
+                _draw_polyline(draw, frame_projected, fill=(255,255,255), width=12)
                 _draw_polyline(draw, visible, fill=(249,115,22), width=7)
                 _draw_marker(draw, marker, scene.get("marker_label") or "TN")
-                _draw_stop(draw, projected[0], 1)
-                _draw_stop(draw, projected[-1], 2)
+                _draw_stop(draw, frame_projected[0], 1)
+                _draw_stop(draw, frame_projected[-1], 2)
                 _draw_bottom_card(
                     draw,
                     scene.get("title") or "Next Stop",
