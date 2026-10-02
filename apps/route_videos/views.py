@@ -6,18 +6,21 @@ and a deterministic clip plan for the later MP4 renderer.
 """
 
 import json
+import subprocess
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse
+from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
 from django.views.decorators.http import require_POST
 
 from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
+
+from .renderer import decode_polyline6, render_scene_mp4
 
 MAX_STOPS = 25
 MAPBOX_GEOCODE_URL = "https://api.mapbox.com/search/geocode/v6/forward"
@@ -158,7 +161,7 @@ def route_preview(request, workspace_id):
             {
                 "overview": "simplified",
                 "geometries": "polyline6",
-                "steps": "false",
+                "steps": "true",
             },
         )
         routes = directions.get("routes") or []
@@ -172,6 +175,13 @@ def route_preview(request, workspace_id):
         for index, leg in enumerate(legs):
             if index + 1 >= len(geocoded):
                 break
+            leg_coordinates = []
+            for step in leg.get("steps") or []:
+                geometry = step.get("geometry") or ""
+                step_coordinates = decode_polyline6(geometry) if geometry else []
+                if leg_coordinates and step_coordinates and leg_coordinates[-1] == step_coordinates[0]:
+                    step_coordinates = step_coordinates[1:]
+                leg_coordinates.extend(step_coordinates)
             clip_legs.append(
                 {
                     "index": index + 1,
@@ -180,6 +190,7 @@ def route_preview(request, workspace_id):
                     "distance_miles": round(float(leg.get("distance") or 0) / 1609.344, 1),
                     "duration_minutes": round(float(leg.get("duration") or 0) / 60),
                     "suggested_clip_seconds": 5,
+                    "coordinates": leg_coordinates,
                 }
             )
 
@@ -190,6 +201,7 @@ def route_preview(request, workspace_id):
         duration_label = f"{hours} hr {minutes} min" if hours else f"{minutes} min"
 
         encoded_route = route.get("geometry") or ""
+        route_coordinates = decode_polyline6(encoded_route) if encoded_route else []
         manifest = {
             "schema_version": 1,
             "workspace_id": str(workspace.id),
@@ -200,6 +212,7 @@ def route_preview(request, workspace_id):
                 "duration_seconds": round(duration_seconds),
                 "duration_label": duration_label,
                 "geometry_polyline6": encoded_route,
+                "coordinates": route_coordinates,
             },
             "stops": geocoded,
             "clips": {
@@ -207,6 +220,7 @@ def route_preview(request, workspace_id):
                     "type": "overview",
                     "suggested_duration_seconds": 5,
                     "show_all_stops": True,
+                    "coordinates": route_coordinates,
                 },
                 "legs": clip_legs,
             },
