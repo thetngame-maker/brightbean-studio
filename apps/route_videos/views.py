@@ -239,3 +239,67 @@ def route_preview(request, workspace_id):
         )
     except (RuntimeError, ValueError) as exc:
         return JsonResponse({"error": str(exc)}, status=400)
+
+
+@require_POST
+def render_clip(request, workspace_id):
+    """Render one overview or leg scene and stream the MP4 response."""
+    _get_workspace(request, workspace_id)
+    token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
+    if not token:
+        return JsonResponse({"error": "Mapbox is not configured yet."}, status=503)
+
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+        manifest = body.get("manifest") or {}
+        route = manifest.get("route") or {}
+        stops = manifest.get("stops") or []
+        clips = manifest.get("clips") or {}
+        clip_type = str(body.get("clip_type") or "overview")
+        clip_index = int(body.get("clip_index") or 0)
+
+        if len(stops) < 2 or len(stops) > MAX_STOPS:
+            raise ValueError("Invalid route manifest.")
+
+        if clip_type == "overview":
+            overview = clips.get("overview") or {}
+            scene = {
+                "type": "overview",
+                "coordinates": overview.get("coordinates") or route.get("coordinates") or [],
+                "stops": stops,
+                "seconds": overview.get("suggested_duration_seconds") or 5,
+                "fps": (manifest.get("format") or {}).get("fps") or 30,
+                "title": body.get("title") or "Tennessee Road Trip",
+                "subtitle": f'{len(stops)} stops · {route.get("distance_miles", 0)} mi · {route.get("duration_label", "")}',
+                "map_style": body.get("map_style") or "outdoors-v12",
+            }
+            filename = "01-route-overview.mp4"
+        elif clip_type == "leg":
+            legs = clips.get("legs") or []
+            if clip_index < 0 or clip_index >= len(legs):
+                raise ValueError("Invalid route leg.")
+            leg = legs[clip_index]
+            scene = {
+                "type": "leg",
+                "coordinates": leg.get("coordinates") or [],
+                "seconds": leg.get("suggested_clip_seconds") or 5,
+                "fps": (manifest.get("format") or {}).get("fps") or 30,
+                "title": f'{str(leg.get("from") or "").split(",")[0]} → {str(leg.get("to") or "").split(",")[0]}',
+                "subtitle": f'{leg.get("distance_miles", 0)} mi · {leg.get("duration_minutes", 0)} min',
+                "marker_label": body.get("marker_label") or "TN",
+                "map_style": body.get("map_style") or "outdoors-v12",
+            }
+            filename = f"{clip_index + 2:02d}-route-leg.mp4"
+        else:
+            raise ValueError("Unknown clip type.")
+
+        coordinates = scene.get("coordinates") or []
+        if len(coordinates) < 2 or len(coordinates) > 20000:
+            raise ValueError("This clip has invalid route geometry.")
+
+        rendered_path = render_scene_mp4(scene, token)
+        response = FileResponse(open(rendered_path, "rb"), content_type="video/mp4", as_attachment=True, filename=filename)
+        response._resource_closers.append(lambda: __import__("pathlib").Path(rendered_path).unlink(missing_ok=True))
+        return response
+    except (json.JSONDecodeError, UnicodeDecodeError, RuntimeError, ValueError, OSError) as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
