@@ -33,7 +33,8 @@ urlpatterns = [
     path("workspace/<uuid:workspace_id>/calendar/", include("apps.calendar.urls")),
     path("workspace/<uuid:workspace_id>/inbox/", include("apps.inbox.urls")),
     path("workspace/<uuid:workspace_id>/community-content/", include("apps.common.ugc_urls")),
-    path("workspace/<uuid:workspace_id>/analytics/", include("apps.analytics.urls")),\n    path("workspace/<uuid:workspace_id>/route-videos/", include("apps.route_videos.urls")),
+    path("workspace/<uuid:workspace_id>/analytics/", include("apps.analytics.urls")),
+    path("workspace/<uuid:workspace_id>/route-videos/", include("apps.route_videos.urls")),
     path("webhooks/", include("apps.inbox.webhook_urls")),
     # Agent API (Phase 2) — programmatic access for external AI agents.
     # Authenticated via scoped bearer tokens issued from the Organization
