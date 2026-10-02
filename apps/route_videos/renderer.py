@@ -24,6 +24,19 @@ DEFAULT_SECONDS = 5
 TILE_SIZE = 512
 MAX_ZOOM = 15.5
 MIN_ZOOM = 3.0
+ALLOWED_MAP_STYLES = {
+    "outdoors-v12",
+    "streets-v12",
+    "light-v11",
+    "dark-v11",
+    "satellite-streets-v12",
+}
+
+
+def _safe_map_style(value):
+    value = str(value or "outdoors-v12")
+    return value if value in ALLOWED_MAP_STYLES else "outdoors-v12"
+
 
 
 def decode_polyline6(encoded):
@@ -239,7 +252,7 @@ def render_scene_mp4(scene, token, destination=None):
     seconds = max(2, min(int(scene.get("seconds") or DEFAULT_SECONDS), 15))
     frame_count = fps * seconds
     camera = choose_camera(coords, padding=90)
-    map_style = scene.get("map_style") or "outdoors-v12"
+    map_style = _safe_map_style(scene.get("map_style"))
     base = fetch_base_map(token, camera, style=map_style)
     follow_frames = None
     if scene.get("type") == "leg" and scene.get("camera_follow"):
