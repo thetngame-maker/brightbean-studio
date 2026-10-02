@@ -96,7 +96,10 @@
                         <h2 class="font-bold text-stone-900">Clip plan</h2>
                         <p class="rv-muted">One overview clip, followed by one travel clip for every leg.</p>
                     </div>
-                    <button type="button" class="rv-secondary" @click="downloadManifest()">Download manifest</button>
+                    <div class="flex gap-2">
+                        <button type="button" class="rv-secondary" @click="renderClip('overview', 0)" :disabled="rendering">Render overview MP4</button>
+                        <button type="button" class="rv-secondary" @click="downloadManifest()">Manifest</button>
+                    </div>
                 </div>
 
                 <div class="rv-clip">
@@ -119,7 +122,7 @@
                             <div class="font-semibold text-sm text-stone-900 truncate"><span x-text="shortName(leg.from)"></span> → <span x-text="shortName(leg.to)"></span></div>
                             <div class="text-xs text-stone-500 mt-0.5"><span x-text="leg.distance_miles + ' mi'"></span> · <span x-text="formatMinutes(leg.duration_minutes)"></span></div>
                         </div>
-                        <span class="text-xs font-semibold text-stone-400" x-text="leg.suggested_clip_seconds + ' sec'"></span>
+                        <button type="button" class="rv-secondary" @click="renderClip('leg', index)" :disabled="rendering">Render MP4</button>
                     </div>
                 </template>
             </section>
@@ -151,8 +154,8 @@
             </div>
 
             <div class="mt-4 rounded-xl border border-stone-200 p-3" x-show="result" x-cloak>
-                <div class="text-xs font-bold uppercase tracking-wide text-stone-400 mb-2">Next renderer milestone</div>
-                <div class="text-sm text-stone-700">Animate the route line and TN icon along each leg, then export each scene as a 1080×1920 MP4.</div>
+                <div class="text-xs font-bold uppercase tracking-wide text-stone-400 mb-2">Renderer ready</div>
+                <div class="text-sm text-stone-700">Overview and individual travel legs can now export as 1080×1920 H.264 MP4 clips with an animated TN marker.</div>
             </div>
         </aside>
     </div>
@@ -168,6 +171,7 @@ function routeVideoBuilder() {
             { id: 3, value: '' },
         ],
         loading: false,
+        rendering: false,
         error: '',
         result: null,
 
@@ -243,6 +247,46 @@ function routeVideoBuilder() {
             const h = Math.floor(m / 60);
             const rest = m % 60;
             return h + ' hr' + (rest ? ' ' + rest + ' min' : '');
+        },
+
+        async renderClip(type, index) {
+            if (!this.result || !this.result.manifest) return;
+            this.rendering = true;
+            this.error = '';
+            try {
+                const response = await fetch('{% url "route_videos:render" workspace_id=workspace.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    },
+                    body: JSON.stringify({
+                        manifest: this.result.manifest,
+                        clip_type: type,
+                        clip_index: index,
+                        marker_label: 'TN',
+                    }),
+                });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Could not render the video.');
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = type === 'overview'
+                    ? '01-route-overview.mp4'
+                    : String(index + 2).padStart(2, '0') + '-route-leg.mp4';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                this.error = err.message || 'Could not render the video.';
+            } finally {
+                this.rendering = false;
+            }
         },
 
         downloadManifest() {
