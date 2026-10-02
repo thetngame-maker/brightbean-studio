@@ -18,6 +18,7 @@ env = environ.Env(
     OPENAI_CAPTION_BATCH_SIZE=(int, 2),
     OPENAI_CAPTION_MAX_WORKERS=(int, 4),
     OPENAI_CAPTION_TIMEOUT=(int, 60),
+    MAPBOX_ACCESS_TOKEN=(str, ""),
 )
 
 environ.Env.read_env(BASE_DIR / ".env", overwrite=False)
@@ -81,6 +82,7 @@ LOCAL_APPS = [
     "apps.mcp",
     "apps.oauth_server",
     "apps.analytics",
+    "apps.route_videos.apps.RouteVideosConfig",
     "theme",
 ]
 
@@ -134,6 +136,7 @@ OPENAI_CAPTION_MODEL = env("OPENAI_CAPTION_MODEL")
 OPENAI_CAPTION_BATCH_SIZE = env("OPENAI_CAPTION_BATCH_SIZE")
 OPENAI_CAPTION_MAX_WORKERS = env("OPENAI_CAPTION_MAX_WORKERS")
 OPENAI_CAPTION_TIMEOUT = env("OPENAI_CAPTION_TIMEOUT")
+MAPBOX_ACCESS_TOKEN = env("MAPBOX_ACCESS_TOKEN")
 if REDIS_URL:
     CACHES = {
         "default": {

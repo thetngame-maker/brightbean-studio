@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+
+{% block title %}Route Videos — {{ workspace.name }} — TN Social Studio{% endblock %}
+
+{% block extra_head %}
+<style>
+.route-video-shell { max-width: 1280px; margin: 0 auto; padding: 24px; width: 100%; }
+.rv-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.9fr); gap: 20px; align-items: start; }
+.rv-card { background: #fff; border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 1px 2px rgba(0,0,0,.02); }
+.rv-card-pad { padding: 20px; }
+.rv-stop { display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid var(--border); border-radius: 12px; background: #fff; }
+.rv-stop + .rv-stop { margin-top: 8px; }
+.rv-index { width: 30px; height: 30px; border-radius: 999px; background: #f97316; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+.rv-input { width: 100%; border: 0; outline: 0; font-size: 14px; background: transparent; color: var(--text-primary); }
+.rv-action { border: 1px solid var(--border); background: #fff; width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); cursor: pointer; }
+.rv-action:hover { background: var(--surface-1); color: var(--text-primary); }
+.rv-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 16px; border: 0; border-radius: 11px; background: #f97316; color: #fff; font-weight: 700; cursor: pointer; }
+.rv-primary:disabled { opacity: .55; cursor: wait; }
+.rv-secondary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; padding: 0 13px; border: 1px solid var(--border); border-radius: 10px; background: #fff; color: var(--text-primary); font-size: 13px; font-weight: 650; cursor: pointer; }
+.rv-map { background: #171717; border-radius: 16px; overflow: hidden; aspect-ratio: 9/16; width: min(100%, 430px); margin: 0 auto; position: relative; }
+.rv-map img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rv-map-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 30px; text-align: center; color: #a8a29e; background: radial-gradient(circle at 50% 30%, #292524 0, #171717 55%, #0c0a09 100%); }
+.rv-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.rv-stat { background: var(--surface-1); border-radius: 12px; padding: 12px; }
+.rv-stat strong { display: block; font-size: 18px; color: var(--text-primary); }
+.rv-stat span { font-size: 11px; color: var(--text-tertiary); }
+.rv-clip { border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: flex; gap: 12px; align-items: center; }
+.rv-clip + .rv-clip { margin-top: 8px; }
+.rv-clip-num { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 10px; background: #fff7ed; color: #c2410c; display: flex; align-items: center; justify-content: center; font-weight: 800; }
+.rv-error { padding: 11px 13px; border-radius: 10px; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; font-size: 13px; }
+.rv-warning { padding: 12px 14px; border-radius: 10px; background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412; font-size: 13px; }
+.rv-muted { color: var(--text-tertiary); font-size: 13px; }
+.rv-progress-track { height: 8px; background: #f5f5f4; border-radius: 999px; overflow: hidden; }
+.rv-progress-bar { height: 100%; background: #f97316; border-radius: 999px; transition: width 250ms ease; }
+.rv-success { padding: 12px 14px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; font-size: 13px; }
+@media (max-width: 900px) {
+  .route-video-shell { padding: 16px; }
+  .rv-grid { grid-template-columns: 1fr; }
+  .rv-map { width: min(100%, 380px); }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="route-video-shell" x-data="routeVideoBuilder()">
+    {% csrf_token %}
+    <div class="flex items-start justify-between gap-4 mb-6">
+        <div>
+            <div class="text-xs font-bold uppercase tracking-[.12em] text-orange-600 mb-1">Content tool</div>
+            <h1 class="text-2xl font-bold text-stone-900">Route Video Generator</h1>
+            <p class="text-sm text-stone-500 mt-1">Build the map clips between every stop, then assemble them with destination footage in CapCut.</p>
+        </div>
+        <span class="text-xs font-semibold rounded-full bg-orange-50 text-orange-700 px-3 py-1.5">9:16 · 1080×1920</span>
+    </div>
+
+    {% if not mapbox_configured %}
+    <div class="rv-warning mb-5">
+        <strong>Mapbox setup required.</strong> Add <code>MAPBOX_ACCESS_TOKEN</code> to the Studio web service before generating live routes.
+    </div>
+    {% endif %}
+
+    <div class="rv-grid">
+        <div class="space-y-5">
+            <section class="rv-card rv-card-pad">
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h2 class="font-bold text-stone-900">Stops</h2>
+                        <p class="rv-muted">Enter them in the order you want the video to travel.</p>
+                    </div>
+                    <button type="button" class="rv-secondary" @click="addStop()" :disabled="stops.length >= {{ max_stops }}">+ Add stop</button>
+                </div>
+
+                <template x-for="(stop, index) in stops" :key="stop.id">
+                    <div class="rv-stop">
+                        <div class="rv-index" x-text="index + 1"></div>
+                        <input class="rv-input" x-model="stop.value" @keydown.enter.prevent="generateRoute()" :placeholder="index === 0 ? 'Start location' : 'Next destination'">
+                        <div class="flex gap-1">
+                            <button type="button" class="rv-action" title="Move up" @click="moveStop(index, -1)" :disabled="index === 0">↑</button>
+                            <button type="button" class="rv-action" title="Move down" @click="moveStop(index, 1)" :disabled="index === stops.length - 1">↓</button>
+                            <button type="button" class="rv-action" title="Remove" @click="removeStop(index)" :disabled="stops.length <= 2">×</button>
+                        </div>
+                    </div>
+                </template>
+
+                <div class="mt-4 flex flex-wrap items-center gap-3">
+                    <button type="button" class="rv-primary" @click="generateRoute()" :disabled="loading || !canGenerate">
+                        <span x-show="!loading">Generate route</span>
+                        <span x-show="loading" x-cloak>Building route…</span>
+                    </button>
+                    <button type="button" class="rv-secondary" @click="loadExample()">Load example</button>
+                    <span class="rv-muted" x-text="stops.length + ' / {{ max_stops }} stops'"></span>
+                </div>
+                <div class="rv-error mt-4" x-show="error" x-cloak x-text="error"></div>
+            </section>
+
+            <section class="rv-card rv-card-pad" x-show="result" x-cloak>
+                <div class="flex items-center justify-between gap-3 mb-4">
+                    <div>
+                        <h2 class="font-bold text-stone-900">Clip plan</h2>
+                        <p class="rv-muted">One overview clip, followed by one travel clip for every leg.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2 justify-end">
+                        <button type="button" class="rv-primary" @click="generateAll()" :disabled="packBusy">Generate all clips</button>
+                        <button type="button" class="rv-secondary" @click="renderClip('overview', 0)" :disabled="rendering">Overview MP4</button>
+                        <button type="button" class="rv-secondary" @click="downloadManifest()">Manifest</button>
+                    </div>
+                </div>
+
+                <div class="mb-4 rounded-xl border border-stone-200 p-4" x-show="renderJob" x-cloak>
+                    <div class="flex items-center justify-between gap-3 mb-2">
+                        <div>
+                            <div class="text-sm font-semibold text-stone-900" x-text="jobHeadline"></div>
+                            <div class="text-xs text-stone-500 mt-0.5" x-text="jobSubline"></div>
+                        </div>
+                        <span class="text-xs font-bold text-orange-600" x-text="jobPercent + '%'"></span>
+                    </div>
+                    <div class="rv-progress-track">
+                        <div class="rv-progress-bar" :style="'width:' + jobPercent + '%'"></div>
+                    </div>
+                    <div class="rv-success mt-3" x-show="renderJob && renderJob.status === 'completed'" x-cloak>
+                        All clips were saved to the <strong>Route Videos</strong> folder in Media Library.
+                        <a :href="renderJob ? renderJob.media_library_url : '#'" class="underline font-semibold ml-1">Open Media Library</a>
+                    </div>
+                    <div class="rv-error mt-3" x-show="renderJob && renderJob.status === 'failed'" x-cloak x-text="renderJob ? renderJob.error : ''"></div>
+                </div>
+
+                <div class="rv-clip">
+                    <div class="rv-clip-num">01</div>
+                    <div class="min-w-0 flex-1">
+                        <div class="font-semibold text-sm text-stone-900">Full route overview</div>
+                        <div class="text-xs text-stone-500 mt-0.5">
+                            <span x-text="result ? result.stops.length + ' stops' : ''"></span>
+                            · <span x-text="result ? result.distance_miles + ' mi' : ''"></span>
+                            · <span x-text="result ? result.duration_label : ''"></span>
+                        </div>
+                    </div>
+                    <span class="text-xs font-semibold text-stone-400">5 sec</span>
+                </div>
+
+                <template x-for="(leg, index) in result ? result.legs : []" :key="index">
+                    <div class="rv-clip">
+                        <div class="rv-clip-num" x-text="String(index + 2).padStart(2, '0')"></div>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-semibold text-sm text-stone-900 truncate"><span x-text="shortName(leg.from)"></span> → <span x-text="shortName(leg.to)"></span></div>
+                            <div class="text-xs text-stone-500 mt-0.5"><span x-text="leg.distance_miles + ' mi'"></span> · <span x-text="formatMinutes(leg.duration_minutes)"></span></div>
+                        </div>
+                        <button type="button" class="rv-secondary" @click="renderClip('leg', index)" :disabled="rendering">Render MP4</button>
+                    </div>
+                </template>
+            </section>
+        </div>
+
+        <aside class="rv-card rv-card-pad sticky top-4">
+            <div class="flex items-center justify-between mb-3">
+                <div>
+                    <h2 class="font-bold text-stone-900">Vertical map preview</h2>
+                    <p class="rv-muted">This framing becomes the overview video canvas.</p>
+                </div>
+            </div>
+
+            <div class="rv-map">
+                <img x-show="result && result.static_map_url" :src="result ? result.static_map_url : ''" alt="Route preview">
+                <div class="rv-map-empty" x-show="!result || !result.static_map_url">
+                    <div>
+                        <div class="text-4xl mb-3">🗺️</div>
+                        <div class="font-semibold text-stone-300">Your route will appear here</div>
+                        <div class="text-xs mt-1">All stops + the complete driving path</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="rv-stats" x-show="result" x-cloak>
+                <div class="rv-stat"><strong x-text="result ? result.stops.length : '—'"></strong><span>Stops</span></div>
+                <div class="rv-stat"><strong x-text="result ? result.distance_miles : '—'"></strong><span>Miles</span></div>
+                <div class="rv-stat"><strong class="!text-sm pt-1" x-text="result ? result.duration_label : '—'"></strong><span>Drive time</span></div>
+            </div>
+
+            <div class="mt-4 rounded-xl border border-stone-200 p-3" x-show="result" x-cloak>
+                <div class="text-xs font-bold uppercase tracking-wide text-stone-400 mb-2">Renderer ready</div>
+                <div class="text-sm text-stone-700">Overview and individual travel legs can now export as 1080×1920 H.264 MP4 clips with an animated TN marker.</div>
+            </div>
+        </aside>
+    </div>
+</div>
+
+<script nonce="{{ request.csp_nonce }}">
+function routeVideoBuilder() {
+    return {
+        nextId: 4,
+        stops: [
+            { id: 1, value: '' },
+            { id: 2, value: '' },
+            { id: 3, value: '' },
+        ],
+        loading: false,
+        rendering: false,
+        renderJob: null,
+        pollTimer: null,
+        error: '',
+        result: null,
+
+        get canGenerate() {
+            return this.stops.filter(s => s.value.trim()).length >= 2;
+        },
+
+        get packBusy() {
+            return this.renderJob && ['queued', 'rendering'].includes(this.renderJob.status);
+        },
+
+        get jobPercent() {
+            if (!this.renderJob || !this.renderJob.total_clips) return 0;
+            return Math.round((this.renderJob.completed_clips / this.renderJob.total_clips) * 100);
+        },
+
+        get jobHeadline() {
+            if (!this.renderJob) return '';
+            if (this.renderJob.status === 'queued') return 'Queued for rendering';
+            if (this.renderJob.status === 'rendering') return 'Generating video pack';
+            if (this.renderJob.status === 'completed') return 'Video pack complete';
+            if (this.renderJob.status === 'failed') return 'Video pack failed';
+            return 'Preparing videos';
+        },
+
+        get jobSubline() {
+            if (!this.renderJob) return '';
+            if (this.renderJob.status === 'completed') return this.renderJob.completed_clips + ' clips saved to Media Library';
+            if (this.renderJob.status === 'failed') return 'Rendering stopped before all clips were completed';
+            const active = this.renderJob.current_clip_label ? ' · ' + this.renderJob.current_clip_label : '';
+            return this.renderJob.completed_clips + ' of ' + this.renderJob.total_clips + ' clips complete' + active;
+        },
+
+        addStop() {
+            if (this.stops.length >= {{ max_stops }}) return;
+            this.stops.push({ id: this.nextId++, value: '' });
+        },
+
+        removeStop(index) {
+            if (this.stops.length <= 2) return;
+            this.stops.splice(index, 1);
+        },
+
+        moveStop(index, delta) {
+            const target = index + delta;
+            if (target < 0 || target >= this.stops.length) return;
+            const [item] = this.stops.splice(index, 1);
+            this.stops.splice(target, 0, item);
+        },
+
+        loadExample() {
+            this.stops = [
+                { id: this.nextId++, value: 'Nashville, TN' },
+                { id: this.nextId++, value: 'Cummins Falls State Park, TN' },
+                { id: this.nextId++, value: 'Burgess Falls State Park, TN' },
+                { id: this.nextId++, value: 'Fall Creek Falls State Park, TN' },
+                { id: this.nextId++, value: 'Foster Falls, TN' },
+                { id: this.nextId++, value: 'Chattanooga, TN' },
+            ];
+            this.result = null;
+            this.error = '';
+        },
+
+        async generateRoute() {
+            const values = this.stops.map(s => s.value.trim()).filter(Boolean);
+            if (values.length < 2) {
+                this.error = 'Add at least two stops.';
+                return;
+            }
+            this.loading = true;
+            this.error = '';
+            try {
+                const response = await fetch('{% url "route_videos:preview" workspace_id=workspace.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    },
+                    body: JSON.stringify({ stops: values }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not build the route.');
+                this.result = data;
+            } catch (err) {
+                this.result = null;
+                this.error = err.message || 'Could not build the route.';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        shortName(value) {
+            return String(value || '').split(',')[0];
+        },
+
+        formatMinutes(minutes) {
+            const m = Number(minutes || 0);
+            if (m < 60) return m + ' min';
+            const h = Math.floor(m / 60);
+            const rest = m % 60;
+            return h + ' hr' + (rest ? ' ' + rest + ' min' : '');
+        },
+
+        async generateAll() {
+            if (!this.result || !this.result.manifest || this.packBusy) return;
+            this.error = '';
+            try {
+                const response = await fetch('{% url "route_videos:generate_all" workspace_id=workspace.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    },
+                    body: JSON.stringify({
+                        manifest: this.result.manifest,
+                        title: 'Tennessee Road Trip',
+                        marker_label: 'TN',
+                        map_style: 'outdoors-v12',
+                    }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not start video generation.');
+                this.renderJob = {
+                    ...data,
+                    completed_clips: 0,
+                    current_clip_label: '',
+                    error: '',
+                    assets: [],
+                    media_library_url: '',
+                };
+                this.schedulePoll(data.job_id);
+            } catch (err) {
+                this.error = err.message || 'Could not start video generation.';
+            }
+        },
+
+        schedulePoll(jobId) {
+            if (this.pollTimer) window.clearTimeout(this.pollTimer);
+            this.pollTimer = window.setTimeout(() => this.pollJob(jobId), 1200);
+        },
+
+        async pollJob(jobId) {
+            try {
+                const response = await fetch('{% url "route_videos:job_status" workspace_id=workspace.id job_id="00000000-0000-0000-0000-000000000000" %}'.replace('00000000-0000-0000-0000-000000000000', jobId));
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.error || 'Could not read render progress.');
+                this.renderJob = data;
+                if (['queued', 'rendering'].includes(data.status)) {
+                    this.schedulePoll(jobId);
+                }
+            } catch (err) {
+                this.error = err.message || 'Could not read render progress.';
+            }
+        },
+
+        async renderClip(type, index) {
+            if (!this.result || !this.result.manifest) return;
+            this.rendering = true;
+            this.error = '';
+            try {
+                const response = await fetch('{% url "route_videos:render" workspace_id=workspace.id %}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    },
+                    body: JSON.stringify({
+                        manifest: this.result.manifest,
+                        clip_type: type,
+                        clip_index: index,
+                        marker_label: 'TN',
+                        camera_follow: true,
+                    }),
+                });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.error || 'Could not render the video.');
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = type === 'overview'
+                    ? '01-route-overview.mp4'
+                    : String(index + 2).padStart(2, '0') + '-route-leg.mp4';
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+            } catch (err) {
+                this.error = err.message || 'Could not render the video.';
+            } finally {
+                this.rendering = false;
+            }
+        },
+
+        downloadManifest() {
+            if (!this.result || !this.result.manifest) return;
+            const blob = new Blob([JSON.stringify(this.result.manifest, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'route-video-manifest.json';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        },
+    };
+}
+</script>
+{% endblock %}
