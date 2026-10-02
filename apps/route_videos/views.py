@@ -107,7 +107,7 @@ def _static_map_url(stops, encoded_route):
     return (
         "https://api.mapbox.com/styles/v1/mapbox/outdoors-v12/static/"
         f"{overlay}/auto/720x1280"
-        f"?padding=80&logo=false&attribution=false&access_token={quote(token, safe='')}"
+        f"?padding=80&access_token={quote(token, safe='')}"
     )
 
 
