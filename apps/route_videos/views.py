@@ -340,7 +340,7 @@ def route_preview(request, workspace_id):
             "clips": {
                 "overview": {
                     "type": "overview",
-                    "suggested_duration_seconds": 5,
+                    "suggested_duration_seconds": 8,
                     "show_all_stops": True,
                     "coordinates": route_coordinates,
                 },
@@ -389,7 +389,7 @@ def render_clip(request, workspace_id):
                 "type": "overview",
                 "coordinates": overview.get("coordinates") or route.get("coordinates") or [],
                 "stops": stops,
-                "seconds": overview.get("suggested_duration_seconds") or 5,
+                "seconds": max(8, overview.get("suggested_duration_seconds") or 8),
                 "fps": (manifest.get("format") or {}).get("fps") or 30,
                 "title": body.get("title") or "Tennessee Road Trip",
                 "subtitle": f"{len(stops)} stops · {route.get('distance_miles', 0)} mi · {route.get('duration_label', '')}",

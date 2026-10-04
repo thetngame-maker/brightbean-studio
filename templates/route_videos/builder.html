@@ -137,7 +137,7 @@
                 <div class="flex items-center justify-between gap-3 mb-4">
                     <div>
                         <h2 class="font-bold text-stone-900">Clip plan</h2>
-                        <p class="rv-muted">One overview clip, followed by one travel clip for every leg.</p>
+                        <p class="rv-muted">Overview: named stops on the full map, then the trip description after 3 seconds. Travel clips follow.</p>
                     </div>
                     <div class="flex flex-wrap gap-2 justify-end">
                         <button type="button" class="rv-primary" @click="generateAll()" :disabled="packBusy">Generate all clips</button>
@@ -174,7 +174,7 @@
                             · <span x-text="result ? result.duration_label : ''"></span>
                         </div>
                     </div>
-                    <span class="text-xs font-semibold text-stone-400">5 sec</span>
+                    <span class="text-xs font-semibold text-stone-400">8 sec</span>
                 </div>
 
                 <template x-for="(leg, index) in result ? result.legs : []" :key="index">

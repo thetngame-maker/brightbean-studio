@@ -34,10 +34,10 @@ def _build_scenes(manifest):
             "type": "overview",
             "coordinates": overview.get("coordinates") or route.get("coordinates") or [],
             "stops": stops,
-            "seconds": overview.get("suggested_duration_seconds") or 5,
+            "seconds": max(8, overview.get("suggested_duration_seconds") or 8),
             "fps": fps,
             "title": manifest.get("title") or "Tennessee Road Trip",
-            "subtitle": f'{len(stops)} stops · {route.get("distance_miles", 0)} mi · {route.get("duration_label", "")}',
+            "subtitle": f"{len(stops)} stops · {route.get('distance_miles', 0)} mi · {route.get('duration_label', '')}",
             "map_style": manifest.get("map_style") or "outdoors-v12",
         },
     }
@@ -56,7 +56,7 @@ def _build_scenes(manifest):
                 "seconds": leg.get("suggested_clip_seconds") or 5,
                 "fps": fps,
                 "title": f"{start} → {end}",
-                "subtitle": f'{leg.get("distance_miles", 0)} mi · {leg.get("duration_minutes", 0)} min',
+                "subtitle": f"{leg.get('distance_miles', 0)} mi · {leg.get('duration_minutes', 0)} min",
                 "marker_label": manifest.get("marker_label") or "TN",
                 "map_style": manifest.get("map_style") or "outdoors-v12",
                 "camera_follow": True,
@@ -100,7 +100,7 @@ def render_route_video_pack(job_id):
             scene = item["scene"]
             coordinates = scene.get("coordinates") or []
             if len(coordinates) < 2:
-                raise ValueError(f'{item["label"]} has no usable route geometry.')
+                raise ValueError(f"{item['label']} has no usable route geometry.")
 
             job.current_clip_label = item["label"]
             job.save(update_fields=["current_clip_label", "updated_at"])

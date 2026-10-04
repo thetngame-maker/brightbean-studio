@@ -38,7 +38,6 @@ def _safe_map_style(value):
     return value if value in ALLOWED_MAP_STYLES else "outdoors-v12"
 
 
-
 def decode_polyline6(encoded):
     """Decode a Google/Mapbox polyline6 string into [lon, lat] coordinates."""
     if not encoded:
@@ -138,15 +137,19 @@ def fetch_base_map(token, camera, style="outdoors-v12"):
 
 def _font(size, bold=False):
     names = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
+        if bold
+        else "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
     ]
     for name in names:
         try:
             return ImageFont.truetype(name, size)
         except OSError:
             continue
-    return ImageFont.load_default()
+    return ImageFont.load_default(size=size)
 
 
 def _draw_polyline(draw, points, fill, width):
@@ -164,7 +167,7 @@ def _interpolate_path(points, progress):
     progress = max(0.0, min(1.0, float(progress)))
     distances = [0.0]
     total = 0.0
-    for a, b in zip(points, points[1:]):
+    for a, b in zip(points, points[1:], strict=False):
         segment = math.hypot(b[0] - a[0], b[1] - a[1])
         total += segment
         distances.append(total)
@@ -194,31 +197,136 @@ def _draw_marker(draw, position, label="TN"):
         return
     x, y = position
     r = 23
-    draw.ellipse((x-r-4, y-r-4, x+r+4, y+r+4), fill=(255,255,255), outline=(255,255,255), width=2)
-    draw.ellipse((x-r, y-r, x+r, y+r), fill=(249,115,22))
+    draw.ellipse((x - r - 4, y - r - 4, x + r + 4, y + r + 4), fill=(255, 255, 255), outline=(255, 255, 255), width=2)
+    draw.ellipse((x - r, y - r, x + r, y + r), fill=(249, 115, 22))
     font = _font(16, bold=True)
-    box = draw.textbbox((0,0), label, font=font)
-    draw.text((x-(box[2]-box[0])/2, y-(box[3]-box[1])/2-1), label, font=font, fill=(255,255,255))
+    box = draw.textbbox((0, 0), label, font=font)
+    draw.text((x - (box[2] - box[0]) / 2, y - (box[3] - box[1]) / 2 - 1), label, font=font, fill=(255, 255, 255))
 
 
 def _draw_stop(draw, position, number):
     x, y = position
     r = 18
-    draw.ellipse((x-r-3, y-r-3, x+r+3, y+r+3), fill=(255,255,255))
-    draw.ellipse((x-r, y-r, x+r, y+r), fill=(249,115,22))
+    draw.ellipse((x - r - 3, y - r - 3, x + r + 3, y + r + 3), fill=(255, 255, 255))
+    draw.ellipse((x - r, y - r, x + r, y + r), fill=(249, 115, 22))
     font = _font(14, bold=True)
     value = str(number)
-    box = draw.textbbox((0,0), value, font=font)
-    draw.text((x-(box[2]-box[0])/2, y-(box[3]-box[1])/2-1), value, font=font, fill=(255,255,255))
+    box = draw.textbbox((0, 0), value, font=font)
+    draw.text((x - (box[2] - box[0]) / 2, y - (box[3] - box[1]) / 2 - 1), value, font=font, fill=(255, 255, 255))
 
 
 def _draw_bottom_card(draw, title, subtitle):
-    left, top, right, bottom = 34, 1045, BASE_WIDTH-34, 1210
-    draw.rounded_rectangle((left, top, right, bottom), radius=24, fill=(255,255,255))
+    left, top, right, bottom = 34, 1045, BASE_WIDTH - 34, 1210
+    draw.rounded_rectangle((left, top, right, bottom), radius=24, fill=(255, 255, 255))
     title_font = _font(32, bold=True)
     sub_font = _font(22)
-    draw.text((left+28, top+28), title, font=title_font, fill=(28,25,23))
-    draw.text((left+28, top+80), subtitle, font=sub_font, fill=(87,83,78))
+    draw.text((left + 28, top + 28), title, font=title_font, fill=(28, 25, 23))
+    draw.text((left + 28, top + 80), subtitle, font=sub_font, fill=(87, 83, 78))
+
+
+OVERVIEW_INTRO_SECONDS = 3
+OVERVIEW_SECONDS = 8
+
+
+def _overview_labels(stops, camera):
+    """Lay out every name in separate callouts, linked to numbered map pins."""
+    if not stops:
+        return []
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    columns = 3
+    rows = max(5, math.ceil(len(stops) / columns) + 1)
+    width = 208
+    cell_height = 960 / rows
+    slots = [(20 + column * 236, 40 + row * cell_height) for row in range(rows) for column in range(columns)]
+    points = [project_to_image([stop["longitude"], stop["latitude"]], camera) for stop in stops]
+    labels = []
+    for index, stop in enumerate(stops, start=1):
+        text = f"{index}. {stop.get('name') or stop.get('location_name') or 'Stop'}"
+        for size in range(14 if len(stops) > 10 else 19, 7, -1):
+            font = _font(size, bold=True)
+            lines = []
+            remaining = text
+            while remaining:
+                count = len(remaining)
+                while count > 1 and measure.textlength(remaining[:count], font=font) > width - 20:
+                    count -= 1
+                if count < len(remaining):
+                    word_break = remaining.rfind(" ", 0, count)
+                    if word_break > 0:
+                        count = word_break + 1
+                lines.append(remaining[:count])
+                remaining = remaining[count:]
+            label_text = "\n".join(lines)
+            bbox = measure.multiline_textbbox((0, 0), label_text, font=font, spacing=3)
+            height = bbox[3] - bbox[1] + 20
+            if height <= cell_height - 10:
+                break
+        point = points[index - 1]
+
+        def slot_score(slot, height=height, point=point):
+            x, y = slot
+            collisions = sum(x - 25 <= px <= x + width + 25 and y - 25 <= py <= y + height + 25 for px, py in points)
+            overlaps = sum(
+                not (
+                    x + width + 8 <= label["box"][0]
+                    or label["box"][2] + 8 <= x
+                    or y + height + 8 <= label["box"][1]
+                    or label["box"][3] + 8 <= y
+                )
+                for label in labels
+            )
+            return (overlaps, collisions, (x + width / 2 - point[0]) ** 2 + (y + height / 2 - point[1]) ** 2)
+
+        candidates = list(slots)
+        if len(stops) <= 10:
+            for dx, dy in [(30, -height / 2), (-width - 30, -height / 2), (-width / 2, -height - 30), (-width / 2, 30)]:
+                for shift in (0, -60, 60):
+                    candidates.append(
+                        (
+                            max(20, min(point[0] + dx, BASE_WIDTH - width - 20)),
+                            max(40, min(point[1] + dy + shift, 1010 - height)),
+                        )
+                    )
+        slot = min(candidates, key=slot_score)
+        if slot in slots:
+            slots.remove(slot)
+        x, y = slot
+        labels.append(
+            {
+                "box": (x, y, x + width, y + height),
+                "text": label_text,
+                "font": font,
+                "point": point,
+                "number": index,
+                "text_offset": bbox[1],
+            }
+        )
+    return labels
+
+
+def _draw_overview(draw, projected, labels, scene, elapsed):
+    _draw_polyline(draw, projected, fill=(255, 255, 255), width=13)
+    _draw_polyline(draw, projected, fill=(249, 115, 22), width=7)
+    for label in labels:
+        left, top, right, bottom = label["box"]
+        x, y = label["point"]
+        anchor = (max(left, min(x, right)), max(top, min(y, bottom)))
+        draw.line([label["point"], anchor], fill=(255, 255, 255), width=5)
+        draw.line([label["point"], anchor], fill=(154, 52, 18), width=2)
+    for label in labels:
+        _draw_stop(draw, label["point"], label["number"])
+    for label in labels:
+        left, top, _, _ = label["box"]
+        draw.rounded_rectangle(label["box"], radius=9, fill=(255, 255, 255), outline=(249, 115, 22), width=2)
+        draw.multiline_text(
+            (left + 10, top + 10 - label["text_offset"]),
+            label["text"],
+            font=label["font"],
+            spacing=3,
+            fill=(28, 25, 23),
+        )
+    if elapsed >= OVERVIEW_INTRO_SECONDS:
+        _draw_bottom_card(draw, scene.get("title") or "Road Trip", scene.get("subtitle") or "")
 
 
 def _camera_follow_keyframes(coords, token, base_camera, style, count=10):
@@ -249,9 +357,12 @@ def render_scene_mp4(scene, token, destination=None):
         raise ValueError("Scene needs at least two route coordinates.")
 
     fps = int(scene.get("fps") or DEFAULT_FPS)
-    seconds = max(2, min(int(scene.get("seconds") or DEFAULT_SECONDS), 15))
+    overview = scene.get("type") == "overview"
+    seconds = max(OVERVIEW_SECONDS if overview else 2, min(int(scene.get("seconds") or DEFAULT_SECONDS), 15))
     frame_count = fps * seconds
-    camera = choose_camera(coords, padding=90)
+    stops = scene.get("stops") or []
+    camera_coords = coords + [[stop["longitude"], stop["latitude"]] for stop in stops] if overview else coords
+    camera = choose_camera(camera_coords, padding=130 if overview else 90)
     map_style = _safe_map_style(scene.get("map_style"))
     base = fetch_base_map(token, camera, style=map_style)
     follow_frames = None
@@ -264,21 +375,41 @@ def render_scene_mp4(scene, token, destination=None):
             count=scene.get("camera_keyframes") or 10,
         )
     projected = [project_to_image(coord, camera) for coord in coords]
+    overview_labels = _overview_labels(stops, camera) if overview else []
 
     if destination is None:
-        handle = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-        destination = handle.name
-        handle.close()
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
+            destination = handle.name
     destination = str(Path(destination))
 
     command = [
-        "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{BASE_WIDTH}x{BASE_HEIGHT}", "-r", str(fps), "-i", "-",
-        "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-pix_fmt", "yuv420p",
-        "-vf", f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos",
-        "-movflags", "+faststart",
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{BASE_WIDTH}x{BASE_HEIGHT}",
+        "-r",
+        str(fps),
+        "-i",
+        "-",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-vf",
+        f"scale={OUTPUT_WIDTH}:{OUTPUT_HEIGHT}:flags=lanczos",
+        "-movflags",
+        "+faststart",
         destination,
     ]
     proc = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -302,21 +433,12 @@ def render_scene_mp4(scene, token, destination=None):
                 frame_projected = projected
             draw = ImageDraw.Draw(image)
 
-            if scene.get("type") == "overview":
-                _, visible = _interpolate_path(projected, eased)
-                _draw_polyline(draw, projected, fill=(255,255,255), width=13)
-                _draw_polyline(draw, projected, fill=(249,115,22), width=7)
-                for i, stop in enumerate(scene.get("stops") or [], start=1):
-                    _draw_stop(draw, project_to_image([stop["longitude"], stop["latitude"]], camera), i)
-                _draw_bottom_card(
-                    draw,
-                    scene.get("title") or "Road Trip",
-                    scene.get("subtitle") or "",
-                )
+            if overview:
+                _draw_overview(draw, projected, overview_labels, scene, frame_index / fps)
             else:
                 marker, visible = _interpolate_path(frame_projected, eased)
-                _draw_polyline(draw, frame_projected, fill=(255,255,255), width=12)
-                _draw_polyline(draw, visible, fill=(249,115,22), width=7)
+                _draw_polyline(draw, frame_projected, fill=(255, 255, 255), width=12)
+                _draw_polyline(draw, visible, fill=(249, 115, 22), width=7)
                 _draw_marker(draw, marker, scene.get("marker_label") or "TN")
                 _draw_stop(draw, frame_projected[0], 1)
                 _draw_stop(draw, frame_projected[-1], 2)
