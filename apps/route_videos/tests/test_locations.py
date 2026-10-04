@@ -222,3 +222,39 @@ def test_static_map_path_uses_polyline5(settings):
         url = views._static_map_url([{"longitude": -120.2, "latitude": 38.5}], "directions-polyline6")
     decode.assert_called_once_with("directions-polyline6")
     assert f"path-5+f97316-0.9({expected})" in unquote(url)
+
+
+@pytest.mark.parametrize("name", ["Our first stop", "Falls, picnic & swim", "", "   "])
+def test_custom_stop_name_preserves_location(context, name):
+    chosen = selection(context)
+    chosen["display_name"] = name
+    response, api = post(
+        views.route_preview,
+        {"stops": [chosen, selection(context)]},
+        context,
+        {"routes": [{"geometry": "", "legs": [{"steps": []}]}]},
+    )
+    assert response.status_code == 200
+    data = json.loads(response.content)
+    stop = data["manifest"]["stops"][0]
+    assert stop["name"] == (name.strip() or "Foster Falls")
+    assert stop["location_name"] == "Foster Falls"
+    assert stop["longitude"] == -85.675012345
+    assert stop["mapbox_id"] == "poi.123"
+    assert data["legs"][0]["from"] == stop["name"]
+    assert "-85.675012345,35.181212345" in api.call_args.args[0]
+
+
+@pytest.mark.parametrize("name", ["x" * 81, 42, {}, "Falls\nPark"])
+def test_invalid_custom_names_rejected(context, name):
+    chosen = selection(context)
+    chosen["display_name"] = name
+    response, api = post(views.route_preview, {"stops": [chosen, selection(context)]}, context)
+    assert response.status_code == 400
+    api.assert_not_called()
+
+
+def test_video_titles_preserve_commas():
+    from apps.route_videos.tasks import _short_name
+
+    assert _short_name("Falls, picnic & swim") == "Falls, picnic & swim"

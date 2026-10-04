@@ -102,7 +102,14 @@ def _confirmed_stop(item, request, workspace):
         raise ValueError("This location selection is invalid. Please select it again.") from exc
     if selection["workspace_id"] != str(workspace.id) or selection["user_id"] != str(request.user.pk):
         raise ValueError("This location selection belongs to another workspace or user.")
-    return selection["stop"]
+    display_name = item.get("display_name", "")
+    if not isinstance(display_name, str) or len(display_name) > 80:
+        raise ValueError("Stop names must be text with at most 80 characters.")
+    display_name = display_name.strip()
+    if any(ord(character) < 32 for character in display_name):
+        raise ValueError("Stop names must be a single line.")
+    stop = selection["stop"]
+    return {**stop, "location_name": stop["name"], "name": display_name or stop["name"]}
 
 
 @require_POST

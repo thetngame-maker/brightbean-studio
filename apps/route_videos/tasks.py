@@ -16,7 +16,7 @@ from .renderer import render_scene_mp4
 
 
 def _short_name(value):
-    return str(value or "").split(",")[0].strip()
+    return str(value or "").strip()
 
 
 def _build_scenes(manifest):
