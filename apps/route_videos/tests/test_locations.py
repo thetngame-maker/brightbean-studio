@@ -209,3 +209,16 @@ def test_generate_all_persists_selected_coordinates(context):
     assert response.status_code == 202
     assert create.call_args.kwargs["manifest"]["stops"][0] == chosen
     enqueue.assert_called_once_with(str(job.id))
+
+
+def test_static_map_path_uses_polyline5(settings):
+    from urllib.parse import unquote
+
+    settings.MAPBOX_ACCESS_TOKEN = "test-token"
+    coordinates = [[-120.2, 38.5], [-120.95, 40.7], [-126.453, 43.252]]
+    expected = "_p~iF~ps|U_ulLnnqC_mqNvxq`@"
+    assert views._encode_static_path(coordinates) == expected
+    with patch.object(views, "decode_polyline6", return_value=coordinates) as decode:
+        url = views._static_map_url([{"longitude": -120.2, "latitude": 38.5}], "directions-polyline6")
+    decode.assert_called_once_with("directions-polyline6")
+    assert f"path-5+f97316-0.9({expected})" in unquote(url)

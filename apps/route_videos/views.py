@@ -199,13 +199,31 @@ def location_retrieve(request, workspace_id):
         return JsonResponse({"error": str(exc)}, status=503)
 
 
+def _encode_static_path(coordinates):
+    """Static Images requires polyline5; Directions/renderer retain polyline6."""
+    encoded = []
+    previous = [0, 0]
+    for longitude, latitude in coordinates:
+        for axis, value in enumerate((latitude, longitude)):
+            current = round(value * 100_000)
+            delta = current - previous[axis]
+            previous[axis] = current
+            number = ~(delta << 1) if delta < 0 else delta << 1
+            while number >= 0x20:
+                encoded.append(chr((0x20 | (number & 0x1F)) + 63))
+                number >>= 5
+            encoded.append(chr(number + 63))
+    return "".join(encoded)
+
+
 def _static_map_url(stops, encoded_route):
     token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
     overlays = []
     for stop in stops:
         overlays.append("pin-s+f97316({:.6f},{:.6f})".format(stop["longitude"], stop["latitude"]))
     if encoded_route:
-        overlays.append(f"path-5+f97316-0.9({quote(encoded_route, safe='')})")
+        static_path = _encode_static_path(decode_polyline6(encoded_route))
+        overlays.append(f"path-5+f97316-0.9({quote(static_path, safe='')})")
 
     overlay = ",".join(overlays)
     # 720x1280 mirrors the 9:16 output we will render in the video worker.

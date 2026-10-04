@@ -344,6 +344,7 @@ function routeVideoBuilder() {
             if (!suggestion || stop.searching) return;
             const sequence = ++stop.sequence;
             const session = stop.session;
+            stop.session = null; // A retrieve consumes this session, even if the user edits while it runs.
             stop.searching = true;
             stop.open = false;
             stop.message = '';
