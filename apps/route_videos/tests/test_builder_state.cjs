@@ -1,0 +1,80 @@
+// Run with: node apps/route_videos/tests/test_builder_state.cjs
+const { readFileSync } = require('node:fs');
+const { strict: assert } = require('node:assert');
+const { webcrypto } = require('node:crypto');
+const vm = require('node:vm');
+const template = readFileSync('templates/route_videos/builder.html', 'utf8');
+const source = template.match(/<script nonce=.*?>([\s\S]*?)<\/script>/)[1]
+    .replace(/{{ max_stops }}/g, '25').replace(/{% url .*?%}/g, '/endpoint/');
+const scope = { crypto: webcrypto, setTimeout, clearTimeout, document: { querySelector: () => ({value: 'csrf'}) } };
+vm.createContext(scope);
+vm.runInContext(source, scope);
+const make = () => { const app = scope.routeVideoBuilder(); app.init(); return app; };
+const selected = (name) => ({ name, confirmation: name, latitude: 35.123456789, longitude: -85.123456789 });
+const tick = () => new Promise(resolve => setImmediate(resolve));
+(async () => {
+    let app = make();
+    assert.equal(app.canGenerate, false);
+    app.stops.forEach((stop, i) => { stop.selected = selected(String(i)); });
+    assert.equal(app.canGenerate, true);
+    app.result = {manifest: {}};
+    app.moveStop(0, 1);
+    assert.equal(app.stops[0].selected.name, '1');
+    assert.equal(app.result, null);
+    app.result = {manifest: {}};
+    app.editStop(app.stops[0]);
+    clearTimeout(app.stops[0].timer);
+    assert.equal(app.canGenerate, false);
+    assert.equal(app.result, null);
+    app.loadExample();
+    assert.equal(app.canGenerate, false);
+    assert.equal(app.stops.length, 6);
+
+    app = make();
+    const stop = app.stops[0];
+    stop.value = 'Foster';
+    let resolveOld;
+    app.locationRequest = () => new Promise(resolve => { resolveOld = resolve; });
+    const old = app.searchStop(stop);
+    app.editStop(stop);
+    clearTimeout(stop.timer);
+    resolveOld({suggestions: [{mapbox_id: 'wrong'}]});
+    await old;
+    assert.equal(stop.suggestions.length, 0, 'Stale results must be discarded');
+
+    let resolveSelection;
+    app.locationRequest = () => new Promise(resolve => { resolveSelection = resolve; });
+    const retrieving = app.selectLocation(stop, {mapbox_id: 'old'});
+    app.editStop(stop);
+    clearTimeout(stop.timer);
+    resolveSelection({stop: selected('old')});
+    await retrieving;
+    assert.equal(stop.selected, null, 'Typing during retrieval must discard selection');
+
+    let resolveRoute;
+    app.stops.forEach((s, i) => { s.selected = selected(String(i)); });
+    scope.fetch = () => new Promise(resolve => { resolveRoute = resolve; });
+    const route = app.generateRoute();
+    app.addStop();
+    resolveRoute({ok: true, json: async () => ({manifest: {old: true}})});
+    await route;
+    assert.equal(app.result, null, 'Editing during route request must discard old route');
+
+    app = make();
+    app.stops[0].selected = selected('Nashville');
+    app.stops[1].value = 'Foster';
+    let request;
+    app.locationRequest = async (url, body) => { request = body; return {suggestions: [{mapbox_id: 'a'}]}; };
+    await app.searchStop(app.stops[1]);
+    assert.equal(request.proximity[0], app.stops[0].selected.longitude);
+    assert.equal(app.stops[1].active, -1, 'Do not implicitly select first result');
+    app.navigateResults(app.stops[1], 1);
+    assert.equal(app.stops[1].active, 0);
+    const session = request.session_token;
+    app.locationRequest = async (url, body) => { request = body; return {stop: selected('Foster')}; };
+    await app.selectLocation(app.stops[1], {mapbox_id: 'a'});
+    assert.equal(request.session_token, session);
+    assert.equal(app.stops[1].session, null);
+    assert.equal(app.canGenerate, true);
+    console.log('Passed: confirmations, reorder, invalidation, examples, stale search/retrieval/route, proximity, keyboard, session lifecycle');
+})().catch(error => { console.error(error); process.exitCode = 1; });

@@ -6,11 +6,14 @@ and a deterministic clip plan for the later MP4 renderer.
 """
 
 import json
+import math
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 from django.conf import settings
+from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.http import FileResponse, JsonResponse
 from django.shortcuts import get_object_or_404, render
@@ -22,7 +25,9 @@ from apps.workspaces.models import Workspace
 from .renderer import decode_polyline6, render_scene_mp4
 
 MAX_STOPS = 25
-MAPBOX_GEOCODE_URL = "https://api.mapbox.com/search/geocode/v6/forward"
+MAPBOX_SEARCH_URL = "https://api.mapbox.com/search/searchbox/v1"
+TN_PROXIMITY = "-86.0,35.8"
+LOCATION_SALT = "route-videos.location.v1"
 MAPBOX_DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox/driving"
 
 
@@ -52,53 +57,153 @@ def _mapbox_json(url, params):
         with urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:400]
-        raise RuntimeError(f"Mapbox returned HTTP {exc.code}: {detail}") from exc
+        raise RuntimeError(
+            f"Location service returned HTTP {exc.code}. Please try again or check Mapbox configuration."
+        ) from exc
     except (URLError, TimeoutError) as exc:
         raise RuntimeError("Mapbox could not be reached. Try again.") from exc
 
 
-def _geocode_stop(query):
-    payload = _mapbox_json(
-        MAPBOX_GEOCODE_URL,
-        {
-            "q": query,
-            "limit": 1,
-            "language": "en",
-        },
-    )
-    features = payload.get("features") or []
-    if not features:
-        raise ValueError(f'No location found for "{query}".')
+def _json_body(request):
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError("Invalid JSON body.") from exc
+    if not isinstance(body, dict):
+        raise ValueError("Expected a JSON object.")
+    return body
 
-    feature = features[0]
-    coordinates = (feature.get("geometry") or {}).get("coordinates") or []
-    if len(coordinates) < 2:
-        raise ValueError(f'No usable coordinates found for "{query}".')
 
-    props = feature.get("properties") or {}
-    label = (
-        props.get("full_address")
-        or props.get("name_preferred")
-        or props.get("name")
-        or feature.get("place_name")
-        or query
-    )
-    return {
-        "query": query,
-        "name": label,
-        "longitude": float(coordinates[0]),
-        "latitude": float(coordinates[1]),
-    }
+def _coordinates(longitude, latitude):
+    if isinstance(longitude, bool) or isinstance(latitude, bool):
+        raise ValueError("Invalid location coordinates.")
+    try:
+        lon, lat = float(longitude), float(latitude)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid location coordinates.") from exc
+    if not math.isfinite(lon) or not math.isfinite(lat) or not -180 <= lon <= 180 or not -90 <= lat <= 90:
+        raise ValueError("Invalid location coordinates.")
+    return lon, lat
+
+
+def _session_token(body):
+    try:
+        return str(UUID(str(body.get("session_token", ""))))
+    except ValueError as exc:
+        raise ValueError("Invalid search session. Please search again.") from exc
+
+
+def _confirmed_stop(item, request, workspace):
+    if not isinstance(item, dict) or not isinstance(item.get("confirmation"), str):
+        raise ValueError("Select and confirm a location for every stop before generating a route.")
+    try:
+        selection = signing.loads(item["confirmation"], salt=LOCATION_SALT)
+    except signing.BadSignature as exc:
+        raise ValueError("This location selection is invalid. Please select it again.") from exc
+    if selection["workspace_id"] != str(workspace.id) or selection["user_id"] != str(request.user.pk):
+        raise ValueError("This location selection belongs to another workspace or user.")
+    return selection["stop"]
+
+
+@require_POST
+def location_suggest(request, workspace_id):
+    _get_workspace(request, workspace_id)
+    try:
+        body = _json_body(request)
+        query = body.get("query")
+        if not isinstance(query, str) or not 2 <= len(query.strip()) <= 256:
+            raise ValueError("Enter between 2 and 256 characters to search.")
+        proximity = TN_PROXIMITY
+        if body.get("proximity") is not None:
+            point = body["proximity"]
+            if not isinstance(point, list) or len(point) != 2:
+                raise ValueError("Invalid search proximity.")
+            lon, lat = _coordinates(*point)
+            proximity = f"{lon},{lat}"
+        payload = _mapbox_json(
+            f"{MAPBOX_SEARCH_URL}/suggest",
+            {
+                "q": query.strip(),
+                "session_token": _session_token(body),
+                "country": "US",
+                "language": "en",
+                "limit": 6,
+                "types": "poi,place,address,locality",
+                "proximity": proximity,
+            },
+        )
+        suggestions = [
+            {
+                "mapbox_id": item["mapbox_id"],
+                "name": item.get("name_preferred") or item.get("name") or "Location",
+                "address": item.get("full_address") or item.get("place_formatted") or "",
+            }
+            for item in payload.get("suggestions", [])
+            if item.get("mapbox_id")
+        ]
+        return JsonResponse({"suggestions": suggestions, "attribution": payload.get("attribution", "© Mapbox")})
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except RuntimeError as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
+
+
+@require_POST
+def location_retrieve(request, workspace_id):
+    workspace = _get_workspace(request, workspace_id)
+    try:
+        body = _json_body(request)
+        mapbox_id = body.get("mapbox_id")
+        if not isinstance(mapbox_id, str) or not 1 <= len(mapbox_id) <= 1024:
+            raise ValueError("Choose a location from the search results.")
+        payload = _mapbox_json(
+            f"{MAPBOX_SEARCH_URL}/retrieve/{quote(mapbox_id, safe='')}",
+            {
+                "session_token": _session_token(body),
+                "language": "en",
+            },
+        )
+        features = payload.get("features") or []
+        if len(features) != 1:
+            raise ValueError("This location could not be resolved. Please choose another result.")
+        feature = features[0]
+        coordinates = (feature.get("geometry") or {}).get("coordinates")
+        if not isinstance(coordinates, list) or len(coordinates) != 2:
+            raise ValueError("This location has no usable coordinates.")
+        lon, lat = _coordinates(*coordinates)
+        props = feature.get("properties") or {}
+        if props.get("mapbox_id") != mapbox_id:
+            raise ValueError("The location did not match your selection. Please search again.")
+        stop = {
+            "mapbox_id": mapbox_id,
+            "name": props.get("name_preferred") or props.get("name") or "Selected location",
+            "address": props.get("full_address") or props.get("place_formatted") or "",
+            "longitude": lon,
+            "latitude": lat,
+            "source": "mapbox_searchbox",
+            "confirmed": True,
+        }
+        confirmation = signing.dumps(
+            {
+                "workspace_id": str(workspace.id),
+                "user_id": str(request.user.pk),
+                "stop": stop,
+            },
+            salt=LOCATION_SALT,
+            compress=True,
+        )
+        return JsonResponse({"stop": {**stop, "confirmation": confirmation}})
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    except RuntimeError as exc:
+        return JsonResponse({"error": str(exc)}, status=503)
 
 
 def _static_map_url(stops, encoded_route):
     token = getattr(settings, "MAPBOX_ACCESS_TOKEN", "")
     overlays = []
     for stop in stops:
-        overlays.append(
-            "pin-s+f97316({:.6f},{:.6f})".format(stop["longitude"], stop["latitude"])
-        )
+        overlays.append("pin-s+f97316({:.6f},{:.6f})".format(stop["longitude"], stop["latitude"]))
     if encoded_route:
         overlays.append(f"path-5+f97316-0.9({quote(encoded_route, safe='')})")
 
@@ -129,17 +234,13 @@ def route_preview(request, workspace_id):
     workspace = _get_workspace(request, workspace_id)
 
     try:
-        body = json.loads(request.body.decode("utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError):
-        return JsonResponse({"error": "Invalid JSON body."}, status=400)
-
-    raw_stops = body.get("stops") or []
-    stops = [str(item).strip() for item in raw_stops if str(item).strip()]
-
-    if len(stops) < 2:
-        return JsonResponse({"error": "Add at least two stops."}, status=400)
-    if len(stops) > MAX_STOPS:
-        return JsonResponse({"error": f"A route can contain at most {MAX_STOPS} stops."}, status=400)
+        body = _json_body(request)
+        raw_stops = body.get("stops")
+        if not isinstance(raw_stops, list) or not 2 <= len(raw_stops) <= MAX_STOPS:
+            raise ValueError(f"Add between 2 and {MAX_STOPS} confirmed stops.")
+        geocoded = [_confirmed_stop(item, request, workspace) for item in raw_stops]
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
 
     if not getattr(settings, "MAPBOX_ACCESS_TOKEN", ""):
         return JsonResponse(
@@ -151,10 +252,7 @@ def route_preview(request, workspace_id):
         )
 
     try:
-        geocoded = [_geocode_stop(stop) for stop in stops]
-        coordinate_string = ";".join(
-            f'{stop["longitude"]:.6f},{stop["latitude"]:.6f}' for stop in geocoded
-        )
+        coordinate_string = ";".join(f"{stop['longitude']},{stop['latitude']}" for stop in geocoded)
         directions = _mapbox_json(
             f"{MAPBOX_DIRECTIONS_URL}/{coordinate_string}",
             {
@@ -202,7 +300,7 @@ def route_preview(request, workspace_id):
         encoded_route = route.get("geometry") or ""
         route_coordinates = decode_polyline6(encoded_route) if encoded_route else []
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "workspace_id": str(workspace.id),
             "format": {"width": 1080, "height": 1920, "fps": 30},
             "route": {
@@ -269,7 +367,7 @@ def render_clip(request, workspace_id):
                 "seconds": overview.get("suggested_duration_seconds") or 5,
                 "fps": (manifest.get("format") or {}).get("fps") or 30,
                 "title": body.get("title") or "Tennessee Road Trip",
-                "subtitle": f'{len(stops)} stops · {route.get("distance_miles", 0)} mi · {route.get("duration_label", "")}',
+                "subtitle": f"{len(stops)} stops · {route.get('distance_miles', 0)} mi · {route.get('duration_label', '')}",
                 "map_style": body.get("map_style") or "outdoors-v12",
             }
             filename = "01-route-overview.mp4"
@@ -283,8 +381,8 @@ def render_clip(request, workspace_id):
                 "coordinates": leg.get("coordinates") or [],
                 "seconds": leg.get("suggested_clip_seconds") or 5,
                 "fps": (manifest.get("format") or {}).get("fps") or 30,
-                "title": f'{str(leg.get("from") or "").split(",")[0]} → {str(leg.get("to") or "").split(",")[0]}',
-                "subtitle": f'{leg.get("distance_miles", 0)} mi · {leg.get("duration_minutes", 0)} min',
+                "title": f"{str(leg.get('from') or '').split(',')[0]} → {str(leg.get('to') or '').split(',')[0]}",
+                "subtitle": f"{leg.get('distance_miles', 0)} mi · {leg.get('duration_minutes', 0)} min",
                 "marker_label": body.get("marker_label") or "TN",
                 "map_style": body.get("map_style") or "outdoors-v12",
                 "camera_follow": bool(body.get("camera_follow", True)),
@@ -298,7 +396,12 @@ def render_clip(request, workspace_id):
             raise ValueError("This clip has invalid route geometry.")
 
         rendered_path = render_scene_mp4(scene, token)
-        response = FileResponse(open(rendered_path, "rb"), content_type="video/mp4", as_attachment=True, filename=filename)
+        response = FileResponse(
+            open(rendered_path, "rb"),  # noqa: SIM115 — FileResponse closes the stream after sending it.
+            content_type="video/mp4",
+            as_attachment=True,
+            filename=filename,
+        )
         response._resource_closers.append(lambda: __import__("pathlib").Path(rendered_path).unlink(missing_ok=True))
         return response
     except (json.JSONDecodeError, UnicodeDecodeError, RuntimeError, ValueError, OSError) as exc:
@@ -317,7 +420,7 @@ def start_render_pack(request, workspace_id):
 
     manifest = body.get("manifest") or {}
     stops = manifest.get("stops") or []
-    legs = ((manifest.get("clips") or {}).get("legs") or [])
+    legs = (manifest.get("clips") or {}).get("legs") or []
 
     if len(stops) < 2 or len(stops) > MAX_STOPS:
         return JsonResponse({"error": "Invalid route manifest."}, status=400)

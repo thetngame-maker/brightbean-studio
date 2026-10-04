@@ -12,6 +12,10 @@
 .rv-stop + .rv-stop { margin-top: 8px; }
 .rv-index { width: 30px; height: 30px; border-radius: 999px; background: #f97316; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
 .rv-input { width: 100%; border: 0; outline: 0; font-size: 14px; background: transparent; color: var(--text-primary); }
+.rv-results { border: 1px solid #d6d3d1; border-radius: 8px; margin-top: 8px; overflow: hidden; }
+.rv-choice { display: block; width: 100%; text-align: left; padding: 10px; background: white; border: 0; border-bottom: 1px solid #e7e5e4; cursor: pointer; }
+.rv-choice:hover, .rv-choice:focus, .rv-choice[aria-selected="true"] { background: #fff7ed; outline: 2px solid #f97316; outline-offset: -2px; }
+.rv-input:focus { outline: 2px solid #f97316; outline-offset: 3px; border-radius: 3px; }
 .rv-action { border: 1px solid var(--border); background: #fff; width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-tertiary); cursor: pointer; }
 .rv-action:hover { background: var(--surface-1); color: var(--text-primary); }
 .rv-primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 0 16px; border: 0; border-radius: 11px; background: #f97316; color: #fff; font-weight: 700; cursor: pointer; }
@@ -65,7 +69,7 @@
                 <div class="flex items-center justify-between gap-3 mb-4">
                     <div>
                         <h2 class="font-bold text-stone-900">Stops</h2>
-                        <p class="rv-muted">Enter them in the order you want the video to travel.</p>
+                        <p class="rv-muted">Search and select each stop in travel order. Searches favor Tennessee, then the previous selected stop.</p>
                     </div>
                     <button type="button" class="rv-secondary" @click="addStop()" :disabled="stops.length >= {{ max_stops }}">+ Add stop</button>
                 </div>
@@ -73,7 +77,35 @@
                 <template x-for="(stop, index) in stops" :key="stop.id">
                     <div class="rv-stop">
                         <div class="rv-index" x-text="index + 1"></div>
-                        <input class="rv-input" x-model="stop.value" @keydown.enter.prevent="generateRoute()" :placeholder="index === 0 ? 'Start location' : 'Next destination'">
+                        <div class="min-w-0" @click.outside="stop.open = false">
+                            <input class="rv-input" x-model="stop.value" maxlength="256" autocomplete="off"
+                                role="combobox" aria-autocomplete="list" aria-haspopup="listbox"
+                                :aria-label="'Search stop ' + (index + 1)" :aria-expanded="stop.open && stop.suggestions.length > 0"
+                                :aria-controls="'locations-' + stop.id"
+                                :aria-activedescendant="stop.open && stop.active >= 0 ? 'location-' + stop.id + '-' + stop.active : null"
+                                @input="editStop(stop)" @focus="if (!stop.selected) searchStop(stop)"
+                                @keydown.arrow-down.prevent="navigateResults(stop, 1)" @keydown.arrow-up.prevent="navigateResults(stop, -1)"
+                                @keydown.escape.prevent="stop.open = false"
+                                @keydown.enter.prevent="if (stop.open && stop.active >= 0) selectLocation(stop, stop.suggestions[stop.active])"
+                                :placeholder="index === 0 ? 'Start location' : 'Next destination'">
+                            <div class="rv-muted mt-2" role="status" aria-live="polite" x-show="stop.searching || stop.message" x-text="stop.searching ? 'Finding locations…' : stop.message"></div>
+                            <div class="rv-results" role="listbox" :id="'locations-' + stop.id" :aria-label="'Locations for stop ' + (index + 1)" x-show="stop.open && stop.suggestions.length" x-cloak>
+                                <template x-for="(suggestion, choiceIndex) in stop.suggestions" :key="suggestion.mapbox_id">
+                                    <button type="button" class="rv-choice" role="option" :id="'location-' + stop.id + '-' + choiceIndex"
+                                        :aria-selected="stop.active === choiceIndex" @click="selectLocation(stop, suggestion)">
+                                        <strong class="block text-sm" x-text="suggestion.name"></strong>
+                                        <span class="block text-xs text-stone-500" x-text="suggestion.address"></span>
+                                    </button>
+                                </template>
+                                <div class="text-xs text-stone-500 p-2" x-text="stop.attribution"></div>
+                            </div>
+                            <div class="rv-success mt-2" x-show="stop.selected" x-cloak>
+                                <strong class="block" x-text="stop.selected ? '✓ Confirmed: ' + stop.selected.name : ''"></strong>
+                                <span class="block" x-text="stop.selected ? stop.selected.address : ''"></span>
+                                <span class="block text-xs" x-text="stop.selected ? stop.selected.latitude + ', ' + stop.selected.longitude : ''"></span>
+                                <button type="button" class="underline mt-1" @click="changeLocation(stop)">Change location</button>
+                            </div>
+                        </div>
                         <div class="flex gap-1">
                             <button type="button" class="rv-action" title="Move up" @click="moveStop(index, -1)" :disabled="index === 0">↑</button>
                             <button type="button" class="rv-action" title="Move down" @click="moveStop(index, 1)" :disabled="index === stops.length - 1">↓</button>
@@ -90,6 +122,7 @@
                     <button type="button" class="rv-secondary" @click="loadExample()">Load example</button>
                     <span class="rv-muted" x-text="stops.length + ' / {{ max_stops }} stops'"></span>
                 </div>
+                <p class="rv-muted mt-3" x-show="!canGenerate">Choose a search result for every stop to enable Generate route. Remove any unused stops.</p>
                 <div class="rv-error mt-4" x-show="error" x-cloak x-text="error"></div>
             </section>
 
@@ -186,12 +219,10 @@
 <script nonce="{{ request.csp_nonce }}">
 function routeVideoBuilder() {
     return {
-        nextId: 4,
-        stops: [
-            { id: 1, value: '' },
-            { id: 2, value: '' },
-            { id: 3, value: '' },
-        ],
+        nextId: 1,
+        stops: [],
+        revision: 0,
+        init() { this.stops = [this.newStop(), this.newStop()]; },
         loading: false,
         rendering: false,
         renderJob: null,
@@ -200,7 +231,7 @@ function routeVideoBuilder() {
         result: null,
 
         get canGenerate() {
-            return this.stops.filter(s => s.value.trim()).length >= 2;
+            return this.stops.length >= 2 && this.stops.every(s => s.selected && s.selected.confirmation);
         },
 
         get packBusy() {
@@ -229,43 +260,150 @@ function routeVideoBuilder() {
             return this.renderJob.completed_clips + ' of ' + this.renderJob.total_clips + ' clips complete' + active;
         },
 
+        newStop(value = '') {
+            return { id: this.nextId++, value, selected: null, suggestions: [], open: false,
+                active: -1, message: '', searching: false, sequence: 0, timer: null,
+                session: null, sessionStarted: 0, sessionCalls: 0, attribution: '© Mapbox' };
+        },
+
+        invalidateRoute() { this.revision++; this.result = null; this.error = ''; },
+
+        cancelSearch(stop) {
+            clearTimeout(stop.timer);
+            stop.sequence++;
+            stop.searching = false;
+            stop.suggestions = [];
+            stop.open = false;
+            stop.active = -1;
+        },
+
+        editStop(stop) {
+            this.cancelSearch(stop);
+            stop.selected = null;
+            stop.message = '';
+            this.invalidateRoute();
+            stop.timer = setTimeout(() => this.searchStop(stop), 350);
+        },
+
+        changeLocation(stop) {
+            this.editStop(stop);
+        },
+
+        navigateResults(stop, delta) {
+            if (!stop.suggestions.length) return;
+            stop.open = true;
+            stop.active = (stop.active + delta + stop.suggestions.length) % stop.suggestions.length;
+        },
+
+        async locationRequest(url, body) {
+            const response = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json',
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value },
+                body: JSON.stringify(body),
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Location search is unavailable. Please retry.');
+            return data;
+        },
+
+        async searchStop(stop) {
+            clearTimeout(stop.timer);
+            if (stop.selected || stop.value.trim().length < 2 || !this.stops.includes(stop)) return;
+            const sequence = ++stop.sequence;
+            if (!stop.session || Date.now() - stop.sessionStarted > 170000 || stop.sessionCalls >= 45) {
+                stop.session = crypto.randomUUID();
+                stop.sessionStarted = Date.now();
+                stop.sessionCalls = 0;
+            }
+            stop.sessionCalls++;
+            stop.searching = true;
+            stop.message = '';
+            stop.suggestions = [];
+            const index = this.stops.indexOf(stop);
+            const previous = index > 0 ? this.stops[index - 1].selected : null;
+            try {
+                const data = await this.locationRequest('{% url "route_videos:location_suggest" workspace_id=workspace.id %}', {
+                    query: stop.value.trim(), session_token: stop.session,
+                    proximity: previous ? [previous.longitude, previous.latitude] : null,
+                });
+                if (sequence !== stop.sequence || !this.stops.includes(stop)) return;
+                stop.suggestions = data.suggestions;
+                stop.attribution = data.attribution;
+                stop.active = -1;
+                stop.open = true;
+                stop.message = data.suggestions.length ? '' : 'No locations found. Add a city or state and try again.';
+            } catch (err) {
+                if (sequence === stop.sequence) stop.message = err.message;
+            } finally {
+                if (sequence === stop.sequence) stop.searching = false;
+            }
+        },
+
+        async selectLocation(stop, suggestion) {
+            if (!suggestion || stop.searching) return;
+            const sequence = ++stop.sequence;
+            const session = stop.session;
+            stop.searching = true;
+            stop.open = false;
+            stop.message = '';
+            try {
+                const data = await this.locationRequest('{% url "route_videos:location_retrieve" workspace_id=workspace.id %}', {
+                    mapbox_id: suggestion.mapbox_id, session_token: session,
+                });
+                if (sequence !== stop.sequence || !this.stops.includes(stop)) return;
+                stop.selected = data.stop;
+                stop.value = data.stop.name;
+                stop.suggestions = [];
+                this.invalidateRoute();
+            } catch (err) {
+                if (sequence === stop.sequence) stop.message = err.message + ' Edit the search to retry.';
+            } finally {
+                if (stop.session === session) stop.session = null;
+                if (sequence === stop.sequence) stop.searching = false;
+            }
+        },
+
         addStop() {
             if (this.stops.length >= {{ max_stops }}) return;
-            this.stops.push({ id: this.nextId++, value: '' });
+            this.stops.push(this.newStop());
+            this.invalidateRoute();
         },
 
         removeStop(index) {
             if (this.stops.length <= 2) return;
+            this.cancelSearch(this.stops[index]);
             this.stops.splice(index, 1);
+            this.invalidateRoute();
         },
 
         moveStop(index, delta) {
             const target = index + delta;
             if (target < 0 || target >= this.stops.length) return;
+            this.stops.forEach(stop => this.cancelSearch(stop));
             const [item] = this.stops.splice(index, 1);
             this.stops.splice(target, 0, item);
+            this.invalidateRoute();
         },
 
         loadExample() {
-            this.stops = [
-                { id: this.nextId++, value: 'Nashville, TN' },
-                { id: this.nextId++, value: 'Cummins Falls State Park, TN' },
-                { id: this.nextId++, value: 'Burgess Falls State Park, TN' },
-                { id: this.nextId++, value: 'Fall Creek Falls State Park, TN' },
-                { id: this.nextId++, value: 'Foster Falls, TN' },
-                { id: this.nextId++, value: 'Chattanooga, TN' },
-            ];
-            this.result = null;
-            this.error = '';
+            this.stops.forEach(stop => this.cancelSearch(stop));
+            this.stops = ['Nashville, TN', 'Cummins Falls State Park, TN',
+                'Burgess Falls State Park, TN', 'Fall Creek Falls State Park, TN',
+                'Foster Falls, TN', 'Chattanooga, TN'].map(value => this.newStop(value));
+            this.invalidateRoute();
         },
 
         async generateRoute() {
-            const values = this.stops.map(s => s.value.trim()).filter(Boolean);
-            if (values.length < 2) {
-                this.error = 'Add at least two stops.';
+            if (this.loading) return;
+            if (!this.canGenerate) {
+                this.error = 'Select and confirm a location for every stop.';
                 return;
             }
+            const revision = this.revision;
+            const values = this.stops.map(s => ({ confirmation: s.selected.confirmation }));
             this.loading = true;
+            this.result = null;
             this.error = '';
             try {
                 const response = await fetch('{% url "route_videos:preview" workspace_id=workspace.id %}', {
@@ -278,8 +416,9 @@ function routeVideoBuilder() {
                 });
                 const data = await response.json();
                 if (!response.ok) throw new Error(data.error || 'Could not build the route.');
-                this.result = data;
+                if (revision === this.revision) this.result = data;
             } catch (err) {
+                if (revision !== this.revision) return;
                 this.result = null;
                 this.error = err.message || 'Could not build the route.';
             } finally {
