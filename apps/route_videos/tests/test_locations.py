@@ -258,3 +258,32 @@ def test_video_titles_preserve_commas():
     from apps.route_videos.tasks import _short_name
 
     assert _short_name("Falls, picnic & swim") == "Falls, picnic & swim"
+
+
+def test_individual_render_uses_full_custom_name(context, tmp_path):
+    output = tmp_path / "clip.mp4"
+    output.write_bytes(b"test-video")
+    manifest = {
+        "stops": [{}, {}],
+        "clips": {
+            "legs": [
+                {
+                    "from": "Falls, picnic & swim",
+                    "to": "Home",
+                    "coordinates": [[-85, 35], [-86, 36]],
+                }
+            ]
+        },
+    }
+    request = RequestFactory().post(
+        "/", json.dumps({"manifest": manifest, "clip_type": "leg"}), content_type="application/json"
+    )
+    request.user = context[1]
+    with (
+        patch.object(views, "_get_workspace", return_value=context[0]),
+        patch.object(views, "render_scene_mp4", return_value=str(output)) as renderer,
+    ):
+        response = views.render_clip(request, context[0].id)
+    assert response.status_code == 200
+    assert renderer.call_args.args[0]["title"] == "Falls, picnic & swim → Home"
+    response.close()

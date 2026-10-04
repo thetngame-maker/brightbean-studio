@@ -406,7 +406,7 @@ def render_clip(request, workspace_id):
                 "coordinates": leg.get("coordinates") or [],
                 "seconds": leg.get("suggested_clip_seconds") or 5,
                 "fps": (manifest.get("format") or {}).get("fps") or 30,
-                "title": f"{str(leg.get('from') or '').split(',')[0]} → {str(leg.get('to') or '').split(',')[0]}",
+                "title": f"{str(leg.get('from') or '').strip()} → {str(leg.get('to') or '').strip()}",
                 "subtitle": f"{leg.get('distance_miles', 0)} mi · {leg.get('duration_minutes', 0)} min",
                 "marker_label": body.get("marker_label") or "TN",
                 "map_style": body.get("map_style") or "outdoors-v12",
