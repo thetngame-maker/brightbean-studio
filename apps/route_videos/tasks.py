@@ -12,7 +12,7 @@ from apps.media_library.services import create_asset
 from apps.media_library.tasks import process_media_asset
 
 from .models import RouteVideoRenderJob
-from .renderer import render_scene_mp4
+from .renderer import leg_stop_markers, render_scene_mp4
 
 
 def _short_name(value):
@@ -52,6 +52,7 @@ def _build_scenes(manifest):
             "label": f"{start} → {end}",
             "scene": {
                 "type": "leg",
+                "stops": leg_stop_markers(stops, leg, index),
                 "coordinates": leg.get("coordinates") or [],
                 "seconds": leg.get("suggested_clip_seconds") or 5,
                 "fps": fps,

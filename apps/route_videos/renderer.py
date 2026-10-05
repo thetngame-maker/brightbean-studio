@@ -241,7 +241,8 @@ def _overview_labels(stops, camera):
     points = [project_to_image([stop["longitude"], stop["latitude"]], camera) for stop in stops]
     labels = []
     for index, stop in enumerate(stops, start=1):
-        text = f"{index}. {stop.get('name') or stop.get('location_name') or 'Stop'}"
+        number = stop.get("number", index)
+        text = f"{number}. {stop.get('name') or stop.get('location_name') or 'Stop'}"
         for size in range(14 if len(stops) > 10 else 19, 7, -1):
             font = _font(size, bold=True)
             lines = []
@@ -297,16 +298,44 @@ def _overview_labels(stops, camera):
                 "text": label_text,
                 "font": font,
                 "point": point,
-                "number": index,
+                "number": number,
                 "text_offset": bbox[1],
             }
         )
     return labels
 
 
-def _draw_overview(draw, projected, labels, scene, elapsed):
-    _draw_polyline(draw, projected, fill=(255, 255, 255), width=13)
-    _draw_polyline(draw, projected, fill=(249, 115, 22), width=7)
+def leg_stop_markers(stops, leg, index):
+    """Carry route-wide numbering and selected names into both render paths."""
+    coordinates = leg.get("coordinates") or []
+    markers = []
+    for offset, field in enumerate(("from", "to")):
+        stop_index = index + offset
+        stop = stops[stop_index] if stop_index < len(stops) else {}
+        point = coordinates[0 if offset == 0 else -1] if coordinates else [0, 0]
+        markers.append(
+            {
+                "number": stop_index + 1,
+                "name": stop.get("name") or leg.get(field) or f"Stop {stop_index + 1}",
+                "longitude": stop.get("longitude", point[0]),
+                "latitude": stop.get("latitude", point[1]),
+            }
+        )
+    return markers
+
+
+def _leg_stop_labels(stops, camera):
+    # Keep labels attached to real locations as the camera moves. Off-screen
+    # destinations are named in the bottom title, not pinned to a false position.
+    visible_stops = []
+    for stop in stops:
+        x, y = project_to_image([stop["longitude"], stop["latitude"]], camera)
+        if 22 <= x <= BASE_WIDTH - 22 and 22 <= y <= 1020:
+            visible_stops.append(stop)
+    return _overview_labels(visible_stops, camera)
+
+
+def _draw_named_stops(draw, labels):
     for label in labels:
         left, top, right, bottom = label["box"]
         x, y = label["point"]
@@ -325,6 +354,17 @@ def _draw_overview(draw, projected, labels, scene, elapsed):
             spacing=3,
             fill=(28, 25, 23),
         )
+
+
+def _draw_driving_route(draw, projected, traveled):
+    """A translucent 3px route preserves the map's underlying road details."""
+    _draw_polyline(draw, projected, fill=(8, 145, 178, 140), width=3)
+    _draw_polyline(draw, traveled, fill=(249, 115, 22, 185), width=3)
+
+
+def _draw_overview(draw, projected, labels, scene, elapsed):
+    _draw_polyline(draw, projected, fill=(249, 115, 22, 180), width=3)
+    _draw_named_stops(draw, labels)
     if elapsed >= OVERVIEW_INTRO_SECONDS:
         _draw_bottom_card(draw, scene.get("title") or "Road Trip", scene.get("subtitle") or "")
 
@@ -376,6 +416,10 @@ def render_scene_mp4(scene, token, destination=None):
         )
     projected = [project_to_image(coord, camera) for coord in coords]
     overview_labels = _overview_labels(stops, camera) if overview else []
+    leg_labels = {}
+    if not overview:
+        for label_camera in [camera] + [item[0] for item in (follow_frames or [])]:
+            leg_labels[tuple(label_camera)] = _leg_stop_labels(stops, label_camera)
 
     if destination is None:
         with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as handle:
@@ -431,17 +475,15 @@ def render_scene_mp4(scene, token, destination=None):
             else:
                 image = base.copy()
                 frame_projected = projected
-            draw = ImageDraw.Draw(image)
+            draw = ImageDraw.Draw(image, "RGBA")
 
             if overview:
                 _draw_overview(draw, projected, overview_labels, scene, frame_index / fps)
             else:
                 marker, visible = _interpolate_path(frame_projected, eased)
-                _draw_polyline(draw, frame_projected, fill=(255, 255, 255), width=12)
-                _draw_polyline(draw, visible, fill=(249, 115, 22), width=7)
+                _draw_driving_route(draw, frame_projected, visible)
                 _draw_marker(draw, marker, scene.get("marker_label") or "TN")
-                _draw_stop(draw, frame_projected[0], 1)
-                _draw_stop(draw, frame_projected[-1], 2)
+                _draw_named_stops(draw, leg_labels[tuple(frame_camera)])
                 _draw_bottom_card(
                     draw,
                     scene.get("title") or "Next Stop",

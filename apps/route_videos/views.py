@@ -22,7 +22,7 @@ from django.views.decorators.http import require_POST
 from apps.members.models import WorkspaceMembership
 from apps.workspaces.models import Workspace
 
-from .renderer import decode_polyline6, render_scene_mp4
+from .renderer import decode_polyline6, leg_stop_markers, render_scene_mp4
 
 MAX_STOPS = 25
 MAPBOX_SEARCH_URL = "https://api.mapbox.com/search/searchbox/v1"
@@ -403,6 +403,7 @@ def render_clip(request, workspace_id):
             leg = legs[clip_index]
             scene = {
                 "type": "leg",
+                "stops": leg_stop_markers(stops, leg, clip_index),
                 "coordinates": leg.get("coordinates") or [],
                 "seconds": leg.get("suggested_clip_seconds") or 5,
                 "fps": (manifest.get("format") or {}).get("fps") or 30,

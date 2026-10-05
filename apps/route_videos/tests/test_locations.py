@@ -287,3 +287,29 @@ def test_individual_render_uses_full_custom_name(context, tmp_path):
     assert response.status_code == 200
     assert renderer.call_args.args[0]["title"] == "Falls, picnic & swim → Home"
     response.close()
+
+
+def test_individual_second_leg_uses_stop_two_and_three(context, tmp_path):
+    output = tmp_path / "clip.mp4"
+    output.write_bytes(b"test-video")
+    stops = [
+        {"name": name, "longitude": -86 + i, "latitude": 35}
+        for i, name in enumerate(["A", "Custom picnic", "Custom falls"])
+    ]
+    leg = {"from": "Custom picnic", "to": "Custom falls", "coordinates": [[-85, 35], [-84, 35]]}
+    request = RequestFactory().post(
+        "/",
+        json.dumps({"manifest": {"stops": stops, "clips": {"legs": [leg, leg]}}, "clip_type": "leg", "clip_index": 1}),
+        content_type="application/json",
+    )
+    request.user = context[1]
+    with (
+        patch.object(views, "_get_workspace", return_value=context[0]),
+        patch.object(views, "render_scene_mp4", return_value=str(output)) as render,
+    ):
+        response = views.render_clip(request, context[0].id)
+    assert response.status_code == 200
+    markers = render.call_args.args[0]["stops"]
+    assert [stop["number"] for stop in markers] == [2, 3]
+    assert [stop["name"] for stop in markers] == ["Custom picnic", "Custom falls"]
+    response.close()
